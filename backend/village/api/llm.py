@@ -1,0 +1,321 @@
+"""LLM 設定 API：provider / 模型註冊、模型分級、試打。全部需要 admin token。
+
+API key 只寫不讀：回應只有 has_api_key 與 api_key_hint。
+"""
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field, SecretStr
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
+
+from village.llm.base import ChatMessage, LLMError, ProviderKind
+from village.llm.service import TIERS, LLMService
+from village.security.admin import require_admin
+from village.security.crypto import SecretBox, secret_hint
+from village.store.models import LlmModel, LlmProvider, ModelTier, new_id
+
+router = APIRouter(prefix="/api/llm", tags=["llm"], dependencies=[Depends(require_admin)])
+
+
+# ---------------------------------------------------------------- schemas
+
+
+class ProviderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    kind: ProviderKind
+    base_url: str | None = None
+    api_key: SecretStr | None = None  # SecretStr：repr / log 時不會露出明文
+
+
+class ProviderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    base_url: str | None = None
+    api_key: SecretStr | None = None  # 不傳 = 保留原值
+    clear_api_key: bool = False
+    enabled: bool | None = None
+
+
+class ProviderOut(BaseModel):
+    id: str
+    name: str
+    kind: str
+    base_url: str | None
+    enabled: bool
+    has_api_key: bool
+    api_key_hint: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, p: LlmProvider) -> "ProviderOut":
+        return cls(
+            id=p.id,
+            name=p.name,
+            kind=p.kind,
+            base_url=p.base_url,
+            enabled=p.enabled,
+            has_api_key=p.api_key_ct is not None,
+            api_key_hint=p.api_key_hint,
+            created_at=p.created_at,
+            updated_at=p.updated_at,
+        )
+
+
+class RemoteModelOut(BaseModel):
+    id: str
+    display_name: str | None
+    context_window: int | None
+    registered: bool
+
+
+class ModelCreate(BaseModel):
+    provider_id: str
+    model: str = Field(min_length=1, max_length=200)
+    display_name: str | None = None
+    supports_json_schema: bool = True
+    context_window: int | None = None
+
+
+class ModelUpdate(BaseModel):
+    display_name: str | None = None
+    supports_json_schema: bool | None = None
+    context_window: int | None = None
+    enabled: bool | None = None
+
+
+class ModelOut(BaseModel):
+    id: str
+    provider_id: str
+    provider_name: str
+    model: str
+    display_name: str | None
+    supports_json_schema: bool
+    context_window: int | None
+    enabled: bool
+
+
+class TiersBody(BaseModel):
+    large: list[str] = []
+    small: list[str] = []
+
+
+class TryBody(BaseModel):
+    target: str = "tier:large"  # tier:large / tier:small / 模型 id
+    prompt: str = Field(min_length=1, max_length=2000)
+
+
+class TryOut(BaseModel):
+    text: str
+    model: str
+
+
+# ---------------------------------------------------------------- helpers
+
+
+def _sm(request: Request):
+    return request.app.state.ctx.sessionmaker
+
+
+def _box(request: Request) -> SecretBox:
+    return request.app.state.ctx.box
+
+
+def _llm(request: Request) -> LLMService:
+    return request.app.state.ctx.llm
+
+
+def _set_api_key(p: LlmProvider, box: SecretBox, api_key: str) -> None:
+    enc = box.encrypt(api_key, p.api_key_aad)
+    p.api_key_ct, p.api_key_nonce, p.key_version = enc.ciphertext, enc.nonce, enc.key_version
+    p.api_key_hint = secret_hint(api_key)
+
+
+def _clear_api_key(p: LlmProvider) -> None:
+    p.api_key_ct = p.api_key_nonce = p.key_version = p.api_key_hint = None
+
+
+def _model_out(m: LlmModel) -> ModelOut:
+    return ModelOut(
+        id=m.id,
+        provider_id=m.provider_id,
+        provider_name=m.provider.name,
+        model=m.model,
+        display_name=m.display_name,
+        supports_json_schema=m.supports_json_schema,
+        context_window=m.context_window,
+        enabled=m.enabled,
+    )
+
+
+# ---------------------------------------------------------------- providers
+
+
+@router.get("/providers", response_model=list[ProviderOut])
+async def list_providers(request: Request):
+    async with _sm(request)() as s:
+        rows = await s.execute(select(LlmProvider).order_by(LlmProvider.created_at))
+        return [ProviderOut.of(p) for p in rows.scalars()]
+
+
+@router.post("/providers", response_model=ProviderOut, status_code=status.HTTP_201_CREATED)
+async def create_provider(body: ProviderCreate, request: Request):
+    if body.kind == "openai_compat" and not body.base_url:
+        raise HTTPException(422, "openai_compat 需要 base_url")
+    # 先產生 id：加密時 AAD 需要它
+    p = LlmProvider(id=new_id(), name=body.name, kind=body.kind, base_url=body.base_url or None)
+    if body.api_key and body.api_key.get_secret_value():
+        _set_api_key(p, _box(request), body.api_key.get_secret_value())
+    async with _sm(request)() as s:
+        s.add(p)
+        try:
+            await s.commit()
+        except IntegrityError:
+            raise HTTPException(409, f"provider 名稱已存在：{body.name}") from None
+        return ProviderOut.of(p)
+
+
+@router.patch("/providers/{provider_id}", response_model=ProviderOut)
+async def update_provider(provider_id: str, body: ProviderUpdate, request: Request):
+    async with _sm(request)() as s:
+        p = await s.get(LlmProvider, provider_id)
+        if p is None:
+            raise HTTPException(404, "provider not found")
+        if body.name is not None:
+            p.name = body.name
+        if body.base_url is not None:
+            p.base_url = body.base_url or None
+        if body.enabled is not None:
+            p.enabled = body.enabled
+        if body.clear_api_key:
+            _clear_api_key(p)
+        elif body.api_key and body.api_key.get_secret_value():
+            _set_api_key(p, _box(request), body.api_key.get_secret_value())
+        try:
+            await s.commit()
+        except IntegrityError:
+            raise HTTPException(409, "provider 名稱已存在") from None
+        return ProviderOut.of(p)
+
+
+@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provider(provider_id: str, request: Request):
+    async with _sm(request)() as s:
+        p = await s.get(LlmProvider, provider_id)
+        if p is None:
+            raise HTTPException(404, "provider not found")
+        await s.delete(p)
+        await s.commit()
+
+
+@router.get("/providers/{provider_id}/remote-models", response_model=list[RemoteModelOut])
+async def remote_models(provider_id: str, request: Request):
+    """測試連線：向 provider 查詢可用模型，並標示哪些已註冊。"""
+    async with _sm(request)() as s:
+        p = await s.get(LlmProvider, provider_id)
+        if p is None:
+            raise HTTPException(404, "provider not found")
+        registered = set(
+            (await s.execute(select(LlmModel.model).where(LlmModel.provider_id == p.id))).scalars()
+        )
+    client = _llm(request).client_for(p)
+    try:
+        models = await client.list_models()
+    except LLMError as e:
+        raise HTTPException(502, f"連線失敗：{e}") from None
+    finally:
+        await client.aclose()
+    return [
+        RemoteModelOut(id=m.id, display_name=m.display_name, context_window=m.context_window, registered=m.id in registered)
+        for m in sorted(models, key=lambda m: m.id)
+    ]
+
+
+# ---------------------------------------------------------------- models
+
+
+@router.get("/models", response_model=list[ModelOut])
+async def list_models(request: Request):
+    async with _sm(request)() as s:
+        rows = await s.execute(select(LlmModel).options(selectinload(LlmModel.provider)).order_by(LlmModel.created_at))
+        return [_model_out(m) for m in rows.scalars()]
+
+
+@router.post("/models", response_model=ModelOut, status_code=status.HTTP_201_CREATED)
+async def create_model(body: ModelCreate, request: Request):
+    async with _sm(request)() as s:
+        p = await s.get(LlmProvider, body.provider_id)
+        if p is None:
+            raise HTTPException(404, "provider not found")
+        m = LlmModel(**body.model_dump())
+        m.provider = p
+        s.add(m)
+        try:
+            await s.commit()
+        except IntegrityError:
+            raise HTTPException(409, "此模型已註冊") from None
+        return _model_out(m)
+
+
+@router.patch("/models/{model_id}", response_model=ModelOut)
+async def update_model(model_id: str, body: ModelUpdate, request: Request):
+    async with _sm(request)() as s:
+        m = await s.get(LlmModel, model_id, options=[selectinload(LlmModel.provider)])
+        if m is None:
+            raise HTTPException(404, "model not found")
+        for k, v in body.model_dump(exclude_unset=True).items():
+            setattr(m, k, v)
+        await s.commit()
+        return _model_out(m)
+
+
+@router.delete("/models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model(model_id: str, request: Request):
+    async with _sm(request)() as s:
+        m = await s.get(LlmModel, model_id)
+        if m is None:
+            raise HTTPException(404, "model not found")
+        await s.delete(m)
+        await s.commit()
+
+
+# ---------------------------------------------------------------- tiers
+
+
+@router.get("/tiers", response_model=TiersBody)
+async def get_tiers(request: Request):
+    async with _sm(request)() as s:
+        rows = await s.execute(select(ModelTier).order_by(ModelTier.tier, ModelTier.position))
+        out: dict[str, list[str]] = {t: [] for t in TIERS}
+        for t in rows.scalars():
+            out.setdefault(t.tier, []).append(t.model_id)
+        return TiersBody(**out)
+
+
+@router.put("/tiers", response_model=TiersBody)
+async def put_tiers(body: TiersBody, request: Request):
+    async with _sm(request)() as s:
+        ids = set(body.large) | set(body.small)
+        found = set((await s.execute(select(LlmModel.id).where(LlmModel.id.in_(ids)))).scalars())
+        if missing := ids - found:
+            raise HTTPException(422, f"unknown model ids: {sorted(missing)}")
+        await s.execute(delete(ModelTier))
+        for tier in TIERS:
+            for i, mid in enumerate(dict.fromkeys(getattr(body, tier))):
+                s.add(ModelTier(tier=tier, position=i, model_id=mid))
+        await s.commit()
+    return await get_tiers(request)
+
+
+# ---------------------------------------------------------------- try
+
+
+@router.post("/try", response_model=TryOut)
+async def try_model(body: TryBody, request: Request):
+    try:
+        r = await _llm(request).chat(body.target, [ChatMessage("user", body.prompt)], max_tokens=512)
+    except LLMError as e:
+        raise HTTPException(502, str(e)) from None
+    return TryOut(text=r.text, model=r.model)

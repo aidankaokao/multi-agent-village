@@ -203,7 +203,7 @@ Registry 啟動時掃描 `agents/*/agent.yaml`，開發模式下檔案變動自�
 
 ```
 主金鑰 (KEK, 32 bytes)  ──不進 DB、不進 git──
-   │  AES-256-GCM(nonce=隨機 12 bytes, AAD="llm_provider:{id}:v{key_version}")
+   │  AES-256-GCM(nonce=隨機 12 bytes, AAD="llm_provider:{id}:api_key")
    ▼
 api_key_ct + api_key_nonce  ──存 SQLite/Postgres──
 ```
