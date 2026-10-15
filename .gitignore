@@ -1,0 +1,31 @@
+# --- secrets：絕對不能進 git ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# --- 資料庫與執行資料 ---
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node ---
+node_modules/
+dist/
+
+# --- OS / IDE ---
+.DS_Store
+.idea/
+.vscode/

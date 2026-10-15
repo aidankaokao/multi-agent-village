@@ -1,0 +1,26 @@
+# Multi-Agent Village
+
+像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者在問答框的任務。
+
+- 架構：`docs/ARCHITECTURE.md`
+- 階段規劃：`docs/ROADMAP.md`（目前：Phase 0 尚未開始）
+- 素材規格：`docs/SPRITES.md`
+
+## 原則
+
+- 一律用繁體中文溝通與撰寫文件。
+- LLM 可能是雲端，也可能是本地弱模型（Ollama）。任何依賴 LLM 的流程都要有結構化輸出約束、失敗重試與非 LLM 的退路。
+- 規劃（LLM）與執行（程式碼）分開：村長只產生 Plan JSON，Executor 負責執行。
+- 新增 prompt 型 agent 只能動 `agents/<id>/agent.yaml`，不應需要改後端程式。
+- 驗證 / 審核 / 重試放在 harness 層，不寫進個別 agent。
+- 後端每個 agent 動作都要發事件，前端村落動畫只靠事件驅動。
+- LLM provider / 模型只在 UI 註冊並存 DB，不寫進設定檔。API key 一律以 AES-256-GCM 加密後存 DB，API 不回傳明文，log 要遮罩。
+- 不可 commit：`*.db`、`data/`、`.env`、`*.key` 或任何 key。主金鑰放專案外（`~/.config/multi-agent-village/master.key`）或環境變數 `VILLAGE_MASTER_KEY`。
+
+## Git
+
+- remote：`git@github.com:aidankaokao/multi-agent-village.git`，分支 `main`；使用者已授權 commit 與 push。
+
+## 指令
+
+- 重新產生佔位 sprites：`python3 scripts/gen_placeholder_sprites.py`

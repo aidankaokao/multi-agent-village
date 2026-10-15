@@ -1,0 +1,55 @@
+{
+  "frameWidth": 32,
+  "frameHeight": 32,
+  "rows": [
+    "down",
+    "left",
+    "right",
+    "up"
+  ],
+  "walkCycle": [
+    0,
+    1,
+    2,
+    1
+  ],
+  "characters": {
+    "poet": {
+      "name": "詩人",
+      "path": "characters/poet.png"
+    },
+    "jester": {
+      "name": "笑話師",
+      "path": "characters/jester.png"
+    },
+    "translator": {
+      "name": "翻譯官",
+      "path": "characters/translator.png"
+    },
+    "mayor": {
+      "name": "村長(orchestrator)",
+      "path": "characters/mayor.png"
+    },
+    "reviewer": {
+      "name": "審核員",
+      "path": "characters/reviewer.png"
+    }
+  },
+  "ui": {
+    "status_bubbles": {
+      "path": "ui/status_bubbles.png",
+      "frameWidth": 16,
+      "frameHeight": 16,
+      "working": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "error": 4,
+      "done": 5,
+      "thinking": 6,
+      "idle": 7
+    }
+  }
+}
