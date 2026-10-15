@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass, field
 
 from village.core.card import AgentSpec
-from village.core.harness import check_output, mask_profanity, normalize, profanity_hits
+from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import ChatLLM, Plan, Step, direct_reply, make_plan
 from village.core.registry import AgentRegistry
 from village.events import EventBus
@@ -19,6 +19,30 @@ log = logging.getLogger("village.executor")
 
 MAYOR = "mayor"
 STEP_RETRIES = 1  # 輸出不合格時帶回饋重做的次數
+DELTA_INTERVAL = 0.08  # 串流事件最短間隔（秒），避免每個 token 都推一次
+
+
+class DeltaEmitter:
+    """把 LLM 串流節流成 agent.delta 事件。
+
+    事件帶的是「目前為止的完整文字」（已清 <think>、遮蔽髒話），前端直接取代顯示，
+    掉幾個事件或換備援模型重來都不會錯亂。最後的完整結果由 agent.finished / run.finished 提供。
+    """
+
+    def __init__(self, bus: EventBus, **ids):
+        self.bus, self.ids = bus, ids
+        self._last = 0.0
+        self._sent = ""
+
+    async def __call__(self, text: str) -> None:
+        now = time.monotonic()
+        if now - self._last < DELTA_INTERVAL:
+            return
+        shown = preview(text)
+        if shown == self._sent:
+            return
+        self._last, self._sent = now, shown
+        await self.bus.publish("agent.delta", **self.ids, text=shown)
 
 
 @dataclass
@@ -63,11 +87,17 @@ class Runner:
         agents = self.registry.all()
         await emit("run.started", run_id=run_id, agent=MAYOR, message=message)
         try:
-            plan = await make_plan(message, agents, self.llm)
+            async def on_note(note: str) -> None:
+                await emit("plan.note", run_id=run_id, agent=MAYOR, note=note)
+
+            plan = await make_plan(message, agents, self.llm, on_note=on_note)
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:
-                answer = await direct_reply(message, agents, self.llm)
+                await emit("agent.started", run_id=run_id, step_id=None, agent=MAYOR, instruction=message)
+                on_text = DeltaEmitter(self.bus, run_id=run_id, step_id=None, agent=MAYOR)
+                answer = await direct_reply(message, agents, self.llm, on_text=on_text)
+                await emit("agent.finished", run_id=run_id, step_id=None, agent=MAYOR, output=answer)
                 await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[])
                 return {"ok": True, "answer": answer, "plan": plan.to_dict(), "steps": []}
 
@@ -135,6 +165,7 @@ class Runner:
                 system=spec.prompt.system,
                 temperature=spec.model.temperature,
                 max_tokens=spec.model.max_tokens,
+                on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=spec.id),
             )
             text = normalize(result.text)
             r.output, r.model = text, result.model

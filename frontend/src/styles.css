@@ -382,16 +382,36 @@ button.example {
   gap: 6px;
 }
 
-.steps {
-  margin: 0;
-  padding-left: 4px;
-  list-style: none;
+.chat-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 14px;
+  border-bottom: 2px solid var(--line);
   font-size: 13px;
-  white-space: normal;
 }
 
-.step.running strong {
+.chat-bar button.link:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.elapsed {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.status-live {
   color: var(--accent);
+  font-size: 13px;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .step-error {
@@ -406,22 +426,61 @@ button.example {
   white-space: pre-wrap;
 }
 
-.trace {
+.cursor {
+  color: var(--accent);
+  animation: blink 0.9s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.process {
   display: flex;
   flex-direction: column;
   gap: 8px;
   white-space: normal;
+  font-size: 13px;
+  border-left: 2px dashed #4a5270;
+  padding-left: 10px;
 }
 
-.trace-step {
-  border-top: 1px dashed #4a5270;
-  padding-top: 6px;
+.pnote {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pnote.live {
+  color: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.pstep {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
+.pstep.pending {
+  opacity: 0.55;
+}
+
+.pstep.running strong {
+  color: var(--accent);
+}
+
+.pstep .output {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .tag.warn {
   color: var(--accent);
+  align-self: flex-start;
+}
+
+.bubble.village > button.link {
   align-self: flex-start;
 }

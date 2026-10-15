@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from village.llm.anthropic_client import AnthropicClient
-from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, ChatResult, LLMClient, LLMError
+from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, ChatResult, LLMClient, LLMError, TextCallback
 from village.llm.openai_compat import OpenAICompatClient
 from village.security.crypto import SecretBox
 from village.security.redact import register_secret
@@ -73,7 +73,10 @@ class LLMService:
                 models = [m] if m else []
         return [m for m in models if m.enabled and m.provider.enabled]
 
-    async def chat(self, target: str, messages: list[ChatMessage], **kw) -> ChatResult:
+    async def chat(
+        self, target: str, messages: list[ChatMessage], *, on_text: TextCallback | None = None, **kw
+    ) -> ChatResult:
+        """on_text 有值時用串流，傳入「目前為止的完整文字」；換備援模型時會從頭重新累積。"""
         models = await self.candidates(target)
         if not models:
             raise LLMError(f"no enabled model for {target}; register one in LLM 設定")
@@ -83,8 +86,18 @@ class LLMService:
                 errors.append(f"{m.model}: json_schema not supported")
                 continue
             client = self.client_for(m.provider)
+            on_delta = None
+            if on_text is not None:
+                buf: list[str] = []
+
+                async def on_delta(piece: str, buf=buf) -> None:
+                    buf.append(piece)
+                    await on_text("".join(buf))
+
             try:
-                return await client.chat(m.model, messages, **{"reasoning_effort": m.reasoning_effort, **kw})
+                return await client.chat(
+                    m.model, messages, **{"reasoning_effort": m.reasoning_effort, **kw}, on_delta=on_delta
+                )
             except LLMError as e:
                 log.warning("model %s failed, trying next: %s", m.model, e)
                 errors.append(f"{m.model}: {e}")

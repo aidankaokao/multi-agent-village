@@ -27,18 +27,21 @@ interface Props {
   runs: RunsState;
   agents: AgentInfo[];
   onSend: (message: string) => Promise<void>;
+  onReset: () => void;
 }
 
-export function ChatPanel({ runs, agents, onSend }: Props) {
+export function ChatPanel({ runs, agents, onSend, onReset }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const bottom = useRef<HTMLDivElement>(null);
+  const log = useRef<HTMLDivElement>(null);
+  const stick = useRef(true); // 使用者往上捲去看舊內容時，串流不要把畫面拉回底部
   const names: Record<string, string> = { mayor: "村長", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
   const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
+    const el = log.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [runs]);
 
   const send = async (message: string) => {
@@ -46,6 +49,7 @@ export function ChatPanel({ runs, agents, onSend }: Props) {
     if (!m || sending) return;
     setSending(true);
     setError("");
+    stick.current = true;
     try {
       await onSend(m);
       setText("");
@@ -56,9 +60,34 @@ export function ChatPanel({ runs, agents, onSend }: Props) {
     }
   };
 
+  const reset = () => {
+    onReset();
+    setError("");
+    stick.current = true;
+  };
+
   return (
     <div className="chat">
-      <div className="chat-log">
+      <div className="chat-bar">
+        <span className="muted">{runs.order.length ? `${runs.order.length} 則問答` : "新對話"}</span>
+        <button
+          className="link"
+          onClick={reset}
+          disabled={runs.order.length === 0}
+          title="清空畫面重新開始（目前每次提問彼此獨立，村長還不會記得前面的對話）"
+        >
+          ＋ 新對話
+        </button>
+      </div>
+
+      <div
+        className="chat-log"
+        ref={log}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        }}
+      >
         {runs.order.length === 0 && (
           <div className="chat-empty">
             <p>
@@ -80,7 +109,6 @@ export function ChatPanel({ runs, agents, onSend }: Props) {
         {runs.order.map((id) => (
           <RunBlock key={id} run={runs.byId[id]} names={names} />
         ))}
-        <div ref={bottom} />
       </div>
 
       <form
@@ -111,9 +139,43 @@ export function ChatPanel({ runs, agents, onSend }: Props) {
   );
 }
 
+/** 執行中每 200ms 更新一次，用來顯示經過秒數 */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+const secs = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+
+function statusText(run: RunView, names: Record<string, string>): string {
+  if (run.status === "planning") return "正在想要請誰幫忙…";
+  if (run.status === "failed") return "失敗";
+  if (run.status === "done") return run.ok === false ? "部分失敗" : "完成";
+  if (run.source === "direct") return "回覆中…";
+  const active = run.steps.find((s) => s.status === "running");
+  if (active) return `${names[active.agent] ?? active.agent} 工作中…`;
+  return run.steps.some((s) => s.status === "pending") ? "交接中…" : "整理結果中…";
+}
+
 function RunBlock({ run, names }: { run: RunView; names: Record<string, string> }) {
-  const [open, setOpen] = useState(false);
   const finished = run.status === "done" || run.status === "failed";
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? !finished; // 執行中自動展開，完成後自動收起；使用者點過就照使用者的
+  const now = useNow(!finished);
+  const last = run.steps[run.steps.length - 1];
+  const hasProcess = run.status === "planning" || run.steps.length > 0 || run.notes.length > 0;
+
+  let answer = "";
+  if (run.status === "done") answer = run.answer ?? "";
+  else if (run.source === "direct") answer = run.liveAnswer ?? "";
+  else if (last?.status === "running") answer = last.live ?? "";
+  const writing = !finished && (run.source === "direct" || last?.status === "running");
+  const writer = run.source === "direct" ? "村長" : last ? (names[last.agent] ?? last.agent) : "";
 
   return (
     <div className="run">
@@ -123,60 +185,76 @@ function RunBlock({ run, names }: { run: RunView; names: Record<string, string> 
         <div className="row">
           <strong>村長</strong>
           {run.source && <span className="tag">{SOURCE_LABEL[run.source] ?? run.source}</span>}
-          {run.status === "planning" && <span className="muted">分派工作中…</span>}
+          <span className={finished ? "muted" : "status-live"}>{statusText(run, names)}</span>
+          <span className="muted elapsed">{secs((run.finishedAt ?? now) - run.startedAt)}</span>
         </div>
 
-        {run.steps.length > 0 && (
-          <ol className="steps">
-            {run.steps.map((s) => (
-              <li key={s.id} className={`step ${s.status}`}>
-                <span>{STATUS_ICON[s.status]}</span> <strong>{names[s.agent] ?? s.agent}</strong>
-                <span className="muted">：{s.instruction}</span>
-                {s.retries > 0 && <span className="tag">重試 {s.retries}</span>}
-                {s.error && <div className="step-error">{s.error}</div>}
-              </li>
-            ))}
-          </ol>
-        )}
-
-        {run.status === "done" && run.answer && <div className="answer">{run.answer}</div>}
-        {run.status === "done" && !run.answer && <div className="step-error">沒有產生結果，請展開執行過程查看原因。</div>}
-        {run.status === "failed" && <div className="step-error">執行失敗：{run.error}</div>}
-
-        {finished && (run.steps.length > 0 || run.notes.length > 0) && (
-          <button className="link" onClick={() => setOpen(!open)}>
-            {open ? "▾ 收起執行過程" : "▸ 執行過程"}
+        {hasProcess && (
+          <button className="link" onClick={() => setUserOpen(!open)}>
+            {open ? "▾ 執行過程" : "▸ 執行過程"}
+            {run.steps.length > 0 && <span className="muted">（{run.steps.length} 步）</span>}
           </button>
         )}
-        {open && (
-          <div className="trace">
+        {hasProcess && open && (
+          <div className="process">
+            {run.status === "planning" && (
+              <div className="pnote live">🤔 村長正在閱讀村民名冊，分派工作…</div>
+            )}
             {run.notes.map((n, i) => (
-              <div key={i} className="muted">
+              <div key={i} className="pnote">
                 ・{n}
               </div>
             ))}
             {run.steps.map((s) => (
-              <div key={s.id} className="trace-step">
-                <div className="row">
-                  <code>{s.id}</code>
-                  <strong>{names[s.agent] ?? s.agent}</strong>
-                  {s.use.length > 0 && <span className="muted">使用 {s.use.join(", ")}</span>}
-                  {s.model && <span className="tag">{s.model}</span>}
-                  {s.elapsed_ms !== undefined && <span className="muted">{(s.elapsed_ms / 1000).toFixed(1)}s</span>}
-                </div>
-                <div className="muted">指示：{s.instruction}</div>
-                {s.warnings.map((w) => (
-                  <div key={w} className="tag warn">
-                    {w}
-                  </div>
-                ))}
-                {s.output && <pre className="output">{s.output}</pre>}
-                {s.error && <div className="step-error">{s.error}</div>}
-              </div>
+              <StepItem key={s.id} step={s} names={names} now={now} isLast={s === last} />
             ))}
           </div>
         )}
+
+        {(answer || writing) && (
+          <div className="answer">
+            {answer || <span className="muted">✍️ {writer} 正在寫…</span>}
+            {writing && <span className="cursor">▌</span>}
+          </div>
+        )}
+        {run.status === "done" && !run.answer && <div className="step-error">沒有產生結果，請展開執行過程查看原因。</div>}
+        {run.status === "failed" && <div className="step-error">執行失敗：{run.error}</div>}
       </div>
+    </div>
+  );
+}
+
+function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Record<string, string>; now: number; isLast: boolean }) {
+  const text = s.status === "running" ? s.live : s.output;
+  const elapsed = s.elapsed_ms ?? (s.status === "running" && s.startedAt ? now - s.startedAt : undefined);
+  return (
+    <div className={`pstep ${s.status}`}>
+      <div className="row">
+        <span>{STATUS_ICON[s.status]}</span>
+        <strong>{names[s.agent] ?? s.agent}</strong>
+        {s.use.length > 0 && <span className="muted">使用 {s.use.join(", ")} 的成果</span>}
+        {s.retries > 0 && <span className="tag warn">重做 {s.retries}</span>}
+        {s.model && <span className="tag">{s.model}</span>}
+        {elapsed !== undefined && <span className="muted elapsed">{secs(elapsed)}</span>}
+      </div>
+      <div className="muted">
+        <code>{s.id}</code> 指示：{s.instruction}
+      </div>
+      {s.retryReason && s.status === "running" && <div className="muted">↻ 重做原因：{s.retryReason}</div>}
+      {s.warnings.map((w) => (
+        <div key={w} className="tag warn">
+          {w}
+        </div>
+      ))}
+      {/* 最後一步的成果就是下方的回答，這裡不重複顯示 */}
+      {!isLast && (text || s.status === "running") && (
+        <pre className="output">
+          {text}
+          {s.status === "running" && <span className="cursor">▌</span>}
+        </pre>
+      )}
+      {isLast && s.status !== "pending" && s.status !== "error" && <div className="muted">→ 成果顯示在下方回答</div>}
+      {s.error && <div className="step-error">{s.error}</div>}
     </div>
   );
 }

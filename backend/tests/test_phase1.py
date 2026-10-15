@@ -27,7 +27,11 @@ class FakeLLM:
 
     async def chat(self, target, messages, **kw):
         self.calls.append({"target": target, "messages": messages, **kw})
-        return ChatResult(text=self.handler(target, messages, kw), model="fake-model")
+        text = self.handler(target, messages, kw)
+        if on_text := kw.get("on_text"):  # 模擬串流：每次給目前為止的完整文字
+            for i in range(1, len(text) + 1):
+                await on_text(text[:i])
+        return ChatResult(text=text, model="fake-model")
 
 
 def role_of(kw) -> str:
@@ -56,8 +60,11 @@ class Recorder(EventBus):
     async def publish(self, type_, **data):
         self.events.append({"type": type_, **data})
 
-    def types(self):
-        return [e["type"] for e in self.events]
+    def types(self, deltas=False):
+        return [e["type"] for e in self.events if deltas or e["type"] != "agent.delta"]
+
+    def deltas(self, step_id):
+        return [e["text"] for e in self.events if e["type"] == "agent.delta" and e["step_id"] == step_id]
 
 
 PLAN_POEM_JOKE = json.dumps(
@@ -205,7 +212,7 @@ async def test_full_run_poet_to_jester(registry):
         "agent.handoff", "agent.started", "agent.finished",
         "run.finished",
     ]
-    handoff = bus.events[4]
+    handoff = next(e for e in bus.events if e["type"] == "agent.handoff")
     assert (handoff["from_agent"], handoff["to_agent"]) == ("poet", "jester")
     poet_call = next(c for c in llm.calls if role_of(c) == "poet")
     assert poet_call["target"] == "tier:small" and poet_call["temperature"] == 0.9
@@ -249,6 +256,50 @@ async def test_direct_reply(registry):
     bus = Recorder()
     out = await Runner(registry, FakeLLM(handler), bus, handoff_delay=0).run("r4", "你好")
     assert out["answer"] == "你好，我是村長！" and out["plan"]["source"] == "direct"
+    assert bus.types() == ["run.started", "plan.created", "agent.started", "agent.finished", "run.finished"]
+    assert bus.events[2]["agent"] == "mayor" and bus.events[2]["step_id"] is None
+
+
+async def test_streaming_deltas(registry, monkeypatch):
+    monkeypatch.setattr("village.core.executor.DELTA_INTERVAL", 0)
+
+    def handler(target, messages, kw):
+        role = role_of(kw)
+        if role == "planner":
+            return PLAN_POEM_JOKE
+        return "<think>想一下</think>貓詩" if role == "poet" else "貓說媽的好熱"
+
+    answers = iter(["好"])  # 重試時 jester 改口
+
+    def handler2(target, messages, kw):
+        if role_of(kw) == "jester" and len(messages) > 1:
+            return next(answers)
+        return handler(target, messages, kw)
+
+    bus = Recorder()
+    out = await Runner(registry, FakeLLM(handler2), bus, handoff_delay=0).run("r5", "貓詩變笑話")
+    assert out["ok"] and out["answer"] == "好"
+    poet = bus.deltas("s1")
+    assert poet[-1] == "貓詩" and all("think" not in t and "想一下" not in t for t in poet)
+    jester = bus.deltas("s2")
+    assert all("媽的" not in t for t in jester)  # 串流中的半成品也先遮蔽
+    assert jester[-1] == "好"  # 重試後的文字從頭來過
+    # delta 一定夾在該步的 started 與 finished 之間
+    kinds = [(e["type"], e.get("step_id")) for e in bus.events]
+    assert kinds.index(("agent.started", "s1")) < kinds.index(("agent.delta", "s1")) < kinds.index(("agent.finished", "s1"))
+
+
+async def test_plan_notes_are_reported_live(registry):
+    replies = iter(["not json", PLAN_POEM_JOKE])
+
+    def handler(target, messages, kw):
+        return next(replies) if role_of(kw) == "planner" else "ok"
+
+    bus = Recorder()
+    await Runner(registry, FakeLLM(handler), bus, handoff_delay=0).run("r6", "貓詩變笑話")
+    types = bus.types()
+    assert types[:3] == ["run.started", "plan.note", "plan.created"]
+    assert "第 1 次規劃無效" in bus.events[1]["note"]
 
 
 # ---------------------------------------------------------------- API

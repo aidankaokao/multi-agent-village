@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
+from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
 
 from village.core.card import AgentSpec
@@ -48,6 +49,22 @@ class Plan:
 
 class PlanError(ValueError):
     pass
+
+
+NoteCallback = Callable[[str], Awaitable[None]]
+
+
+class Notes(list[str]):
+    """規劃過程的紀錄；有 on_note 時同時即時回報，讓前端在等待時看得到村長在做什麼。"""
+
+    def __init__(self, on_note: NoteCallback | None = None):
+        super().__init__()
+        self._on_note = on_note
+
+    async def add(self, note: str) -> None:
+        self.append(note)
+        if self._on_note:
+            await self._on_note(note)
 
 
 # ---------------------------------------------------------------- 1. @指名
@@ -212,7 +229,7 @@ def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSp
     return steps
 
 
-async def plan_with_llm(message: str, agents: list[AgentSpec], llm: ChatLLM, notes: list[str]) -> list[Step] | None:
+async def plan_with_llm(message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes) -> list[Step] | None:
     by_id = {a.id: a for a in agents}
     messages = [ChatMessage("user", f"請求：{message}")]
     for attempt in range(PLAN_RETRIES + 1):
@@ -225,12 +242,12 @@ async def plan_with_llm(message: str, agents: list[AgentSpec], llm: ChatLLM, not
                 max_tokens=1024,
             )
         except LLMError as e:
-            notes.append(f"LLM 規劃無法使用：{e}")
+            await notes.add(f"LLM 規劃無法使用：{e}")
             return None
         try:
             return prune_unrequested(parse_plan(r.text, by_id), message, by_id, notes)
         except PlanError as e:
-            notes.append(f"第 {attempt + 1} 次規劃無效：{e}")
+            await notes.add(f"第 {attempt + 1} 次規劃無效：{e}，請村長重新規劃")
             messages += [
                 ChatMessage("assistant", r.text or "（空白）"),
                 ChatMessage("user", f"這個計畫有問題：{e}。請修正後重新輸出完整 JSON。"),
@@ -259,26 +276,30 @@ def plan_from_keywords(message: str, agents: list[AgentSpec]) -> list[Step]:
 # ---------------------------------------------------------------- 入口
 
 
-async def make_plan(message: str, agents: list[AgentSpec], llm: ChatLLM) -> Plan:
+async def make_plan(
+    message: str, agents: list[AgentSpec], llm: ChatLLM, on_note: NoteCallback | None = None
+) -> Plan:
     by_id = {a.id: a for a in agents}
     if plan := plan_from_mentions(message, by_id):
         return plan
     if not agents:
         return Plan(steps=[], source="direct", notes=["村裡還沒有任何村民"])
 
-    notes: list[str] = []
+    notes = Notes(on_note)
     steps = await plan_with_llm(message, agents, llm, notes)
     if steps is not None:
-        return Plan(steps=steps, source="llm" if steps else "direct", notes=notes)
+        return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes))
 
     steps = plan_from_keywords(message, agents)
     if steps:
-        notes.append("改用關鍵字備援規劃")
-        return Plan(steps=steps, source="keyword", notes=notes)
-    return Plan(steps=[], source="direct", notes=notes)
+        await notes.add("改用關鍵字備援規劃")
+        return Plan(steps=steps, source="keyword", notes=list(notes))
+    return Plan(steps=[], source="direct", notes=list(notes))
 
 
-async def direct_reply(message: str, agents: list[AgentSpec], llm: ChatLLM) -> str:
+async def direct_reply(
+    message: str, agents: list[AgentSpec], llm: ChatLLM, on_text: Callable[[str], Awaitable[None]] | None = None
+) -> str:
     roster = "、".join(f"{a.name}（@{a.id}）" for a in agents) or "（目前沒有村民）"
     system = (
         "你是村子的村長，個性親切。用繁體中文簡短回答（3 句以內）。"
@@ -286,7 +307,8 @@ async def direct_reply(message: str, agents: list[AgentSpec], llm: ChatLLM) -> s
         "如果使用者的需求村民做不到，就誠實說明，並介紹村民能做什麼。"
     )
     try:
-        r = await llm.chat("tier:large", [ChatMessage("user", message)], system=system, max_tokens=400)
+        kw = {"on_text": on_text} if on_text else {}
+        r = await llm.chat("tier:large", [ChatMessage("user", message)], system=system, max_tokens=400, **kw)
         if text := re.sub(r"<think>.*?</think>", "", r.text, flags=re.S).strip():
             return text
     except LLMError as e:

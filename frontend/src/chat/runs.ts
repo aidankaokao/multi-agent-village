@@ -8,11 +8,14 @@ export interface StepView {
   instruction: string;
   use: string[];
   status: StepStatus;
+  live?: string; // 串流中的半成品
   output?: string;
   error?: string;
   model?: string;
+  startedAt?: number;
   elapsed_ms?: number;
   retries: number;
+  retryReason?: string;
   warnings: string[];
 }
 
@@ -25,17 +28,26 @@ export interface RunView {
   source?: PlanSource;
   notes: string[];
   steps: StepView[];
+  liveAnswer?: string; // 村長直接回覆時的串流文字
   answer?: string;
   ok?: boolean;
   error?: string;
   startedAt: number;
+  finishedAt?: number;
 }
 
 export type RunsState = { order: string[]; byId: Record<string, RunView> };
 
 export const initialRuns: RunsState = { order: [], byId: {} };
 
-type Action = { type: "local"; run_id: string; message: string } | { type: "event"; event: VillageEvent };
+type Action =
+  | { type: "local"; run_id: string; message: string }
+  | { type: "event"; event: VillageEvent }
+  | { type: "reset" };
+
+function newRun(id: string, message: string): RunView {
+  return { id, message, status: "planning", notes: [], steps: [], startedAt: Date.now() };
+}
 
 function patchStep(run: RunView, stepId: unknown, patch: (s: StepView) => StepView): RunView {
   return { ...run, steps: run.steps.map((s) => (s.id === stepId ? patch(s) : s)) };
@@ -43,9 +55,10 @@ function patchStep(run: RunView, stepId: unknown, patch: (s: StepView) => StepVi
 
 /** 把後端事件累積成每一次問答的狀態；事件可能比 POST 回應早到，所以兩邊都能建立 run */
 export function runsReducer(state: RunsState, action: Action): RunsState {
+  if (action.type === "reset") return initialRuns;
   if (action.type === "local") {
     if (state.byId[action.run_id]) return state;
-    const run: RunView = { id: action.run_id, message: action.message, status: "planning", notes: [], steps: [], startedAt: Date.now() };
+    const run = newRun(action.run_id, action.message);
     return { order: [...state.order, run.id], byId: { ...state.byId, [run.id]: run } };
   }
 
@@ -55,12 +68,16 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
   let run = state.byId[id];
   let order = state.order;
   if (!run) {
-    if (e.type !== "run.started") return state; // 不是這個頁面發起的、也沒看到開頭的 run 就忽略
-    run = { id, message: String(e.message ?? ""), status: "planning", notes: [], steps: [], startedAt: Date.now() };
+    // 不是這個頁面發起的、沒看到開頭、或「新對話」清掉的 run 就忽略
+    if (e.type !== "run.started") return state;
+    run = newRun(id, String(e.message ?? ""));
     order = [...order, id];
   }
 
   switch (e.type) {
+    case "plan.note":
+      run = { ...run, notes: [...run.notes, e.note as string] };
+      break;
     case "plan.created": {
       const steps = (e.steps as { id: string; agent: string; instruction: string; use: string[] }[]) ?? [];
       run = {
@@ -73,15 +90,21 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
       break;
     }
     case "agent.started":
-      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "running" }));
+      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "running", startedAt: Date.now() }));
+      break;
+    case "agent.delta":
+      if (e.step_id == null) run = { ...run, liveAnswer: e.text as string };
+      else run = patchStep(run, e.step_id, (s) => ({ ...s, live: e.text as string }));
       break;
     case "agent.retry":
-      run = patchStep(run, e.step_id, (s) => ({ ...s, retries: s.retries + 1 }));
+      run = patchStep(run, e.step_id, (s) => ({ ...s, live: "", retries: s.retries + 1, retryReason: e.reason as string }));
       break;
     case "agent.finished":
+      if (e.step_id == null) break; // 村長直接回覆，結果在 run.finished
       run = patchStep(run, e.step_id, (s) => ({
         ...s,
         status: "done",
+        live: undefined,
         output: e.output as string,
         model: e.model as string,
         elapsed_ms: e.elapsed_ms as number,
@@ -89,13 +112,13 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
       }));
       break;
     case "agent.error":
-      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "error", error: e.error as string }));
+      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "error", live: undefined, error: e.error as string }));
       break;
     case "run.finished":
-      run = { ...run, status: "done", ok: e.ok as boolean, answer: e.answer as string };
+      run = { ...run, status: "done", ok: e.ok as boolean, answer: e.answer as string, finishedAt: Date.now() };
       break;
     case "run.failed":
-      run = { ...run, status: "failed", ok: false, error: e.error as string };
+      run = { ...run, status: "failed", ok: false, error: e.error as string, finishedAt: Date.now() };
       break;
     default:
       if (run === state.byId[id]) return state;

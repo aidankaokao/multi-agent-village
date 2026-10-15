@@ -11,7 +11,8 @@ class AnthropicClient(LLMClient):
         self._client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url or None)
 
     async def chat(
-        self, model, messages, *, system=None, max_tokens=2048, temperature=None, json_schema=None, reasoning_effort=None
+        self, model, messages, *, system=None, max_tokens=2048, temperature=None, json_schema=None,
+        reasoning_effort=None, on_delta=None,
     ):
         # 新世代 Claude 模型不接受 temperature 等取樣參數，這裡刻意不傳
         kwargs: dict = {
@@ -31,7 +32,13 @@ class AnthropicClient(LLMClient):
         if output_config:
             kwargs["output_config"] = output_config
         try:
-            resp = await self._client.messages.create(**kwargs)
+            if on_delta is None:
+                resp = await self._client.messages.create(**kwargs)
+            else:
+                async with self._client.messages.stream(**kwargs) as stream:
+                    async for piece in stream.text_stream:
+                        await on_delta(piece)
+                    resp = await stream.get_final_message()
         except anthropic.APIError as e:
             raise LLMError(redact(f"{type(e).__name__}: {e}")) from None
         if resp.stop_reason == "refusal":

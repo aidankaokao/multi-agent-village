@@ -163,3 +163,72 @@ async def test_defaults_endpoint(env):
     c, _ = env
     r = await c.get("/api/llm/defaults")
     assert r.json()["base_urls"]["ollama"].endswith("/v1")
+
+
+async def test_streaming_restarts_on_fallback(env):
+    c, _ = env
+
+    class Streaming(FakeClient):
+        async def chat(self, model, messages, on_delta=None, **kw):
+            for piece in ("半", "途"):
+                await on_delta(piece)
+            if "broken" in self.base_url:
+                raise LLMError("斷線")
+            return ChatResult(text="半途", model=model)
+
+    ctx = c._transport.app.state.ctx
+    ctx.llm._factory = Streaming
+    good = await _provider(c, name="local", base_url="http://local/v1", api_key=None)
+    bad = await _provider(c, name="cloud", base_url="http://broken/v1")
+    m_bad = (await c.post("/api/llm/models", json={"provider_id": bad["id"], "model": "big"})).json()
+    m_good = (await c.post("/api/llm/models", json={"provider_id": good["id"], "model": "small"})).json()
+    await c.put("/api/llm/tiers", json={"large": [m_bad["id"], m_good["id"]]})
+
+    seen: list[str] = []
+
+    async def on_text(text):
+        seen.append(text)
+
+    r = await ctx.llm.chat("tier:large", [], on_text=on_text)
+    assert r.model == "small"
+    assert seen == ["半", "半途", "半", "半途"]  # 換模型後從頭累積，不會接在失敗的半成品後面
+
+
+async def test_openai_compat_sse_parsing():
+    from village.llm.base import ChatMessage
+    from village.llm.openai_compat import OpenAICompatClient
+
+    def sse(*chunks):
+        body = "".join(f"data: {c}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    def handler(request: httpx.Request):
+        import json
+
+        body = json.loads(request.content)
+        assert body["stream"] is True
+        if body["model"] == "thinker":  # 只有思考、沒有內容就被截斷
+            return sse('{"model":"thinker","choices":[{"delta":{"reasoning":"嗯"},"finish_reason":"length"}]}')
+        if body["model"] == "down":
+            return httpx.Response(500, text="server exploded")
+        return sse(
+            '{"model":"m","choices":[{"delta":{"role":"assistant","content":""}}]}',
+            '{"model":"m","choices":[{"delta":{"content":"你"}}]}',
+            ": keep-alive",
+            '{"model":"m","choices":[{"delta":{"content":"好"},"finish_reason":"stop"}]}',
+        )
+
+    client = OpenAICompatClient("http://x/v1", None)
+    client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler))
+    pieces: list[str] = []
+
+    async def on_delta(p):
+        pieces.append(p)
+
+    r = await client.chat("m", [ChatMessage("user", "hi")], on_delta=on_delta)
+    assert (r.text, r.model, pieces) == ("你好", "m", ["你", "好"])
+    with pytest.raises(LLMError, match="截斷"):
+        await client.chat("thinker", [ChatMessage("user", "hi")], on_delta=on_delta)
+    with pytest.raises(LLMError, match="HTTP 500"):
+        await client.chat("down", [ChatMessage("user", "hi")], on_delta=on_delta)
+    await client.aclose()

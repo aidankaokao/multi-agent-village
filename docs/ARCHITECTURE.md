@@ -177,8 +177,10 @@ Registry 啟動時掃描 `agents/*/agent.yaml`，開發模式下檔案變動自�
 | 事件 | 前端效果 |
 |---|---|
 | `run.started` | 村長頭頂出現 💬 |
+| `plan.note` | 規劃中的即時紀錄（例如「第 1 次規劃無效，請村長重新規劃」），顯示在執行過程 |
 | `plan.created` | 村長走向第一位被指派者 |
-| `agent.started` | 該角色停止閒晃、頭頂 working 泡泡動畫 |
+| `agent.started` | 該角色停止閒晃、頭頂 working 泡泡動畫；`step_id` 為 null 代表村長直接回覆 |
+| `agent.delta` | 串流中的半成品，聊天框即時顯示 |
 | `agent.handoff` (from→to) | 角色走向下一位（帶著卷軸） |
 | `agent.finished` / `agent.error` | 泡泡變 ✓ / ❗，幾秒後恢復閒晃 |
 | `review.started/finished` | 審核員出動 |
@@ -187,6 +189,10 @@ Registry 啟動時掃描 `agents/*/agent.yaml`，開發模式下檔案變動自�
 ```json
 {"type": "agent.started", "run_id": "r_123", "step_id": "s1", "agent": "poet", "ts": "..."}
 ```
+
+**串流**：`agent.delta` 帶的是「目前為止的完整文字」而不是增量，前端直接取代顯示，所以節流掉事件（每 80ms 最多一次）、
+換備援模型或重做時從頭來過都不會錯亂。半成品已先清掉 `<think>`、遮蔽髒話；正式結果仍以通過 harness 檢查的
+`agent.finished` / `run.finished` 為準。村長規劃（JSON）不串流。
 
 ### 3.7 LLM 註冊與 API Key 加密
 

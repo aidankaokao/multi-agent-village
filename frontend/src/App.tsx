@@ -59,7 +59,7 @@ export function App() {
         </nav>
         {/* 問答分頁切走時保留狀態，所以用 display 切換而不是卸載 */}
         <div className="tab-pane" style={{ display: tab === "chat" ? "flex" : "none" }}>
-          <ChatPanel runs={runs} agents={agents} onSend={send} />
+          <ChatPanel runs={runs} agents={agents} onSend={send} onReset={() => dispatch({ type: "reset" })} />
         </div>
         {tab === "llm" && <LlmSettings />}
       </aside>
