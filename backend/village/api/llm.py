@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from village.llm.base import ChatMessage, LLMError, ProviderKind
+from village.llm.base import ChatMessage, LLMError, ProviderKind, ReasoningEffort
 from village.llm.service import TIERS, LLMService
 from village.security.admin import require_admin
 from village.security.crypto import SecretBox, secret_hint
@@ -77,12 +77,14 @@ class ModelCreate(BaseModel):
     display_name: str | None = None
     supports_json_schema: bool = True
     context_window: int | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class ModelUpdate(BaseModel):
     display_name: str | None = None
     supports_json_schema: bool | None = None
     context_window: int | None = None
+    reasoning_effort: ReasoningEffort | None = None  # 傳 null = 改回 provider 預設
     enabled: bool | None = None
 
 
@@ -94,6 +96,7 @@ class ModelOut(BaseModel):
     display_name: str | None
     supports_json_schema: bool
     context_window: int | None
+    reasoning_effort: str | None
     enabled: bool
 
 
@@ -146,6 +149,7 @@ def _model_out(m: LlmModel) -> ModelOut:
         display_name=m.display_name,
         supports_json_schema=m.supports_json_schema,
         context_window=m.context_window,
+        reasoning_effort=m.reasoning_effort,
         enabled=m.enabled,
     )
 

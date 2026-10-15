@@ -20,12 +20,16 @@ class OpenAICompatClient(LLMClient):
             raise LLMError(redact(f"HTTP {resp.status_code}: {resp.text[:500]}"))
         return resp.json()
 
-    async def chat(self, model, messages, *, system=None, max_tokens=2048, temperature=None, json_schema=None):
+    async def chat(
+        self, model, messages, *, system=None, max_tokens=2048, temperature=None, json_schema=None, reasoning_effort=None
+    ):
         msgs = [{"role": "system", "content": system}] if system else []
         msgs += [{"role": m.role, "content": m.content} for m in messages]
         body: dict = {"model": model, "messages": msgs, "max_tokens": max_tokens}
         if temperature is not None:
             body["temperature"] = temperature
+        if reasoning_effort:
+            body["reasoning_effort"] = reasoning_effort
         if json_schema is not None:
             body["response_format"] = {
                 "type": "json_schema",
@@ -33,9 +37,14 @@ class OpenAICompatClient(LLMClient):
             }
         data = await self._request("POST", "chat/completions", json=body)
         try:
-            text = data["choices"][0]["message"]["content"] or ""
+            choice = data["choices"][0]
+            text = choice["message"]["content"] or ""
         except (KeyError, IndexError) as e:
             raise LLMError(f"unexpected response shape: {e}") from None
+        if not text.strip() and choice.get("finish_reason") == "length":
+            raise LLMError(
+                f"輸出在 {max_tokens} tokens 被截斷且沒有內容（思考型模型？可在 LLM 設定把思考強度設為 none）"
+            )
         return ChatResult(text=text, model=data.get("model", model), usage=data.get("usage") or {})
 
     async def list_models(self) -> list[RemoteModel]:

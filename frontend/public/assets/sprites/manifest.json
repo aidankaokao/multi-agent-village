@@ -27,7 +27,7 @@
       "path": "characters/translator.png"
     },
     "mayor": {
-      "name": "村長(orchestrator)",
+      "name": "村長",
       "path": "characters/mayor.png"
     },
     "reviewer": {

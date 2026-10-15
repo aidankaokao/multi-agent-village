@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 ProviderKind = Literal["openai_compat", "ollama", "anthropic"]
+ReasoningEffort = Literal["none", "low", "medium", "high"]
 
 DEFAULT_BASE_URLS: dict[str, str | None] = {
     "ollama": "http://localhost:11434/v1",
@@ -46,8 +47,13 @@ class LLMClient(ABC):
         max_tokens: int = 2048,
         temperature: float | None = None,
         json_schema: dict | None = None,
+        reasoning_effort: str | None = None,
     ) -> ChatResult:
-        """json_schema 有值時要求模型輸出符合 schema 的 JSON（text 為 JSON 字串）。"""
+        """json_schema 有值時要求模型輸出符合 schema 的 JSON（text 為 JSON 字串）。
+
+        輸出被截斷且沒有任何內容時（常見於思考型模型把 token 用在思考上）要 raise LLMError，
+        讓上層備援接手，而不是回傳空字串。
+        """
 
     @abstractmethod
     async def list_models(self) -> list[RemoteModel]: ...

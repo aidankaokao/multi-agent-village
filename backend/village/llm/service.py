@@ -84,7 +84,7 @@ class LLMService:
                 continue
             client = self.client_for(m.provider)
             try:
-                return await client.chat(m.model, messages, **kw)
+                return await client.chat(m.model, messages, **{"reasoning_effort": m.reasoning_effort, **kw})
             except LLMError as e:
                 log.warning("model %s failed, trying next: %s", m.model, e)
                 errors.append(f"{m.model}: {e}")

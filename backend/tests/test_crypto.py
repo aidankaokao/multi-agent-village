@@ -78,3 +78,14 @@ def test_hint_and_redaction():
     assert "my-custom-token-xyz" not in out
     assert "abcdefghijklmnop" not in out
     assert "sk-proj-abcdefgh123" not in out
+
+
+def test_log_filter_redacts_args_and_keeps_structure():
+    import logging
+
+    from village.security.redact import RedactingFilter
+
+    register_secret("another-secret-token-1")
+    rec = logging.LogRecord("x", logging.INFO, __file__, 1, "%s - %s %d", ("another-secret-token-1", "GET /", 200), None)
+    RedactingFilter().filter(rec)
+    assert rec.getMessage() == "[REDACTED] - GET / 200"

@@ -3,7 +3,7 @@
 像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者在問答框的任務。
 
 - 架構：`docs/ARCHITECTURE.md`
-- 階段規劃：`docs/ROADMAP.md`（目前：Phase 0 尚未開始）
+- 階段規劃：`docs/ROADMAP.md`（目前：Phase 0 完成，下一步 Phase 1 MVP）
 - 素材規格：`docs/SPRITES.md`
 
 ## 原則
@@ -23,4 +23,9 @@
 
 ## 指令
 
+- 後端：`cd backend && uv run village serve`（127.0.0.1:8000）；測試 `uv run pytest`
+- 前端：`cd frontend && npm run dev`（5173，/api 與 /ws 代理到後端）；型別檢查 `npx tsc -b`
+- admin token：`cat ~/.config/multi-agent-village/admin.token`（LLM 設定頁要貼）
+- 主金鑰輪替：`cd backend && uv run village rotate-key`
 - 重新產生佔位 sprites：`python3 scripts/gen_placeholder_sprites.py`
+- DB schema 目前用 `create_all`，改欄位時要刪掉 `data/village.db` 重建（Phase 5 前導入 Alembic）

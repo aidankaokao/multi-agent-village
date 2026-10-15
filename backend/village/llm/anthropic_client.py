@@ -10,7 +10,9 @@ class AnthropicClient(LLMClient):
     def __init__(self, api_key: str | None, base_url: str | None = None):
         self._client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url or None)
 
-    async def chat(self, model, messages, *, system=None, max_tokens=2048, temperature=None, json_schema=None):
+    async def chat(
+        self, model, messages, *, system=None, max_tokens=2048, temperature=None, json_schema=None, reasoning_effort=None
+    ):
         # 新世代 Claude 模型不接受 temperature 等取樣參數，這裡刻意不傳
         kwargs: dict = {
             "model": model,
@@ -19,8 +21,15 @@ class AnthropicClient(LLMClient):
         }
         if system:
             kwargs["system"] = system
+        output_config: dict = {}
         if json_schema is not None:
-            kwargs["output_config"] = {"format": {"type": "json_schema", "schema": json_schema}}
+            output_config["format"] = {"type": "json_schema", "schema": json_schema}
+        if reasoning_effort in ("low", "medium", "high"):  # Claude 沒有 none，用 low 最省
+            output_config["effort"] = reasoning_effort
+        elif reasoning_effort == "none":
+            output_config["effort"] = "low"
+        if output_config:
+            kwargs["output_config"] = output_config
         try:
             resp = await self._client.messages.create(**kwargs)
         except anthropic.APIError as e:
@@ -28,6 +37,8 @@ class AnthropicClient(LLMClient):
         if resp.stop_reason == "refusal":
             raise LLMError("model refused the request")
         text = "".join(b.text for b in resp.content if b.type == "text")
+        if not text.strip() and resp.stop_reason == "max_tokens":
+            raise LLMError(f"輸出在 {max_tokens} tokens 被截斷且沒有內容")
         return ChatResult(
             text=text,
             model=resp.model,

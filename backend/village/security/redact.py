@@ -33,8 +33,13 @@ def redact(text: str) -> str:
 
 class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = redact(record.getMessage())
-        record.args = None
+        # 逐一遮罩 msg 與 args，保留 args 結構（uvicorn access formatter 依賴它）
+        if isinstance(record.msg, str):
+            record.msg = redact(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(redact(a) if isinstance(a, str) else a for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: redact(v) if isinstance(v, str) else v for k, v in record.args.items()}
         return True
 
 

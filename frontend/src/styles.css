@@ -1,0 +1,303 @@
+:root {
+  --bg: #1f2433;
+  --panel: #2a3044;
+  --card: #343b52;
+  --line: #1b1b2a;
+  --text: #ece8dc;
+  --muted: #9aa0b5;
+  --accent: #f2c230;
+  --ok: #5cbf7a;
+  --danger: #e0565e;
+  font-family: "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  height: 100vh;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px;
+  gap: 8px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+
+.village-canvas {
+  flex: 1;
+  min-height: 0;
+  border: 4px solid var(--line);
+  box-shadow: 0 0 0 2px #4a5270;
+  background: #1c2030;
+  image-rendering: pixelated;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+aside {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 4px solid var(--line);
+  min-height: 0;
+}
+
+.tabs {
+  display: flex;
+}
+
+.tabs button {
+  flex: 1;
+  border-radius: 0;
+  border: none;
+  border-bottom: 4px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  padding: 12px;
+}
+
+.tabs button.active {
+  background: var(--panel);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.panel-body {
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+h3 {
+  margin: 4px 0;
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.card {
+  background: var(--card);
+  border: 2px solid var(--line);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  background: var(--accent);
+  color: #222;
+  border: 2px solid var(--line);
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--line);
+}
+
+button:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--line);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+button.link {
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--accent);
+  padding: 0 4px;
+}
+
+button.link.danger {
+  color: var(--danger);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  background: #1c2030;
+  color: var(--text);
+  border: 2px solid var(--line);
+  width: 100%;
+}
+
+.row input,
+.row select {
+  width: auto;
+  flex: 1;
+}
+
+label.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+label.toggle input {
+  width: auto;
+}
+
+.tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  background: #1c2030;
+  color: var(--muted);
+}
+
+.tag.ok {
+  color: var(--ok);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.error {
+  color: #fff;
+  background: var(--danger);
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+td label.toggle,
+td button,
+td select {
+  white-space: nowrap;
+}
+
+td {
+  padding: 4px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.tiers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tiers ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.remote-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.remote-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.output {
+  white-space: pre-wrap;
+  background: #1c2030;
+  border: 2px solid var(--line);
+  padding: 8px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.event-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.event-log li {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 50vh 1fr;
+    height: auto;
+  }
+  aside {
+    border-left: none;
+    border-top: 4px solid var(--line);
+  }
+}

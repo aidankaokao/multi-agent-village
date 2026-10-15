@@ -4,16 +4,16 @@
 
 ---
 
-## Phase 0 — 地基（約 1~2 天）
+## Phase 0 — 地基 ✅
 
-- [ ] `backend/`：uv 專案、FastAPI、`/health`
-- [ ] SQLite + SQLAlchemy；`.gitignore` 排除 DB、`.env`、金鑰檔
-- [ ] `security/crypto.py`：主金鑰載入（環境變數 / 專案外金鑰檔）、AES-256-GCM 加解密，附單元測試
-- [ ] LLM 註冊 API：provider 增刪改、測試連線、列出 / 註冊模型、模型分級；API key 只寫不讀
-- [ ] `LLMProvider`：OpenAI 相容 client，`chat()` 與 `chat_json(schema)`，從 DB 載入設定
-- [ ] 前端「LLM 設定」頁：註冊本地 Ollama 與一個雲端 provider，並指派 `large` / `small`
-- [ ] `frontend/`：Vite + React + Phaser，畫出一塊草地，5 個角色用 `assets/sprites` 隨機閒晃（四向走路動畫）
-- [ ] WebSocket 連通，後端送假事件 → 指定角色頭頂出現 working 泡泡
+- [x] `backend/`：uv 專案、FastAPI、`/health`
+- [x] SQLite + SQLAlchemy；`.gitignore` 排除 DB、`.env`、金鑰檔
+- [x] `security/crypto.py`：主金鑰載入（環境變數 / 專案外金鑰檔）、AES-256-GCM 加解密，附單元測試
+- [x] LLM 註冊 API：provider 增刪改、測試連線、列出 / 註冊模型、模型分級；API key 只寫不讀
+- [x] `LLMProvider`：OpenAI 相容 client，`chat()` 與 `chat_json(schema)`，從 DB 載入設定
+- [x] 前端「LLM 設定」頁：註冊本地 Ollama 與一個雲端 provider，並指派 `large` / `small`
+- [x] `frontend/`：Vite + React + Phaser，畫出一塊草地，5 個角色用 `assets/sprites` 隨機閒晃（四向走路動畫）
+- [x] WebSocket 連通，後端送假事件 → 指定角色頭頂出現 working 泡泡
 
 **驗收**：打開網頁看到村民在走；按一個 debug 按鈕，詩人頭上冒泡泡；在設定頁註冊 Ollama 和雲端模型後都能測試成功；直接打開 SQLite 只看得到密文。
 

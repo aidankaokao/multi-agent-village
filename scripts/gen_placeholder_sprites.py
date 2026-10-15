@@ -214,7 +214,7 @@ CHARACTERS = {
     "poet": ("詩人", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet),
     "jester": ("笑話師", dict(hair="#e08a2c", cloth="#d8343c", cloth2="#7a2a8a", shoe="#3a2a20"), acc_jester),
     "translator": ("翻譯官", dict(hair="#1e1e2a", cloth="#3a6fc4", cloth2="#28477d", shoe="#2a2a2a"), acc_translator),
-    "mayor": ("村長(orchestrator)", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor),
+    "mayor": ("村長", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor),
     "reviewer": ("審核員", dict(hair="#3b2a1e", cloth="#2b3a67", cloth2="#1b2442", shoe="#111111"), acc_reviewer),
 }
 

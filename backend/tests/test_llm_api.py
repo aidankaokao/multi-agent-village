@@ -124,3 +124,30 @@ async def test_delete_provider_cascades_models_and_tiers(env):
     assert (await c.delete(f"/api/llm/providers/{p['id']}")).status_code == 204
     assert (await c.get("/api/llm/models")).json() == []
     assert (await c.get("/api/llm/tiers")).json() == {"large": [], "small": []}
+
+
+async def test_truncated_empty_output_falls_back_and_effort_is_passed(env):
+    c, _ = env
+
+    class Truncating(FakeClient):
+        efforts: list = []
+
+        async def chat(self, model, messages, **kw):
+            Truncating.efforts.append((model, kw.get("reasoning_effort")))
+            if "thinker" in model:
+                raise LLMError("輸出被截斷且沒有內容")
+            return await super().chat(model, messages, **kw)
+
+    c._transport.app.state.ctx.llm._factory = Truncating
+    p = await _provider(c, name="local", base_url="http://local/v1", api_key=None)
+    a = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "thinker"})).json()
+    b = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "fast", "reasoning_effort": "none"})).json()
+    assert b["reasoning_effort"] == "none"
+    await c.put("/api/llm/tiers", json={"small": [a["id"], b["id"]]})
+
+    r = await c.post("/api/llm/try", json={"target": "tier:small", "prompt": "hi"})
+    assert r.json()["model"] == "fast"
+    assert Truncating.efforts == [("thinker", None), ("fast", "none")]
+
+    r = await c.patch(f"/api/llm/models/{b['id']}", json={"reasoning_effort": "bogus"})
+    assert r.status_code == 422
