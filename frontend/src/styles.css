@@ -301,3 +301,127 @@ td {
     border-top: 4px solid var(--line);
   }
 }
+
+/* ---------------------------------------------------------------- 問答 */
+
+.tab-pane {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.chat-empty .tag {
+  margin-left: 6px;
+}
+
+button.example {
+  text-align: left;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.chat-input {
+  border-top: 4px solid var(--line);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bubble {
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--accent);
+  color: #222;
+}
+
+.bubble.village {
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  font-size: 13px;
+  white-space: normal;
+}
+
+.step.running strong {
+  color: var(--accent);
+}
+
+.step-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.answer {
+  background: #1c2030;
+  border-left: 4px solid var(--accent);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+}
+
+.trace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+
+.trace-step {
+  border-top: 1px dashed #4a5270;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tag.warn {
+  color: var(--accent);
+  align-self: flex-start;
+}

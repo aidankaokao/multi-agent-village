@@ -18,7 +18,7 @@ cd frontend && npm install && npm run dev            # http://localhost:5173
 
 1. 打開 http://localhost:5173 → 「LLM 設定」
 2. 新增 provider（Ollama 或雲端）→ 測試連線 → 註冊模型 → 指派 large / small
-3. 回到「問答」按「播放示範」看村民動起來
+3. 回到「問答」輸入問題，例如「寫一首關於貓的詩，再改成笑話」，或用 `@poet … → @jester` 直接指名
 
 ## 容器部署
 

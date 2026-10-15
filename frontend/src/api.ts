@@ -110,3 +110,21 @@ export const llm = {
   tryModel: (target: string, prompt: string) =>
     api<{ text: string; model: string }>("/api/llm/try", { method: "POST", json: { target, prompt } }),
 };
+
+// ---------------------------------------------------------------- 村民 / 問答
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  description: string;
+  kind: string;
+  sprite: string | null;
+  home: [number, number] | null;
+  skills: { id: string; description: string; examples: string[] }[];
+  tags: string[];
+}
+
+export const village = {
+  agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
+  chat: (message: string) => api<{ run_id: string }>("/api/chat", { method: "POST", json: { message } }),
+};

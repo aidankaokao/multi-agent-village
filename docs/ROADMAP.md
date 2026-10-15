@@ -19,17 +19,24 @@
 
 ---
 
-## Phase 1 — MVP：詩人 × 笑話師合作
+## Phase 1 — MVP：詩人 × 笑話師合作 ✅
 
 目標題目：**「寫一首關於貓的詩，然後把它改成笑話」**
 
-- [ ] `AgentCard` / `BaseAgent` / `PromptAgent` / `Registry`
-- [ ] `agents/poet/agent.yaml`、`agents/jester/agent.yaml`
-- [ ] 村長：產生兩步 Plan（JSON schema 約束 + 修復重試 + `@agent` 指名退路）
-- [ ] Executor：依序執行、`{{s1.poem}}` 代入、發事件
-- [ ] 聊天面板：送出問題、顯示最終答案、可展開看每一步（誰做了什麼）
-- [ ] 村落動畫：村長 → 詩人工作 → 詩人走向笑話師交接 → 笑話師工作 → 完成
-- [ ] Harness 最小版：輸出非空 / 長度檢查 + 中英髒話詞表
+- [x] `AgentSpec`（card + x-village + prompt + validate）/ `AgentRegistry`（每 2 秒 hot reload）
+- [x] `agents/poet/agent.yaml`、`agents/jester/agent.yaml`
+- [x] 村長：`@指名` → LLM 規劃（JSON schema + 帶錯誤回饋重試）→ 剪掉沒被要求的步驟 → 關鍵字備援 → 直接回覆
+- [x] Executor：依序執行、`use` 指定的成果組成 `{context}`、發事件、交接動畫
+- [x] 聊天面板：送出問題、即時步驟狀態、最終答案、可展開執行過程（模型、耗時、輸出、警告）
+- [x] 村落動畫：由真實事件驅動；村民清單來自 `/api/agents`，新增 agent 會淡入登場
+- [x] Harness 最小版：清 `<think>`、非空 / 長度檢查、中英髒話詞表；不合格帶回饋重試一次，仍不合格則遮蔽 / 標警告
+- [x] 模型分級互為備援：small 沒設定或失敗時用 large
+
+實測（Ollama qwen3.5:9b、思考 none，只設定 large）：「貓詩 → 笑話」約 20 秒完成；`@指名` 不經 LLM 立即開始。
+
+已知限制（留待後續）：
+- 本地模型偶爾混入簡體字 → 可在 harness 加 OpenCC 繁簡轉換
+- 步驟目前依序執行；平行步驟在 Phase 3
 
 **驗收**：
 1. 單一任務「講個笑話」→ 只有笑話師動

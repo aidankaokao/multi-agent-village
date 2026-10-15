@@ -118,15 +118,24 @@ Registry 啟動時掃描 `agents/*/agent.yaml`，開發模式下檔案變動自�
 ```json
 {
   "steps": [
-    {"id": "s1", "agent": "poet",   "skill": "write_poem", "input": {"topic": "貓"}},
-    {"id": "s2", "agent": "jester", "skill": "make_joke",  "input": {"text": "{{s1.poem}}"}, "after": ["s1"]}
-  ],
-  "final": "s2"
+    {"id": "s1", "agent": "poet",   "instruction": "寫一首關於貓的詩",   "use": []},
+    {"id": "s2", "agent": "jester", "instruction": "把這首詩改編成笑話", "use": ["s1"]}
+  ]
 }
 ```
 
-執行器（Executor）照 DAG 跑：沒有依賴的步驟平行跑，`{{s1.poem}}` 由前一步的輸出代入。
-這樣 **規劃（LLM 做）** 和 **執行（程式碼做）** 分開——弱模型只需要做好「挑人+填參數」這一件事。
+- 每一步只有「誰、一句指示、要用哪幾步的成果」——刻意不讓模型填結構化參數，弱模型也做得到
+- Executor 把 `use` 指到的成果組成 `{context}`（「參考資料（來自詩人）：…」），連同 `{instruction}` 填進該 agent 的 `user_template`
+- 最終答案 = 最後一步的輸出
+- 這樣 **規劃（LLM 做）** 和 **執行（程式碼做）** 分開
+
+規劃的退路順序（`backend/village/core/orchestrator.py`）：
+
+1. `@指名`：`@poet 寫詩 → @jester`，完全不經 LLM
+2. LLM 規劃：JSON schema 約束（`agent` 是 enum），解析或驗證失敗會把錯誤回饋給模型重試（最多 2 次）
+3. 剪掉「沒被要求」的步驟：村民的 `x-village.keywords` 一個都沒出現在請求裡、且沒人依賴它 → 移除（弱模型常照抄範例多加步驟）
+4. 關鍵字備援：LLM 不可用或一直規劃失敗時，依關鍵字在請求中出現的順序串接
+5. 村長直接回覆：沒有村民適合（打招呼、閒聊）
 
 ### 3.4 為「弱模型」設計的保險
 

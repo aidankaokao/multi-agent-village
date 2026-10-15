@@ -315,7 +315,7 @@ function TierSection({ models, tiers, run }: { models: Model[]; tiers: Tiers; ru
           </div>
         ))}
       </div>
-      <p className="hint">排在前面的優先使用，失敗依序往下；large 全部失敗時會再退到 small。</p>
+      <p className="hint">排在前面的優先使用，失敗依序往下；兩級互為備援（large 失敗退到 small，small 沒設定或失敗則用 large）。</p>
       <button disabled={!dirty} onClick={() => run(() => llm.saveTiers(draft))}>
         儲存分級
       </button>

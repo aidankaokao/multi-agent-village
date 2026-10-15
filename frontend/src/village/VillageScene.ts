@@ -19,14 +19,15 @@ const CHAR_SCALE = 2; // 32px 角色放大 2 倍（整數倍，像素才不會�
 
 type Dir = "down" | "left" | "right" | "up";
 
-// Phase 0 暫時寫死村民位置；Phase 1 起改由後端 agent card 的 x-village.home 提供
-const HOMES: Record<string, [number, number]> = {
-  mayor: [15, 9],
-  poet: [7, 6],
-  jester: [22, 6],
-  translator: [8, 14],
-  reviewer: [22, 14],
-};
+/** 村裡要出現的村民；來自後端 /api/agents（agent.yaml 的 x-village），村長由前端固定加入 */
+export interface VillagerInfo {
+  id: string;
+  name: string;
+  sprite: string | null;
+  home: [number, number] | null;
+}
+
+export const MAYOR: VillagerInfo = { id: "mayor", name: "村長", sprite: "mayor", home: [15, 9] };
 
 class Villager {
   sprite: Phaser.GameObjects.Sprite;
@@ -41,10 +42,11 @@ class Villager {
   constructor(
     private scene: Phaser.Scene,
     public id: string,
+    private skin: string, // spritesheet key
     name: string,
     public home: Phaser.Math.Vector2,
   ) {
-    this.sprite = scene.add.sprite(home.x, home.y, id, 1).setOrigin(0.5, 0.9).setScale(CHAR_SCALE);
+    this.sprite = scene.add.sprite(home.x, home.y, skin, 1).setOrigin(0.5, 0.9).setScale(CHAR_SCALE);
     this.bubble = scene.add.sprite(home.x, home.y, "bubbles", 0).setScale(2).setVisible(false);
     this.label = scene.add
       .text(home.x, home.y, name, { fontSize: "12px", color: "#fff", backgroundColor: "#0009", padding: { x: 4, y: 1 } })
@@ -62,7 +64,7 @@ class Villager {
 
   private face(dir: Dir, walking: boolean) {
     this.dir = dir;
-    if (walking) this.sprite.play(`${this.id}-walk-${dir}`, true);
+    if (walking) this.sprite.play(`${this.skin}-walk-${dir}`, true);
     else {
       this.sprite.stop();
       this.sprite.setFrame(["down", "left", "right", "up"].indexOf(dir) * 3 + 1);
@@ -126,6 +128,24 @@ class Villager {
     this.scheduleWander(2000);
   }
 
+  /** 新村民登場：淡入 + 完成泡泡 */
+  appear() {
+    for (const o of [this.sprite, this.label]) {
+      o.setAlpha(0);
+      this.scene.tweens.add({ targets: o, alpha: 1, duration: 800 });
+    }
+    this.showBubble("done", 2000);
+  }
+
+  destroy() {
+    this.tween?.stop();
+    this.timer?.remove();
+    this.bubbleTimer?.remove();
+    this.sprite.destroy();
+    this.bubble.destroy();
+    this.label.destroy();
+  }
+
   /** 走到另一位村民旁邊交接，再回家附近繼續閒晃 */
   handoffTo(other: Villager) {
     this.busy = true;
@@ -144,6 +164,8 @@ class Villager {
 
 export class VillageScene extends Phaser.Scene {
   private villagers = new Map<string, Villager>();
+  private ready = false;
+  private pending: VillagerInfo[] | null = null;
 
   constructor(private manifest: SpriteManifest) {
     super("village");
@@ -166,7 +188,7 @@ export class VillageScene extends Phaser.Scene {
       frameRate: 5,
       repeat: -1,
     });
-    for (const [id, c] of Object.entries(this.manifest.characters)) {
+    for (const id of Object.keys(this.manifest.characters)) {
       this.manifest.rows.forEach((dir, row) => {
         this.anims.create({
           key: `${id}-walk-${dir}`,
@@ -175,9 +197,39 @@ export class VillageScene extends Phaser.Scene {
           repeat: -1,
         });
       });
-      const [hx, hy] = HOMES[id] ?? [Phaser.Math.Between(3, MAP_W - 3), Phaser.Math.Between(3, MAP_H - 3)];
-      this.villagers.set(id, new Villager(this, id, c.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE)));
     }
+    this.ready = true;
+    this.syncVillagers(this.pending ?? [], false);
+  }
+
+  /** 依後端村民清單增減角色（agents/ hot reload 時新村民會淡入登場） */
+  syncVillagers(list: VillagerInfo[], animate = true) {
+    if (!this.ready) {
+      this.pending = list;
+      return;
+    }
+    const wanted = new Map([MAYOR, ...list].map((v) => [v.id, v]));
+    for (const [id, v] of this.villagers) {
+      if (!wanted.has(id)) {
+        v.destroy();
+        this.villagers.delete(id);
+      }
+    }
+    for (const info of wanted.values()) {
+      if (this.villagers.has(info.id)) continue;
+      const skin = info.sprite && this.manifest.characters[info.sprite] ? info.sprite : "poet";
+      const [hx, hy] = info.home ?? this.freeSpot(info.id);
+      const v = new Villager(this, info.id, skin, info.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE));
+      this.villagers.set(info.id, v);
+      if (animate) v.appear();
+    }
+  }
+
+  /** 沒指定 home 時，依 id 算出固定的空地位置 */
+  private freeSpot(id: string): [number, number] {
+    let h = 0;
+    for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return [3 + (h % (MAP_W - 6)), 3 + ((h >>> 8) % (MAP_H - 6))];
   }
 
   update() {
@@ -189,6 +241,12 @@ export class VillageScene extends Phaser.Scene {
     switch (e.type) {
       case "run.started":
         v?.startWork("thinking");
+        break;
+      case "plan.created":
+        v?.finish(true);
+        break;
+      case "run.failed":
+        v?.finish(false);
         break;
       case "agent.started":
         v?.startWork();

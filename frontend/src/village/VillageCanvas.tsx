@@ -1,17 +1,24 @@
 import Phaser from "phaser";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { VillageEvent } from "../events";
-import { MAP_H, MAP_W, TILE, VillageScene, type SpriteManifest } from "./VillageScene";
+import { MAP_H, MAP_W, TILE, VillageScene, type SpriteManifest, type VillagerInfo } from "./VillageScene";
 
 export interface VillageHandle {
   dispatch(e: VillageEvent): void;
 }
 
-export const VillageCanvas = forwardRef<VillageHandle>(function VillageCanvas(_, ref) {
+export const VillageCanvas = forwardRef<VillageHandle, { villagers: VillagerInfo[] }>(function VillageCanvas({ villagers }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<VillageScene | null>(null);
 
+  const latest = useRef(villagers);
+  latest.current = villagers;
+
   useImperativeHandle(ref, () => ({ dispatch: (e) => scene.current?.handleEvent(e) }), []);
+
+  useEffect(() => {
+    scene.current?.syncVillagers(villagers);
+  }, [villagers]);
 
   useEffect(() => {
     let game: Phaser.Game | undefined;
@@ -21,6 +28,7 @@ export const VillageCanvas = forwardRef<VillageHandle>(function VillageCanvas(_,
       .then((manifest: SpriteManifest) => {
         if (cancelled || !host.current) return;
         scene.current = new VillageScene(manifest);
+        scene.current.syncVillagers(latest.current, false);
         game = new Phaser.Game({
           type: Phaser.AUTO,
           parent: host.current,

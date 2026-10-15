@@ -60,13 +60,13 @@ class LLMService:
     async def candidates(self, target: str) -> list[LlmModel]:
         """target：'tier:large' / 'tier:small' / 模型 id。
 
-        tier:large 失敗時最後會退到 small 級（弱模型總比沒有好）。
+        兩級互為備援：large 失敗退到 small（弱模型總比沒有好）；small 沒設定或失敗則用 large。
         """
         if target.startswith("tier:"):
             tier = target.removeprefix("tier:")
+            other = "small" if tier == "large" else "large"
             models = await self.tier_models(tier)
-            if tier == "large":
-                models += [m for m in await self.tier_models("small") if m not in models]
+            models += [m for m in await self.tier_models(other) if m not in models]
         else:
             async with self._sm() as s:
                 m = await s.get(LlmModel, target, options=[selectinload(LlmModel.provider)])

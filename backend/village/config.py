@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class Settings:
     database_url: str
     config_dir: Path
+    agents_dir: Path = REPO_ROOT / "agents"
     host: str = "127.0.0.1"
     port: int = 8000
 
@@ -26,6 +27,7 @@ class Settings:
             config_dir=Path(
                 os.environ.get("VILLAGE_CONFIG_DIR", Path.home() / ".config" / "multi-agent-village")
             ),
+            agents_dir=Path(os.environ.get("VILLAGE_AGENTS_DIR", REPO_ROOT / "agents")),
             host=os.environ.get("VILLAGE_HOST", "127.0.0.1"),
             port=int(os.environ.get("VILLAGE_PORT", "8000")),
         )

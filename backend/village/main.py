@@ -1,13 +1,16 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
 from village.config import Settings
+from village.core.executor import Runner
+from village.core.registry import AgentRegistry
 from village.events import EventBus
 from village.llm.service import ClientFactory, LLMService
 from village.security.admin import load_admin_token
@@ -27,9 +30,28 @@ class AppContext:
     llm: LLMService
     bus: EventBus
     admin_token: str | None
+    registry: AgentRegistry
+    runner: Runner
+    tasks: set[asyncio.Task] = field(default_factory=set)
 
 
-def create_app(settings: Settings | None = None, client_factory: ClientFactory | None = None) -> FastAPI:
+AGENT_WATCH_INTERVAL = 2.0
+
+
+async def watch_agents(registry: AgentRegistry, bus: EventBus) -> None:
+    """agents/ 有新增或修改就重新載入，並通知前端（村民出現 / 消失）。"""
+    while True:
+        await asyncio.sleep(AGENT_WATCH_INTERVAL)
+        try:
+            if registry.refresh():
+                await bus.publish("agents.changed", agents=[a.id for a in registry.all()], errors=registry.errors)
+        except Exception:
+            log.exception("agent watcher error")
+
+
+def create_app(
+    settings: Settings | None = None, client_factory: ClientFactory | None = None, handoff_delay: float = 1.0
+) -> FastAPI:
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
@@ -39,22 +61,33 @@ def create_app(settings: Settings | None = None, client_factory: ClientFactory |
         await init_db(engine)
         sm = make_sessionmaker(engine)
         box = SecretBox(load_keyring(settings.config_dir))
+        llm = LLMService(sm, box, client_factory)
+        bus = EventBus()
+        registry = AgentRegistry(settings.agents_dir)
+        registry.refresh()
         app.state.ctx = AppContext(
             settings=settings,
             engine=engine,
             sessionmaker=sm,
             box=box,
-            llm=LLMService(sm, box, client_factory),
-            bus=EventBus(),
+            llm=llm,
+            bus=bus,
             admin_token=load_admin_token(),
+            registry=registry,
+            runner=Runner(registry, llm, bus, handoff_delay=handoff_delay),
         )
+        watcher = asyncio.create_task(watch_agents(registry, bus))
         if app.state.ctx.admin_token is None:
             log.warning("未設定 VILLAGE_ADMIN_TOKEN：LLM 設定 API 不需驗證")
         yield
+        watcher.cancel()
+        for t in list(app.state.ctx.tasks):
+            t.cancel()
         await engine.dispose()
 
     app = FastAPI(title="Multi-Agent Village", lifespan=lifespan)
     app.include_router(llm_router)
+    app.include_router(chat_router)
 
     @app.get("/api/health")
     async def health():
@@ -72,30 +105,6 @@ def create_app(settings: Settings | None = None, client_factory: ClientFactory |
             pass
         finally:
             bus.unsubscribe(q)
-
-    @app.post("/api/debug/demo-run")
-    async def demo_run():
-        """Phase 0 用：模擬「村長 → 詩人 → 笑話師」的事件序列，驗證村落動畫。"""
-
-        async def play():
-            bus: EventBus = app.state.ctx.bus
-            run = "demo"
-            await bus.publish("run.started", run_id=run, agent="mayor")
-            await asyncio.sleep(1.5)
-            await bus.publish("plan.created", run_id=run, agent="mayor", steps=["poet", "jester"])
-            await bus.publish("agent.finished", run_id=run, agent="mayor")
-            await bus.publish("agent.started", run_id=run, agent="poet")
-            await asyncio.sleep(3)
-            await bus.publish("agent.finished", run_id=run, agent="poet")
-            await bus.publish("agent.handoff", run_id=run, from_agent="poet", to_agent="jester")
-            await asyncio.sleep(2)
-            await bus.publish("agent.started", run_id=run, agent="jester")
-            await asyncio.sleep(3)
-            await bus.publish("agent.finished", run_id=run, agent="jester")
-            await bus.publish("run.finished", run_id=run)
-
-        asyncio.create_task(play())
-        return {"ok": True}
 
     return app
 

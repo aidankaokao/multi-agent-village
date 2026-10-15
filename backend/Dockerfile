@@ -30,7 +30,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     VILLAGE_HOST=0.0.0.0 \
     VILLAGE_PORT=8000 \
     DATABASE_URL=sqlite+aiosqlite:////data/village.db \
-    VILLAGE_CONFIG_DIR=/config
+    VILLAGE_CONFIG_DIR=/config \
+    VILLAGE_AGENTS_DIR=/app/agents
 
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \

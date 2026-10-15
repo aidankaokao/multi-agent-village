@@ -13,6 +13,7 @@ services:
       VILLAGE_ADMIN_TOKEN: ${VILLAGE_ADMIN_TOKEN:-}   # 留空 = LLM 設定不需驗證
       VILLAGE_MASTER_KEY: ${VILLAGE_MASTER_KEY:-}     # 留空 = 自動產生並存到 village-secrets volume
     volumes:
+      - ./agents:/app/agents:ro   # 村民定義；新增 / 修改 agent.yaml 會自動載入，不需重 build
       - village-data:/data        # SQLite DB
       - village-secrets:/config   # 主金鑰（與 DB 分開，備份 DB 不會帶走金鑰）
     extra_hosts:
