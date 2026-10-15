@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 
 import httpx
@@ -10,7 +9,7 @@ from village.core.executor import Runner
 from village.core.harness import check_output, mask_profanity, normalize
 from village.core.card import Checks
 from village.core.orchestrator import PlanError, make_plan, parse_plan, plan_from_mentions
-from village.core.registry import AgentRegistry
+from village.core.registry import AgentRegistry, load_dir
 from village.events import EventBus
 from village.llm.base import ChatResult, LLMError
 from village.main import create_app
@@ -47,9 +46,9 @@ def role_of(kw) -> str:
 
 @pytest.fixture
 def registry():
-    r = AgentRegistry(AGENTS_DIR)
-    r.refresh()
-    return r
+    specs, errors = load_dir(AGENTS_DIR)
+    assert errors == {}
+    return AgentRegistry(specs)
 
 
 class Recorder(EventBus):
@@ -88,30 +87,24 @@ def test_registry_loads_repo_agents(registry):
     assert registry.errors == {}
 
 
-def test_registry_reports_bad_agents_and_hot_reloads(tmp_path: Path):
+def test_load_dir_reports_bad_agents(tmp_path: Path):
     (tmp_path / "good").mkdir()
-    good = tmp_path / "good" / "agent.yaml"
-    good.write_text("card: {id: good, name: 好人, description: d}\nprompt: {system: s}\n")
+    (tmp_path / "good" / "agent.yaml").write_text("card: {id: good, name: 好人, description: d}\nprompt: {system: s}\n")
     (tmp_path / "wrongdir").mkdir()
     (tmp_path / "wrongdir" / "agent.yaml").write_text("card: {id: other, name: x, description: d}\nprompt: {system: s}\n")
     (tmp_path / "broken").mkdir()
     (tmp_path / "broken" / "agent.yaml").write_text("card: [oops")
     (tmp_path / "mayor").mkdir()
     (tmp_path / "mayor" / "agent.yaml").write_text("card: {id: mayor, name: x, description: d}\nprompt: {system: s}\n")
+    (tmp_path / "noinst").mkdir()
+    (tmp_path / "noinst" / "agent.yaml").write_text(
+        "card: {id: noinst, name: x, description: d}\nprompt: {system: s, user_template: '{context}'}\n"
+    )
 
-    r = AgentRegistry(tmp_path)
-    assert r.refresh() is True
-    assert [a.id for a in r.all()] == ["good"]
-    assert set(r.errors) == {"wrongdir", "broken", "mayor"}
-    assert r.refresh() is False  # 沒變動
-
-    good.write_text("card: {id: good, name: 改名, description: d}\nprompt: {system: s}\n")
-    st = good.stat()
-    os.utime(good, (st.st_atime, st.st_mtime + 5))
-    assert r.refresh() is True and r.get("good").name == "改名"
-
-
-# ---------------------------------------------------------------- planning
+    specs, errors = load_dir(tmp_path)
+    assert [a.id for a in specs] == ["good"]
+    assert set(errors) == {"wrongdir", "broken", "mayor", "noinst"}
+    assert "{instruction}" in errors["noinst"]
 
 
 def test_mentions(registry):

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
+from village.api.villagers import router as villagers_router
 from village.config import Settings
 from village.core.executor import Runner
 from village.core.registry import AgentRegistry
@@ -16,6 +17,7 @@ from village.llm.service import ClientFactory, LLMService
 from village.security.admin import load_admin_token
 from village.security.crypto import SecretBox, load_keyring
 from village.security.redact import install_log_redaction
+from village.store.agents import load_registry, seed_builtin
 from village.store.db import init_db, make_engine, make_sessionmaker
 
 log = logging.getLogger("village")
@@ -35,20 +37,6 @@ class AppContext:
     tasks: set[asyncio.Task] = field(default_factory=set)
 
 
-AGENT_WATCH_INTERVAL = 2.0
-
-
-async def watch_agents(registry: AgentRegistry, bus: EventBus) -> None:
-    """agents/ 有新增或修改就重新載入，並通知前端（村民出現 / 消失）。"""
-    while True:
-        await asyncio.sleep(AGENT_WATCH_INTERVAL)
-        try:
-            if registry.refresh():
-                await bus.publish("agents.changed", agents=[a.id for a in registry.all()], errors=registry.errors)
-        except Exception:
-            log.exception("agent watcher error")
-
-
 def create_app(
     settings: Settings | None = None, client_factory: ClientFactory | None = None, handoff_delay: float = 1.0
 ) -> FastAPI:
@@ -63,8 +51,11 @@ def create_app(
         box = SecretBox(load_keyring(settings.config_dir))
         llm = LLMService(sm, box, client_factory)
         bus = EventBus()
-        registry = AgentRegistry(settings.agents_dir)
-        registry.refresh()
+        added = await seed_builtin(sm, settings.agents_dir)
+        if added:
+            log.info("匯入內建範例村民：%s", added)
+        registry = AgentRegistry()
+        await load_registry(sm, registry)
         app.state.ctx = AppContext(
             settings=settings,
             engine=engine,
@@ -76,11 +67,9 @@ def create_app(
             registry=registry,
             runner=Runner(registry, llm, bus, handoff_delay=handoff_delay),
         )
-        watcher = asyncio.create_task(watch_agents(registry, bus))
         if app.state.ctx.admin_token is None:
             log.warning("未設定 VILLAGE_ADMIN_TOKEN：LLM 設定 API 不需驗證")
         yield
-        watcher.cancel()
         for t in list(app.state.ctx.tasks):
             t.cancel()
         await engine.dispose()
@@ -88,6 +77,7 @@ def create_app(
     app = FastAPI(title="Multi-Agent Village", lifespan=lifespan)
     app.include_router(llm_router)
     app.include_router(chat_router)
+    app.include_router(villagers_router)
 
     @app.get("/api/health")
     async def health():

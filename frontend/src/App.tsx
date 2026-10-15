@@ -4,10 +4,11 @@ import { ChatPanel } from "./chat/ChatPanel";
 import { initialRuns, runsReducer } from "./chat/runs";
 import { useVillageEvents } from "./events";
 import { LlmSettings } from "./settings/LlmSettings";
+import { VillagerManager } from "./villagers/VillagerManager";
 import { VillageCanvas, type VillageHandle } from "./village/VillageCanvas";
 import type { VillagerInfo } from "./village/VillageScene";
 
-type Tab = "chat" | "llm";
+type Tab = "chat" | "villagers" | "llm";
 
 export function App() {
   const villageRef = useRef<VillageHandle>(null);
@@ -41,7 +42,7 @@ export function App() {
   };
 
   return (
-    <div className="layout">
+    <div className={`layout ${tab === "villagers" ? "wide" : ""}`}>
       <main>
         <header>
           <h1>Multi-Agent Village</h1>
@@ -53,6 +54,9 @@ export function App() {
           <button className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>
             問答
           </button>
+          <button className={tab === "villagers" ? "active" : ""} onClick={() => setTab("villagers")}>
+            村民
+          </button>
           <button className={tab === "llm" ? "active" : ""} onClick={() => setTab("llm")}>
             LLM 設定
           </button>
@@ -61,6 +65,7 @@ export function App() {
         <div className="tab-pane" style={{ display: tab === "chat" ? "flex" : "none" }}>
           <ChatPanel runs={runs} agents={agents} onSend={send} onReset={() => dispatch({ type: "reset" })} />
         </div>
+        {tab === "villagers" && <VillagerManager />}
         {tab === "llm" && <LlmSettings />}
       </aside>
     </div>

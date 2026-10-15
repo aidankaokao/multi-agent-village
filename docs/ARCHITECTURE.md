@@ -109,7 +109,9 @@ class BaseAgent(Protocol):
 # ctx 提供：llm、emit(event)、memory、user、取消訊號
 ```
 
-Registry 啟動時掃描 `agents/*/agent.yaml`，開發模式下檔案變動自動重新載入（hot reload）。
+村民定義存在 DB（`agents` 表，`spec` 欄位與 `agent.yaml` 同格式），在前端「村民」分頁新增 / 編輯 / 停用 / 刪除、試打、跑測試題、匯入匯出 YAML（API：`/api/villagers`）。
+存檔後後端重新載入名冊並發 `agents.changed`，村子裡的角色即時登場 / 換裝 / 離開。
+`agents/*/agent.yaml` 是內建範例：啟動時只匯入 DB 還沒有的 id；刪掉的內建範例留有紀錄，不會在重啟時回來，可用「還原內建範例」救回。
 
 ### 3.3 Orchestrator（村長）
 
@@ -263,7 +265,7 @@ multi-agent-village/
 │       ├── core/
 │       │   ├── card.py          # AgentCard pydantic 模型
 │       │   ├── base.py          # BaseAgent / Task / RunContext / AgentResult
-│       │   ├── registry.py      # 掃描 agents/、hot reload
+│       │   ├── registry.py      # 記憶體中的村民名冊（資料來自 DB）
 │       │   ├── prompt_agent.py  # kind=prompt 的通用實作
 │       │   ├── remote_agent.py  # kind=remote（A2A client）
 │       │   ├── orchestrator.py  # 村長：規劃
@@ -271,11 +273,10 @@ multi-agent-village/
 │       ├── harness/             # input_guard, validators, content_guard
 │       ├── events.py            # Event bus
 │       └── store/               # SQLAlchemy models
-├── agents/                      # ★ 市集：每個資料夾一位村民
+├── agents/                      # 內建範例村民（第一次啟動匯入 DB）
 │   ├── poet/agent.yaml
 │   ├── jester/agent.yaml
 │   ├── reviewer/agent.yaml
-│   └── translator/agent.yaml    # Phase 2 教學
 ├── services/
 │   └── taiwan-history/          # Phase 6：獨立容器的 remote agent
 ├── frontend/

@@ -23,7 +23,7 @@
 
 目標題目：**「寫一首關於貓的詩，然後把它改成笑話」**
 
-- [x] `AgentSpec`（card + x-village + prompt + validate）/ `AgentRegistry`（每 2 秒 hot reload）
+- [x] `AgentSpec`（card + x-village + prompt + validate）/ `AgentRegistry`
 - [x] `agents/poet/agent.yaml`、`agents/jester/agent.yaml`
 - [x] 村長：`@指名` → LLM 規劃（JSON schema + 帶錯誤回饋重試）→ 剪掉沒被要求的步驟 → 關鍵字備援 → 直接回覆
 - [x] Executor：依序執行、`use` 指定的成果組成 `{context}`、發事件、交接動畫
@@ -50,19 +50,29 @@
 
 ---
 
-## Phase 2 — 教學：自己建立 prompt agent（英文翻譯）
+## Phase 2 — 在介面上建立村民（英文翻譯）
 
-這一階段的重點是「你自己動手」，我負責帶。
+使用者的角色是「介面使用者」：新增村民的所有功能都在前端完成，不用碰檔案或後端。
 
-1. 複製 `agents/poet/` 為 `agents/translator/`
-2. 改 card：`description`、`skills`（`translate`: `{text, target_lang: zh|en}` → `{text}`）、**`examples`**
-3. 寫 system prompt：自動偵測語言、只輸出譯文、保留格式
-4. 寫 `agents/translator/tests.yaml`：5~10 組輸入 / 期望特徵（例如「輸出不含中文」）
-5. `uv run village eval translator` 跑測試，比較雲端 vs 本地模型的表現
-6. 存檔 → hot reload → 在村落看到翻譯官出現
-7. 試組合題：「寫一首關於海的詩，翻成英文，再改成笑話」→ 三人接力
+**A. 村民管理介面（已完成）**
 
-**附加**：前端「建立村民」表單（填 card + prompt → 產生 yaml），之後新增 prompt agent 不用碰程式碼。
+- [x] 村民改存 DB（`agents` 表）；`agents/*.yaml` 只是第一次啟動匯入的內建範例
+- [x] 「村民」分頁：列表、新增、複製、編輯、停用 / 啟用、刪除、還原內建範例
+- [x] 設定表單：名片（名稱、描述、技能與請求範例）、外觀、住處（點地圖）、關鍵字、模型與 temperature、system prompt、任務模板、自動檢查
+- [x] 試打：用編輯中的草稿直接跑一次，可指定模型比較雲端 / 本地
+- [x] 測試題：任務 + 期望條件（應包含 / 不應包含 / 語言 / 字數 / regex），一鍵全部執行看通過率與紀錄
+- [x] 匯入 / 匯出 YAML
+- [x] 存檔後村子即時更新（登場、換裝、改名、離開）
+
+**B. 教學：使用者在介面上建立翻譯官**
+
+1. 「＋ 新增村民」，填名片：名稱、ID `translator`、描述、技能與請求範例
+2. 選外觀（翻譯官）、點地圖選住處、填關鍵字
+3. 模型選 small、temperature 調低（約 0.2）
+4. 寫 system prompt：自動判斷中翻英 / 英翻中、只輸出譯文、保留格式
+5. 「試打」幾次，把好的任務加入測試題，補上期望條件
+6. 「測試題」全部執行，修改 prompt 後再跑，比較雲端與本地模型
+7. 建立後在村子看到翻譯官，再到問答試三人接力：「寫一首關於海的詩，翻成英文，再改成笑話」
 
 ---
 

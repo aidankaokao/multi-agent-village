@@ -164,6 +164,7 @@ class Villager {
 
 export class VillageScene extends Phaser.Scene {
   private villagers = new Map<string, Villager>();
+  private looks = new Map<string, string>(); // 外觀 / 名字 / 住處，變了就重新登場
   private ready = false;
   private pending: VillagerInfo[] | null = null;
 
@@ -202,21 +203,24 @@ export class VillageScene extends Phaser.Scene {
     this.syncVillagers(this.pending ?? [], false);
   }
 
-  /** 依後端村民清單增減角色（agents/ hot reload 時新村民會淡入登場） */
+  /** 依後端村民清單增減角色（在村民管理新增或修改後，村民會淡入登場） */
   syncVillagers(list: VillagerInfo[], animate = true) {
     if (!this.ready) {
       this.pending = list;
       return;
     }
     const wanted = new Map([MAYOR, ...list].map((v) => [v.id, v]));
+    const look = (v: VillagerInfo) => JSON.stringify([v.sprite, v.name, v.home]);
     for (const [id, v] of this.villagers) {
-      if (!wanted.has(id)) {
+      const info = wanted.get(id);
+      if (!info || look(info) !== this.looks.get(id)) {
         v.destroy();
         this.villagers.delete(id);
       }
     }
     for (const info of wanted.values()) {
       if (this.villagers.has(info.id)) continue;
+      this.looks.set(info.id, look(info));
       const skin = info.sprite && this.manifest.characters[info.sprite] ? info.sprite : "poet";
       const [hx, hy] = info.home ?? this.freeSpot(info.id);
       const v = new Villager(this, info.id, skin, info.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE));

@@ -27,7 +27,6 @@ class AgentOut(BaseModel):
 @router.get("/agents")
 async def list_agents(request: Request):
     registry = request.app.state.ctx.registry
-    registry.refresh()
     agents = [
         AgentOut(
             id=a.id,

@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 
 from village.core.card import AgentSpec
@@ -13,7 +14,7 @@ from village.core.harness import check_output, mask_profanity, normalize, previe
 from village.core.orchestrator import ChatLLM, Plan, Step, direct_reply, make_plan
 from village.core.registry import AgentRegistry
 from village.events import EventBus
-from village.llm.base import ChatMessage, LLMError
+from village.llm.base import ChatMessage, LLMError, TextCallback
 
 log = logging.getLogger("village.executor")
 
@@ -83,7 +84,6 @@ class Runner:
 
     async def run(self, run_id: str, message: str) -> dict:
         emit = self.bus.publish
-        self.registry.refresh()
         agents = self.registry.all()
         await emit("run.started", run_id=run_id, agent=MAYOR, message=message)
         try:
@@ -140,7 +140,14 @@ class Runner:
         try:
             if spec is None:
                 raise LLMError(f"村民「{step.agent}」不存在")
-            await self._run_prompt_agent(run_id, spec, step, r, render_context(step, results, self.registry))
+            async def on_retry(reason: str) -> None:
+                await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=reason)
+
+            await run_prompt_agent(
+                self.llm, spec, step.instruction, render_context(step, results, self.registry), r,
+                on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
+                on_retry=on_retry,
+            )
             r.status = "done"
         except LLMError as e:
             r.status, r.error = "error", str(e)
@@ -153,33 +160,49 @@ class Runner:
         else:
             await emit("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
 
-    async def _run_prompt_agent(self, run_id: str, spec: AgentSpec, step: Step, r: StepResult, context: str) -> None:
-        assert spec.prompt is not None
-        messages = [ChatMessage("user", render_user(spec.prompt.user_template, step.instruction, context))]
-        feedback: str | None = None
-        for attempt in range(STEP_RETRIES + 1):
-            r.attempts = attempt + 1
-            result = await self.llm.chat(
-                spec.model.target,
-                messages,
-                system=spec.prompt.system,
-                temperature=spec.model.temperature,
-                max_tokens=spec.model.max_tokens,
-                on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=spec.id),
-            )
-            text = normalize(result.text)
-            r.output, r.model = text, result.model
-            feedback = check_output(text, spec.checks)
-            if feedback is None:
-                return
-            await self.bus.publish("agent.retry", run_id=run_id, step_id=step.id, agent=spec.id, reason=feedback)
-            messages += [ChatMessage("assistant", text or "（空白）"), ChatMessage("user", feedback)]
 
-        # 重試後仍不合格：髒話直接遮蔽、太長照收但標警告、空白則失敗
-        if not r.output:
-            raise LLMError(feedback or "輸出為空")
-        if profanity_hits(r.output):
-            r.output = mask_profanity(r.output)
-            r.warnings.append("已遮蔽不適當用語")
-        if feedback and "太長" in feedback:
-            r.warnings.append("內容超過長度上限")
+async def run_prompt_agent(
+    llm: ChatLLM,
+    spec: AgentSpec,
+    instruction: str,
+    context: str,
+    r: StepResult,
+    *,
+    on_text: TextCallback | None = None,
+    on_retry: Callable[[str], Awaitable[None]] | None = None,
+    target: str | None = None,
+) -> None:
+    """執行一位 prompt 型村民：呼叫 LLM → harness 檢查 → 不合格帶回饋重做。結果寫進 r。
+
+    問答流程與「村民管理 → 試打 / 測試」共用。target 可指定模型（比較雲端與本地用），預設依村民設定。
+    """
+    assert spec.prompt is not None
+    messages = [ChatMessage("user", render_user(spec.prompt.user_template, instruction, context))]
+    feedback: str | None = None
+    for attempt in range(STEP_RETRIES + 1):
+        r.attempts = attempt + 1
+        result = await llm.chat(
+            target or spec.model.target,
+            messages,
+            system=spec.prompt.system,
+            temperature=spec.model.temperature,
+            max_tokens=spec.model.max_tokens,
+            **({"on_text": on_text} if on_text else {}),
+        )
+        text = normalize(result.text)
+        r.output, r.model = text, result.model
+        feedback = check_output(text, spec.checks)
+        if feedback is None:
+            return
+        if on_retry:
+            await on_retry(feedback)
+        messages += [ChatMessage("assistant", text or "（空白）"), ChatMessage("user", feedback)]
+
+    # 重試後仍不合格：髒話直接遮蔽、太長照收但標警告、空白則失敗
+    if not r.output:
+        raise LLMError(feedback or "輸出為空")
+    if profanity_hits(r.output):
+        r.output = mask_profanity(r.output)
+        r.warnings.append("已遮蔽不適當用語")
+    if feedback and "太長" in feedback:
+        r.warnings.append("內容超過長度上限")

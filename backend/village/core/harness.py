@@ -2,7 +2,7 @@
 
 import re
 
-from village.core.card import Checks
+from village.core.card import Checks, Expect
 
 _THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
 _OPEN_THINK = re.compile(r"<think>.*", re.S | re.I)
@@ -51,3 +51,24 @@ def check_output(text: str, checks: Checks) -> str | None:
     if hits := profanity_hits(text):
         return f"內容含有不適當的用語（{'、'.join(hits)}），請改寫並避免這類字詞。"
     return None
+
+
+_CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
+
+
+def check_expect(text: str, expect: Expect) -> list[str]:
+    """測試題用：回傳沒通過的條件（空 list = 通過）。"""
+    fails: list[str] = []
+    fails += [f"應包含「{w}」" for w in expect.contains if w not in text]
+    fails += [f"不應包含「{w}」" for w in expect.not_contains if w in text]
+    if expect.lang == "en" and _CJK.search(text):
+        fails.append("應為英文，但含有中文字")
+    if expect.lang == "zh" and not _CJK.search(text):
+        fails.append("應為中文，但沒有中文字")
+    if expect.min_chars is not None and len(text) < expect.min_chars:
+        fails.append(f"太短（{len(text)} < {expect.min_chars} 字）")
+    if expect.max_chars is not None and len(text) > expect.max_chars:
+        fails.append(f"太長（{len(text)} > {expect.max_chars} 字）")
+    if expect.regex and not re.search(expect.regex, text):
+        fails.append(f"不符合 regex：{expect.regex}")
+    return fails

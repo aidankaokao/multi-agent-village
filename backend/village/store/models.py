@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from village.store.db import Base
@@ -66,3 +66,17 @@ class ModelTier(Base):
     tier: Mapped[str] = mapped_column(String(16), primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     model_id: Mapped[str] = mapped_column(ForeignKey("llm_models.id", ondelete="CASCADE"))
+
+
+class AgentDef(Base):
+    """村民定義。spec 與 agent.yaml 同格式（card / x-village / model / prompt / validate / tests）。"""
+
+    __tablename__ = "agents"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    spec: Mapped[dict] = mapped_column(JSON)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False)  # 從 agents/ 匯入的內建範例
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)  # 內建範例刪除後保留紀錄，避免重啟又被匯入
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

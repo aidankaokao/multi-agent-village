@@ -128,3 +128,71 @@ export const village = {
   agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
   chat: (message: string) => api<{ run_id: string }>("/api/chat", { method: "POST", json: { message } }),
 };
+
+// ---------------------------------------------------------------- 村民管理
+
+/** 與 agent.yaml 相同的結構 */
+export interface Expect {
+  contains: string[];
+  not_contains: string[];
+  lang: "zh" | "en" | null;
+  min_chars: number | null;
+  max_chars: number | null;
+  regex: string | null;
+}
+
+export interface AgentTest {
+  input: string;
+  context: string;
+  expect: Expect;
+}
+
+export interface AgentSpec {
+  card: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    skills: { id: string; description: string; examples: string[] }[];
+    tags: string[];
+  };
+  "x-village": { sprite: string | null; home: [number, number] | null; keywords: string[] };
+  kind: "prompt";
+  model: { tier: "large" | "small"; model_id: string | null; temperature: number | null; max_tokens: number };
+  prompt: { system: string; user_template: string };
+  validate: { must_not_be_empty: boolean; max_chars: number | null };
+  tests: AgentTest[];
+}
+
+export interface Villager {
+  id: string;
+  enabled: boolean;
+  builtin: boolean;
+  spec: AgentSpec;
+  updated_at: string;
+}
+
+export interface TryResult {
+  ok: boolean;
+  output: string;
+  model: string | null;
+  elapsed_ms: number;
+  attempts: number;
+  warnings: string[];
+  retry_reasons: string[];
+  error: string | null;
+  failures: string[];
+}
+
+export const villagers = {
+  list: () => api<Villager[]>("/api/villagers"),
+  create: (spec: AgentSpec) => api<Villager>("/api/villagers", { method: "POST", json: { spec } }),
+  update: (spec: AgentSpec) => api<Villager>(`/api/villagers/${spec.card.id}`, { method: "PUT", json: { spec } }),
+  setEnabled: (id: string, enabled: boolean) => api<Villager>(`/api/villagers/${id}`, { method: "PATCH", json: { enabled } }),
+  remove: (id: string) => api<void>(`/api/villagers/${id}`, { method: "DELETE" }),
+  restoreBuiltin: () => api<{ restored: string[] }>("/api/villagers/restore-builtin", { method: "POST" }),
+  toYaml: (spec: AgentSpec) => api<{ yaml: string }>("/api/villagers/to-yaml", { method: "POST", json: { spec } }),
+  fromYaml: (yaml: string) => api<{ spec: AgentSpec }>("/api/villagers/from-yaml", { method: "POST", json: { yaml } }),
+  try: (body: { spec: AgentSpec; instruction: string; context?: string; target?: string | null; expect?: Expect }) =>
+    api<TryResult>("/api/villagers/try", { method: "POST", json: body }),
+};

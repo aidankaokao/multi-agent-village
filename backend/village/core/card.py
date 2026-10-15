@@ -1,10 +1,12 @@
-"""Agent 定義（agents/<id>/agent.yaml）的資料模型。
+"""村民（agent）定義的資料模型。
 
+村民在介面上建立並存 DB；agents/<id>/agent.yaml 只是第一次啟動時匯入的內建範例，格式相同。
 card 段落參考 A2A AgentCard；x-village 是村落專屬欄位（外觀、位置、關鍵字備援）。
 """
 
+import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -43,13 +45,45 @@ class ModelConfig(BaseModel):
 
 
 class PromptConfig(BaseModel):
-    system: str
+    system: str = Field(min_length=1)
     user_template: str = "任務：{instruction}\n{context}"
+
+    @model_validator(mode="after")
+    def _has_instruction(self):
+        if "{instruction}" not in self.user_template:
+            raise ValueError("user_template 必須包含 {instruction}，否則村民收不到任務")
+        return self
 
 
 class Checks(BaseModel):
     must_not_be_empty: bool = True
     max_chars: int | None = None
+
+
+class Expect(BaseModel):
+    """測試題的期望條件，全部都要符合才算通過；沒填的不檢查。"""
+
+    contains: list[str] = []
+    not_contains: list[str] = []
+    lang: Literal["zh", "en"] | None = None  # zh：要有中文字；en：不能有中文字
+    min_chars: int | None = None
+    max_chars: int | None = None
+    regex: str | None = None
+
+    @model_validator(mode="after")
+    def _regex_ok(self):
+        if self.regex:
+            try:
+                re.compile(self.regex)
+            except re.error as e:
+                raise ValueError(f"regex 格式錯誤：{e}") from None
+        return self
+
+
+class AgentTest(BaseModel):
+    input: str = Field(min_length=1)  # 村長會給的指示
+    context: str = ""  # 模擬前一步的成果（選填）
+    expect: Expect = Field(default_factory=Expect)
 
 
 class AgentSpec(BaseModel):
@@ -61,6 +95,7 @@ class AgentSpec(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     prompt: PromptConfig | None = None
     checks: Checks = Field(default_factory=Checks, alias="validate")
+    tests: list[AgentTest] = []
 
     @model_validator(mode="after")
     def _prompt_required(self):
@@ -75,6 +110,10 @@ class AgentSpec(BaseModel):
     @property
     def name(self) -> str:
         return self.card.name
+
+    def to_doc(self) -> dict[str, Any]:
+        """存 DB / 匯出 YAML 用的格式（與 agent.yaml 相同的欄位名稱）。"""
+        return self.model_dump(mode="json", by_alias=True)
 
 
 def load_spec(path: Path) -> AgentSpec:

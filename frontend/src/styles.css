@@ -484,3 +484,187 @@ button.example {
 .bubble.village > button.link {
   align-self: flex-start;
 }
+
+/* ---------------------------------------------------------------- 村民管理 */
+
+.layout.wide {
+  grid-template-columns: minmax(0, 1fr) 680px;
+}
+
+.notice {
+  background: #2f4a3a;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.mono {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sprite-thumb {
+  display: inline-block;
+  flex: none;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+  background-color: #1c2030;
+  border: 2px solid var(--line);
+}
+
+.villager-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.villager-row.disabled {
+  opacity: 0.55;
+}
+
+.villager-info {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.clamp {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.villager-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.subtabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--line);
+}
+
+.subtabs button {
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+}
+
+.subtabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.spec-form,
+.lab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  align-items: start;
+}
+
+.sprite-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sprite-pick button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: none;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.sprite-pick button.picked {
+  border-color: var(--accent);
+  background: #4a4320;
+}
+
+.home-map {
+  position: relative;
+  width: 300px;
+  display: grid;
+  background:
+    linear-gradient(90deg, transparent 49%, #c9a36a 49%, #c9a36a 51%, transparent 51%),
+    linear-gradient(0deg, transparent 47%, #c9a36a 47%, #c9a36a 53%, transparent 53%),
+    #5f9e50;
+  border: 2px solid var(--line);
+  cursor: crosshair;
+}
+
+.home-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--line);
+}
+
+.home-dot.other {
+  background: #ece8dc;
+}
+
+.home-dot.me {
+  background: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+.try-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.editor-foot {
+  border-top: 2px solid var(--line);
+  padding-top: 8px;
+}
+
+.row input[type="number"] {
+  min-width: 0;
+}
+
+.card > button.link,
+.lab > button.link,
+section > button.link {
+  align-self: flex-start;
+}
