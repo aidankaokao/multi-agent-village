@@ -10,12 +10,11 @@ services:
     environment:
       TZ: ${TZ:-Asia/Taipei}
       VILLAGE_OLLAMA_URL: ${VILLAGE_OLLAMA_URL:-http://host.docker.internal:11434/v1}
-      # 兩者留空 = 第一次啟動時自動產生並存到 village-secrets volume
-      VILLAGE_ADMIN_TOKEN: ${VILLAGE_ADMIN_TOKEN:-}
-      VILLAGE_MASTER_KEY: ${VILLAGE_MASTER_KEY:-}
+      VILLAGE_ADMIN_TOKEN: ${VILLAGE_ADMIN_TOKEN:-}   # 留空 = LLM 設定不需驗證
+      VILLAGE_MASTER_KEY: ${VILLAGE_MASTER_KEY:-}     # 留空 = 自動產生並存到 village-secrets volume
     volumes:
       - village-data:/data        # SQLite DB
-      - village-secrets:/config   # 主金鑰、admin token（與 DB 分開，備份 DB 不會帶走金鑰）
+      - village-secrets:/config   # 主金鑰（與 DB 分開，備份 DB 不會帶走金鑰）
     extra_hosts:
       - "host.docker.internal:host-gateway"  # Linux 也能連主機上的 Ollama
     restart: unless-stopped
@@ -29,7 +28,7 @@ services:
         NODE_VERSION: ${NODE_VERSION:-20}
         NGINX_VERSION: ${NGINX_VERSION:-1.27}
     ports:
-      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:?請在 .env 填入 FRONTEND_PORT}:80"
+      - "${FRONTEND_PORT:?請在 .env 填入 FRONTEND_PORT}:80"
     environment:
       TZ: ${TZ:-Asia/Taipei}
     depends_on:

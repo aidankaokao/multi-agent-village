@@ -15,7 +15,8 @@ const FALLBACK_URL: Record<ProviderKind, string> = {
 
 export function LlmSettings() {
   const [token, setToken] = useState(getAdminToken());
-  const [authed, setAuthed] = useState(false);
+  // 只有後端設定了 VILLAGE_ADMIN_TOKEN 並回 401 時才要求輸入
+  const [needToken, setNeedToken] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [tiers, setTiers] = useState<Tiers>({ large: [], small: [] });
@@ -27,16 +28,16 @@ export function LlmSettings() {
       setProviders(p);
       setModels(m);
       setTiers(t);
-      setAuthed(true);
+      setNeedToken(false);
       setError("");
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setAuthed(false);
+      if (e instanceof ApiError && e.status === 401) setNeedToken(true);
       setError(String((e as Error).message));
     }
   }, []);
 
   useEffect(() => {
-    if (token) reload();
+    reload();
   }, [token, reload]);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -48,13 +49,12 @@ export function LlmSettings() {
     }
   };
 
-  if (!authed) {
+  if (needToken) {
     return (
       <div className="panel-body">
         <h3>管理員驗證</h3>
         <p className="hint">
-          LLM 設定含 API key，需要 admin token。請在終端機執行 <code>cat ~/.config/multi-agent-village/admin.token</code>，
-          把內容貼到下面。
+          後端設定了 <code>VILLAGE_ADMIN_TOKEN</code>，請輸入 .env 裡的同一個值。
         </p>
         <form
           onSubmit={(e) => {

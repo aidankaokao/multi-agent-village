@@ -25,9 +25,9 @@
 
 - 後端：`cd backend && uv run village serve`（127.0.0.1:8000）；測試 `uv run pytest`
 - 前端：`cd frontend && npm run dev`（5173，/api 與 /ws 代理到後端）；型別檢查 `npx tsc -b`
-- admin token：`cat ~/.config/multi-agent-village/admin.token`（LLM 設定頁要貼）
+- admin token 為選用：只有設定 `VILLAGE_ADMIN_TOKEN` 時設定 API 才驗證（使用者覺得麻煩，預設關閉）
 - 主金鑰輪替：`cd backend && uv run village rotate-key`
 - 重新產生佔位 sprites：`python3 scripts/gen_placeholder_sprites.py`
-- 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh`；只有 docker-compose（無 docker compose plugin）
+- 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh`（只 build image）→ 使用者自己執行 `docker-compose up -d`；前端綁 0.0.0.0。本機只有 docker-compose（無 docker compose plugin）
 - `cryptography` 釘在 `<47`：47+ 的 aarch64 wheel 在本機 Docker VM 會 SIGILL（exit 132）
 - DB schema 目前用 `create_all`，改欄位時要刪掉 `data/village.db` 重建（Phase 5 前導入 Alembic）

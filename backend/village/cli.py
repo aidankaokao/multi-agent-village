@@ -2,7 +2,6 @@
 
   village serve          啟動後端（預設 127.0.0.1:8000）
   village rotate-key     產生新主金鑰版本並重新加密所有 API key
-  village admin-token    顯示 admin token 檔案位置
 """
 
 import argparse
@@ -11,7 +10,6 @@ import asyncio
 from sqlalchemy import select
 
 from village.config import Settings
-from village.security.admin import ADMIN_TOKEN_FILENAME
 from village.security.crypto import SecretBox, keyring_from_env, keyring_path, load_keyring, save_keyring
 from village.store.db import init_db, make_engine, make_sessionmaker
 from village.store.models import LlmProvider
@@ -46,7 +44,6 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve")
     sub.add_parser("rotate-key")
-    sub.add_parser("admin-token")
     args = parser.parse_args()
     settings = Settings.from_env()
 
@@ -56,5 +53,3 @@ def main() -> None:
         run()
     elif args.cmd == "rotate-key":
         asyncio.run(rotate_key(settings))
-    elif args.cmd == "admin-token":
-        print(settings.config_dir / ADMIN_TOKEN_FILENAME)

@@ -10,7 +10,7 @@ from village.api.llm import router as llm_router
 from village.config import Settings
 from village.events import EventBus
 from village.llm.service import ClientFactory, LLMService
-from village.security.admin import ADMIN_TOKEN_FILENAME, load_admin_token
+from village.security.admin import load_admin_token
 from village.security.crypto import SecretBox, load_keyring
 from village.security.redact import install_log_redaction
 from village.store.db import init_db, make_engine, make_sessionmaker
@@ -26,7 +26,7 @@ class AppContext:
     box: SecretBox
     llm: LLMService
     bus: EventBus
-    admin_token: str
+    admin_token: str | None
 
 
 def create_app(settings: Settings | None = None, client_factory: ClientFactory | None = None) -> FastAPI:
@@ -46,9 +46,10 @@ def create_app(settings: Settings | None = None, client_factory: ClientFactory |
             box=box,
             llm=LLMService(sm, box, client_factory),
             bus=EventBus(),
-            admin_token=load_admin_token(settings.config_dir),
+            admin_token=load_admin_token(),
         )
-        log.warning("admin token：cat %s", settings.config_dir / ADMIN_TOKEN_FILENAME)
+        if app.state.ctx.admin_token is None:
+            log.warning("未設定 VILLAGE_ADMIN_TOKEN：LLM 設定 API 不需驗證")
         yield
         await engine.dispose()
 

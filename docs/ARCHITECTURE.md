@@ -215,7 +215,7 @@ api_key_ct + api_key_nonce  ──存 SQLite/Postgres──
 - **只寫不讀**：API 永遠不回傳明文 key，只回 `api_key_hint`；UI 上是「已設定 / 重新輸入」。更新時沒填 key 就保留原值
 - **用時才解密**：只在發出 LLM 請求的當下解密，存在記憶體；log、trace、錯誤訊息都經過遮罩（redaction），不會印出 key
 - **輪替**：`uv run village secrets rotate`，用新主金鑰重新加密所有列，`key_version` +1
-- **存取控制**：設定頁 API 需要 admin 身分。帳號系統（Phase 5）完成前，後端預設只綁 `127.0.0.1`，並要求一個啟動時產生的 admin token
+- **存取控制**：帳號系統（Phase 5）完成前，設定頁 API 預設不驗證；設定 `VILLAGE_ADMIN_TOKEN` 後才要求 Bearer token。即使不驗證，API 也拿不到明文 key（只寫不讀）
 - **git 防線**：`.gitignore` 排除 `*.db`、`data/`、`.env`、`*.key`；另可加 pre-commit 的 secret 掃描（gitleaks）
 
 #### 這個設計擋得住什麼

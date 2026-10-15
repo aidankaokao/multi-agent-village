@@ -38,11 +38,8 @@ async def env(tmp_path, monkeypatch):
     settings = Settings(database_url=f"sqlite+aiosqlite:///{db}", config_dir=tmp_path / "cfg")
     app = create_app(settings, client_factory=FakeClient)
     async with app.router.lifespan_context(app):
-        token = app.state.ctx.admin_token
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://t", headers={"Authorization": f"Bearer {token}"}
-        ) as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             yield c, db
 
 
@@ -54,10 +51,19 @@ async def _provider(c, name="cloud", base_url="http://cloud/v1", api_key=SECRET)
     return r.json()
 
 
-async def test_requires_admin_token(env):
+async def test_no_admin_token_by_default(env):
     c, _ = env
+    r = await c.get("/api/llm/providers", headers={"Authorization": ""})
+    assert r.status_code == 200
+
+
+async def test_admin_token_enforced_when_set(env):
+    c, _ = env
+    c._transport.app.state.ctx.admin_token = "s3cret-token"
     r = await c.get("/api/llm/providers", headers={"Authorization": "Bearer wrong"})
     assert r.status_code == 401
+    r = await c.get("/api/llm/providers", headers={"Authorization": "Bearer s3cret-token"})
+    assert r.status_code == 200
 
 
 async def test_api_key_never_returned_and_encrypted_at_rest(env):
