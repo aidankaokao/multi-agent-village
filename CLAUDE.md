@@ -28,4 +28,6 @@
 - admin token：`cat ~/.config/multi-agent-village/admin.token`（LLM 設定頁要貼）
 - 主金鑰輪替：`cd backend && uv run village rotate-key`
 - 重新產生佔位 sprites：`python3 scripts/gen_placeholder_sprites.py`
+- 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh`；只有 docker-compose（無 docker compose plugin）
+- `cryptography` 釘在 `<47`：47+ 的 aarch64 wheel 在本機 Docker VM 會 SIGILL（exit 132）
 - DB schema 目前用 `create_all`，改欄位時要刪掉 `data/village.db` 重建（Phase 5 前導入 Alembic）

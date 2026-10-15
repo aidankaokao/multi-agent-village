@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -6,7 +7,8 @@ ProviderKind = Literal["openai_compat", "ollama", "anthropic"]
 ReasoningEffort = Literal["none", "low", "medium", "high"]
 
 DEFAULT_BASE_URLS: dict[str, str | None] = {
-    "ollama": "http://localhost:11434/v1",
+    # 容器內要連主機上的 Ollama 時設 VILLAGE_OLLAMA_URL=http://host.docker.internal:11434/v1
+    "ollama": os.environ.get("VILLAGE_OLLAMA_URL") or "http://localhost:11434/v1",
     "openai_compat": None,  # 必填，例如 https://api.openai.com/v1
     "anthropic": None,  # 留空 = 官方端點
 }

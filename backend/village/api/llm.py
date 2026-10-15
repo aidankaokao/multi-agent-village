@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from village.llm.base import ChatMessage, LLMError, ProviderKind, ReasoningEffort
+from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, LLMError, ProviderKind, ReasoningEffort
 from village.llm.service import TIERS, LLMService
 from village.security.admin import require_admin
 from village.security.crypto import SecretBox, secret_hint
@@ -155,6 +155,12 @@ def _model_out(m: LlmModel) -> ModelOut:
 
 
 # ---------------------------------------------------------------- providers
+
+
+@router.get("/defaults")
+async def defaults():
+    """新增 provider 表單的預設值（依部署環境而不同，例如容器內的 Ollama 位址）。"""
+    return {"base_urls": DEFAULT_BASE_URLS}
 
 
 @router.get("/providers", response_model=list[ProviderOut])

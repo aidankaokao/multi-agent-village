@@ -8,7 +8,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.20",
-    "cryptography>=43",
+    # 47+ 的 linux/aarch64 wheel 在 Docker Desktop (Apple Silicon) VM 上會 SIGILL（exit 132），先釘在 46.x
+    "cryptography>=43,<47",
     "httpx>=0.27",
     "anthropic>=0.40",
     "pydantic>=2.8",

@@ -91,6 +91,7 @@ export interface Tiers {
 }
 
 export const llm = {
+  defaults: () => api<{ base_urls: Partial<Record<ProviderKind, string | null>> }>("/api/llm/defaults"),
   providers: () => api<Provider[]>("/api/llm/providers"),
   createProvider: (body: { name: string; kind: ProviderKind; base_url?: string; api_key?: string }) =>
     api<Provider>("/api/llm/providers", { method: "POST", json: body }),

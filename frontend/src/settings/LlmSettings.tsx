@@ -7,7 +7,7 @@ const KIND_LABEL: Record<ProviderKind, string> = {
   anthropic: "Anthropic（Claude）",
 };
 
-const DEFAULT_URL: Record<ProviderKind, string> = {
+const FALLBACK_URL: Record<ProviderKind, string> = {
   ollama: "http://localhost:11434/v1",
   openai_compat: "https://api.openai.com/v1",
   anthropic: "",
@@ -90,6 +90,13 @@ export function LlmSettings() {
 
 function ProviderSection({ providers, models, run }: { providers: Provider[]; models: Model[]; run: (fn: () => Promise<unknown>) => Promise<void> }) {
   const [kind, setKind] = useState<ProviderKind>("ollama");
+  const [defaultUrl, setDefaultUrl] = useState(FALLBACK_URL);
+  useEffect(() => {
+    llm
+      .defaults()
+      .then((d) => setDefaultUrl((f) => ({ ...f, ...Object.fromEntries(Object.entries(d.base_urls).filter(([, v]) => v)) })))
+      .catch(() => {});
+  }, []);
   const [remote, setRemote] = useState<Record<string, RemoteModel[] | string>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
 
@@ -203,7 +210,7 @@ function ProviderSection({ providers, models, run }: { providers: Provider[]; mo
           ))}
         </select>
         <input name="name" required placeholder="名稱，例如 本機 Ollama" />
-        <input name="base_url" key={kind} defaultValue={DEFAULT_URL[kind]} placeholder={kind === "anthropic" ? "留空 = 官方端點" : "base URL"} />
+        <input name="base_url" key={kind + defaultUrl[kind]} defaultValue={defaultUrl[kind]} placeholder={kind === "anthropic" ? "留空 = 官方端點" : "base URL"} />
         <input name="api_key" type="password" autoComplete="new-password" placeholder={kind === "ollama" ? "API key（本地通常留空）" : "API key"} />
         <p className="hint">API key 送出後以 AES-256-GCM 加密存入資料庫，之後畫面只會顯示遮罩。</p>
         <button type="submit">新增</button>

@@ -151,3 +151,9 @@ async def test_truncated_empty_output_falls_back_and_effort_is_passed(env):
 
     r = await c.patch(f"/api/llm/models/{b['id']}", json={"reasoning_effort": "bogus"})
     assert r.status_code == 422
+
+
+async def test_defaults_endpoint(env):
+    c, _ = env
+    r = await c.get("/api/llm/defaults")
+    assert r.json()["base_urls"]["ollama"].endswith("/v1")
