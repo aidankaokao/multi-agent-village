@@ -50,6 +50,9 @@ echo "==> 專案 ${COMPOSE_PROJECT_NAME}，版本 ${IMAGE_TAG}"
 # build 不需要 port；FRONTEND_PORT 還沒填時給暫時值，避免 compose 檔驗證失敗
 FRONTEND_PORT="${FRONTEND_PORT:-0}" "${COMPOSE[@]}" build $NO_CACHE
 
+# 同一個 tag 重新 build 時，舊 image 會失去 tag 變成 <none>；只清掉本專案的
+docker image prune -f --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" >/dev/null
+
 echo
 echo "✅ build 完成："
 docker images --format '   {{.Repository}}:{{.Tag}}  ({{.Size}})' \
