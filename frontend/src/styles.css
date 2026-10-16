@@ -22,33 +22,25 @@ body {
   background: var(--bg);
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 440px;
-  height: 100vh;
+/* ---------------------------------------------------------------- 版面：滿版地圖 + 懸浮按鈕 + 抽屜 + 問答視窗 */
+
+.stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  --drawer-w: min(720px, 100vw);
 }
 
-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 12px;
-  gap: 8px;
-}
-
-header h1 {
-  margin: 0;
-  font-size: 18px;
-  letter-spacing: 1px;
-  color: var(--accent);
+.map {
+  position: absolute;
+  inset: 0;
 }
 
 .village-canvas {
-  flex: 1;
-  min-height: 0;
-  border: 4px solid var(--line);
-  box-shadow: 0 0 0 2px #4a5270;
-  background: #1c2030;
+  width: 100%;
+  height: 100%;
+  /* 螢幕比例和地圖（3:2）不同時，兩側用草地色延伸，不留黑邊 */
+  background: #5f9c4e;
   image-rendering: pixelated;
   display: flex;
   align-items: center;
@@ -56,32 +48,228 @@ header h1 {
   overflow: hidden;
 }
 
-aside {
+.village-name {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 10px;
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  background: #1b1b2acc;
+  border: 2px solid var(--line);
+  pointer-events: none;
+}
+
+button.fab {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  font-size: 22px;
+  border-radius: 50%;
+  box-shadow: 3px 3px 0 var(--line);
+  position: relative;
+}
+
+.fab-menu {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  z-index: 20;
+}
+
+button.fab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  animation: fab-drop 180ms ease-out backwards;
+}
+
+.fab-label {
+  padding: 4px 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 2px solid var(--line);
+  font-size: 13px;
+  box-shadow: 2px 2px 0 var(--line);
+}
+
+.fab-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: var(--card);
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  box-shadow: 2px 2px 0 var(--line);
+}
+
+button.fab-item:hover .fab-icon,
+button.fab-item:hover .fab-label {
+  border-color: var(--accent);
+}
+
+@keyframes fab-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+}
+
+/* 右側抽屜 */
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--drawer-w);
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border-left: 4px solid var(--line);
+  box-shadow: -6px 0 0 #0004;
+  z-index: 30;
+  animation: drawer-in 200ms ease-out;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 4px solid var(--line);
+  background: var(--card);
+}
+
+.drawer-tabs {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+}
+
+.drawer-tabs button {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  color: var(--muted);
+  padding: 12px 14px;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+
+.drawer-tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--panel);
+}
+
+.drawer-close {
+  padding: 0 16px;
+  font-size: 16px;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-body > .panel-body {
+  flex: 1;
   min-height: 0;
 }
 
-.tabs {
-  display: flex;
+/* 右下問答 */
+.chat-fab {
+  position: absolute !important;
+  right: 16px;
+  bottom: 16px;
+  z-index: 25;
 }
 
-.tabs button {
-  flex: 1;
-  border-radius: 0;
-  border: none;
-  border-bottom: 4px solid var(--line);
-  background: var(--card);
-  color: var(--muted);
-  padding: 12px;
+.chat-fab.busy::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  animation: spin 0.9s linear infinite;
 }
 
-.tabs button.active {
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fab-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 2px solid var(--line);
+}
+
+.with-drawer .chat-fab {
+  right: calc(var(--drawer-w) + 16px);
+}
+
+.chat-window {
+  position: absolute;
+  right: 16px;
+  bottom: 80px;
+  width: min(440px, calc(100vw - 32px));
+  height: min(660px, calc(100vh - 160px)); /* 留出右上角 ⚙️ 的位置 */
+  flex-direction: column;
   background: var(--panel);
+  border: 4px solid var(--line);
+  box-shadow: 6px 6px 0 var(--line);
+  z-index: 24;
+  animation: modal-in 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  transform-origin: bottom right;
+}
+
+.chat-window-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--card);
+  border-bottom: 2px solid var(--line);
   color: var(--accent);
-  border-bottom-color: var(--accent);
+}
+
+.chat-window .chat {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 760px) {
+  .with-drawer .chat-fab {
+    display: none; /* 手機上抽屜滿版，關掉抽屜再用問答 */
+  }
 }
 
 .panel-body {
@@ -290,25 +478,9 @@ td {
   border-bottom: 1px solid var(--line);
 }
 
-@media (max-width: 900px) {
-  .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: 50vh 1fr;
-    height: auto;
-  }
-  aside {
-    border-left: none;
-    border-top: 4px solid var(--line);
-  }
-}
+
 
 /* ---------------------------------------------------------------- 問答 */
-
-.tab-pane {
-  flex: 1;
-  min-height: 0;
-  flex-direction: column;
-}
 
 .chat {
   flex: 1;
@@ -487,9 +659,7 @@ button.example {
 
 /* ---------------------------------------------------------------- 村民管理 */
 
-.layout.wide {
-  grid-template-columns: minmax(0, 1fr) 680px;
-}
+
 
 .notice {
   background: #2f4a3a;
@@ -779,7 +949,10 @@ details summary {
 
 @media (prefers-reduced-motion: reduce) {
   .modal-backdrop,
-  .modal {
+  .modal,
+  .drawer,
+  .chat-window,
+  button.fab-item {
     animation: none;
   }
 }

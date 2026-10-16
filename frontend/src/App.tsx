@@ -10,23 +10,31 @@ import { VillagerManager } from "./villagers/VillagerManager";
 import { VillageCanvas, type VillageHandle } from "./village/VillageCanvas";
 import type { VillagerInfo } from "./village/VillageScene";
 
-type Tab = "chat" | "villagers" | "traces" | "rules" | "llm";
+type Page = "villagers" | "traces" | "rules" | "llm";
 
-const TABS: [Tab, string][] = [
-  ["chat", "問答"],
-  ["villagers", "村民"],
-  ["traces", "紀錄"],
-  ["rules", "村規"],
-  ["llm", "LLM 設定"],
+const PAGES: { id: Page; icon: string; label: string }[] = [
+  { id: "villagers", icon: "🧑‍🌾", label: "村民" },
+  { id: "traces", icon: "📜", label: "紀錄" },
+  { id: "rules", icon: "⚖️", label: "村規" },
+  { id: "llm", icon: "🧠", label: "LLM 設定" },
 ];
 
+/**
+ * 版面：像素地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
+ * 右下 💬 打開問答視窗。抽屜與問答視窗同時只開一個（進行中的問答不受影響）。
+ */
 export function App() {
   const villageRef = useRef<VillageHandle>(null);
-  const [tab, setTab] = useState<Tab>("chat");
+  const [page, setPage] = useState<Page | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unseen, setUnseen] = useState(false); // 問答視窗收著時有問答完成 → 💬 上的紅點
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [runs, dispatch] = useReducer(runsReducer, initialRuns);
   const [traceId, setTraceId] = useState<string | null>(null); // 從問答跳到某筆紀錄
   const [traceTick, setTraceTick] = useState(0); // 問答結束 → 紀錄列表重新整理
+  const chatOpenRef = useRef(chatOpen);
+  chatOpenRef.current = chatOpen;
 
   const loadAgents = useCallback(() => {
     village
@@ -41,13 +49,44 @@ export function App() {
     villageRef.current?.dispatch(e);
     if (e.type === "agents.changed") loadAgents();
     else dispatch({ type: "event", event: e });
-    if (["run.finished", "run.failed", "run.cancelled"].includes(e.type)) setTraceTick((n) => n + 1);
+    if (["run.finished", "run.failed", "run.cancelled"].includes(e.type)) {
+      setTraceTick((n) => n + 1);
+      if (!chatOpenRef.current && e.run_id && runs.byId[e.run_id]) setUnseen(true);
+    }
   });
 
   const villagers = useMemo<VillagerInfo[]>(
     () => agents.map((a) => ({ id: a.id, name: a.name, sprite: a.sprite, home: a.home })),
     [agents],
   );
+  const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));
+
+  const openPage = (p: Page | null) => {
+    setPage(p);
+    setMenuOpen(false);
+    if (p) setChatOpen(false);
+  };
+  const toggleChat = () => {
+    const next = !chatOpen;
+    setChatOpen(next);
+    if (next) {
+      setPage(null);
+      setMenuOpen(false);
+      setUnseen(false);
+    }
+  };
+
+  // Esc：先關選單，再關抽屜 / 問答視窗；抽屜裡還有彈窗時交給彈窗處理
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || document.querySelector(".modal-backdrop")) return;
+      if (menuOpen) setMenuOpen(false);
+      else if (page) setPage(null);
+      else if (chatOpen) setChatOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen, page, chatOpen]);
 
   const clearTraceId = useCallback(() => setTraceId(null), []);
 
@@ -56,41 +95,80 @@ export function App() {
     dispatch({ type: "local", run_id, message });
   };
 
+  const current = PAGES.find((p) => p.id === page);
+
   return (
-    <div className={`layout ${tab === "villagers" || tab === "traces" ? "wide" : ""}`}>
-      <main>
-        <header>
-          <h1>Multi-Agent Village</h1>
-        </header>
+    <div className={`stage ${page ? "with-drawer" : ""}`}>
+      <div className="map" onMouseDown={() => setMenuOpen(false)}>
         <VillageCanvas ref={villageRef} villagers={villagers} />
-      </main>
-      <aside>
-        <nav className="tabs">
-          {TABS.map(([k, label]) => (
-            <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
-              {label}
-            </button>
-          ))}
+      </div>
+      <div className="village-name">Multi-Agent Village</div>
+
+      {/* 右上：頁面選單（抽屜打開時改用抽屜上方的切換列） */}
+      {!page && (
+        <nav className={`fab-menu ${menuOpen ? "open" : ""}`}>
+          <button className="fab" onClick={() => setMenuOpen(!menuOpen)} title="選單" aria-expanded={menuOpen}>
+            {menuOpen ? "✕" : "⚙️"}
+          </button>
+          {menuOpen &&
+            PAGES.map((p, i) => (
+              <button key={p.id} className="fab-item" style={{ animationDelay: `${i * 40}ms` }} onClick={() => openPage(p.id)}>
+                <span className="fab-label">{p.label}</span>
+                <span className="fab-icon">{p.icon}</span>
+              </button>
+            ))}
         </nav>
-        {/* 問答分頁切走時保留狀態，所以用 display 切換而不是卸載 */}
-        <div className="tab-pane" style={{ display: tab === "chat" ? "flex" : "none" }}>
-          <ChatPanel
-            runs={runs}
-            agents={agents}
-            onSend={send}
-            onReset={() => dispatch({ type: "reset" })}
-            onCancel={async (id) => void (await village.cancel(id))}
-            onOpenTrace={(id) => {
-              setTraceId(id);
-              setTab("traces");
-            }}
-          />
+      )}
+
+      {/* 右側抽屜：各設定頁 */}
+      {current && (
+        <aside className="drawer" key="drawer">
+          <div className="drawer-head">
+            <nav className="drawer-tabs">
+              {PAGES.map((p) => (
+                <button key={p.id} className={p.id === page ? "active" : ""} onClick={() => openPage(p.id)} title={p.label}>
+                  <span>{p.icon}</span> {p.label}
+                </button>
+              ))}
+            </nav>
+            <button className="link drawer-close" onClick={() => openPage(null)} title="關閉（Esc）">
+              ✕
+            </button>
+          </div>
+          <div className="drawer-body">
+            {page === "villagers" && <VillagerManager />}
+            {page === "traces" && <TracePanel agents={agents} openId={traceId} onOpened={clearTraceId} refreshKey={traceTick} />}
+            {page === "rules" && <RulesPanel />}
+            {page === "llm" && <LlmSettings />}
+          </div>
+        </aside>
+      )}
+
+      {/* 右下：問答。收起時用 display 隱藏而不卸載，進行中的問答與輸入的文字都保留 */}
+      <div className="chat-window" style={{ display: chatOpen ? "flex" : "none" }}>
+        <div className="chat-window-head">
+          <strong>💬 問答</strong>
+          <span style={{ flex: 1 }} />
+          <button className="link" onClick={toggleChat} title="收起（Esc）">
+            ▾
+          </button>
         </div>
-        {tab === "villagers" && <VillagerManager />}
-        {tab === "traces" && <TracePanel agents={agents} openId={traceId} onOpened={clearTraceId} refreshKey={traceTick} />}
-        {tab === "rules" && <RulesPanel />}
-        {tab === "llm" && <LlmSettings />}
-      </aside>
+        <ChatPanel
+          runs={runs}
+          agents={agents}
+          onSend={send}
+          onReset={() => dispatch({ type: "reset" })}
+          onCancel={async (id) => void (await village.cancel(id))}
+          onOpenTrace={(id) => {
+            setTraceId(id);
+            openPage("traces");
+          }}
+        />
+      </div>
+      <button className={`fab chat-fab ${busy ? "busy" : ""}`} onClick={toggleChat} title={chatOpen ? "收起問答" : "打開問答"}>
+        {chatOpen ? "▾" : "💬"}
+        {unseen && !chatOpen && <span className="fab-dot" />}
+      </button>
     </div>
   );
 }
