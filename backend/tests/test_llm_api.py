@@ -295,6 +295,20 @@ async def test_openai_compat_adapts_unsupported_params():
     assert r.text == "ok" and len(calls) == 2
     assert "reasoning_effort" not in calls[-1] and calls[-1]["temperature"] == 0.2 and calls[-1]["max_tokens"] == 10
 
+    # OpenRouter GLM 5.3：一定要思考，none 不行 → 改 low
+    def handler_glm(request: httpx.Request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if body.get("reasoning_effort") in (None, "none"):
+            msg = "Reasoning is mandatory for this endpoint and cannot be disabled."
+            return httpx.Response(400, json={"error": {"message": msg, "code": 400, "metadata": {"provider_name": None}}})
+        return httpx.Response(200, json={"model": "glm", "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]})
+
+    calls.clear()
+    client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler_glm))
+    r = await client.chat("z-ai/glm-5.3", [ChatMessage("user", "hi")], max_tokens=10, reasoning_effort="none")
+    assert r.text == "ok" and len(calls) == 2 and calls[-1]["reasoning_effort"] == "low"
+
     # 其他 400（不是參數問題）照常失敗，不會無限重試
     def handler2(request):
         return httpx.Response(400, json={"error": {"message": "bad key", "code": "invalid_api_key"}})

@@ -28,6 +28,8 @@ class ParamError(LLMError):
 
 
 _UNRECOGNIZED = re.compile(r"Unrecognized request arguments? supplied:\s*([A-Za-z_]+)")
+# OpenRouter 等：一定要思考的模型（如 GLM 5.3）不能把思考關掉
+_REASONING_REQUIRED = re.compile(r"reasoning is (mandatory|required)|cannot disable reasoning|reasoning.{0,40}cannot be disabled", re.I)
 
 
 def _http_error(status: int, text: str) -> LLMError:
@@ -42,8 +44,11 @@ def _http_error(status: int, text: str) -> LLMError:
         if err.get("param") and err.get("code") in ("unsupported_parameter", "unsupported_value"):
             return ParamError(msg, err["param"], err["code"])
         # 舊模型（如 gpt-4o-mini）param 是 null，參數名只寫在訊息裡
-        if m := _UNRECOGNIZED.search(str(err.get("message") or "")):
+        message = str(err.get("message") or "")
+        if m := _UNRECOGNIZED.search(message):
             return ParamError(msg, m.group(1), "unsupported_parameter")
+        if _REASONING_REQUIRED.search(message):
+            return ParamError(msg, "reasoning_effort", "reasoning_required")
     return LLMError(msg)
 
 
@@ -57,6 +62,8 @@ def _quirk_for(param: str, code: str, body: dict) -> str | None:
         # gpt-5 有這個參數但沒有 none 這個值 → 改 minimal；非思考型模型（gpt-4o-mini）根本不認得 → 拿掉
         if code == "unsupported_value" and body["reasoning_effort"] == "none":
             return "minimal_effort"
+        if code == "reasoning_required":  # 一定要思考的模型：用最省的 low
+            return "low_effort" if body["reasoning_effort"] in ("none", "minimal") else None
         return "no_reasoning_effort"
     if param == "stream" and body.get("stream"):
         return "no_stream"  # 例如 OpenAI 組織未驗證時不能串流 gpt-5
@@ -71,6 +78,8 @@ def _apply(body: dict, quirks: set[str]) -> dict:
         b.pop("temperature", None)
     if "no_reasoning_effort" in quirks:
         b.pop("reasoning_effort", None)
+    elif "low_effort" in quirks and b.get("reasoning_effort") in ("none", "minimal"):
+        b["reasoning_effort"] = "low"
     elif "minimal_effort" in quirks and b.get("reasoning_effort") == "none":
         b["reasoning_effort"] = "minimal"
     if "no_stream" in quirks:
