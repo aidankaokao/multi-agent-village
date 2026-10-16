@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Modal } from "../ui/Modal";
 import { ApiError, getAdminToken, llm, setAdminToken, type Model, type Provider, type ProviderKind, type ReasoningEffort, type RemoteModel, type Tiers } from "../api";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
@@ -21,6 +22,7 @@ export function LlmSettings() {
   const [models, setModels] = useState<Model[]>([]);
   const [tiers, setTiers] = useState<Tiers>({ large: [], small: [] });
   const [error, setError] = useState("");
+  const [sub, setSub] = useState<Sub | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -28,6 +30,7 @@ export function LlmSettings() {
       setProviders(p);
       setModels(m);
       setTiers(t);
+      setSub((s) => s ?? (p.length === 0 ? "providers" : "tiers")); // 第一次使用直接到供應商
       setNeedToken(false);
       setError("");
     } catch (e) {
@@ -40,12 +43,14 @@ export function LlmSettings() {
     reload();
   }, [token, reload]);
 
-  const run = async (fn: () => Promise<unknown>) => {
+  const run: Run = async (fn) => {
     try {
       await fn();
       await reload();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     }
   };
 
@@ -75,21 +80,181 @@ export function LlmSettings() {
   return (
     <div className="panel-body">
       {error && (
-        <p className="error" onClick={() => setError("")}>
+        <p className="error toast" onClick={() => setError("")}>
           {error}（點擊關閉）
         </p>
       )}
-      <ProviderSection providers={providers} models={models} run={run} />
-      <TierSection models={models} tiers={tiers} run={run} />
-      <TrySection models={models} />
+      <nav className="subtabs">
+        {(
+          [
+            ["tiers", "分級"],
+            ["models", `模型（${models.length}）`],
+            ["providers", `供應商（${providers.length}）`],
+            ["try", "試打"],
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} className={sub === k ? "active" : ""} onClick={() => setSub(k)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+      {sub === "tiers" && <TierSection models={models} tiers={tiers} run={run} goto={setSub} />}
+      {sub === "models" && <ModelSection models={models} tiers={tiers} run={run} goto={setSub} />}
+      {sub === "providers" && <ProviderSection providers={providers} models={models} run={run} />}
+      {sub === "try" && <TrySection models={models} />}
     </div>
   );
 }
 
+type Sub = "tiers" | "models" | "providers" | "try";
+type Run = (fn: () => Promise<unknown>) => Promise<boolean>;
+
 // ---------------------------------------------------------------- providers
 
-function ProviderSection({ providers, models, run }: { providers: Provider[]; models: Model[]; run: (fn: () => Promise<unknown>) => Promise<void> }) {
-  const [kind, setKind] = useState<ProviderKind>("ollama");
+function ProviderSection({ providers, models, run }: { providers: Provider[]; models: Model[]; run: Run }) {
+  const [managing, setManaging] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const current = providers.find((p) => p.id === managing);
+
+  return (
+    <section>
+      <p className="hint">供應商 = 模型從哪裡來（本機 Ollama、OpenAI、OpenRouter、Anthropic…）。按「管理」可以換 API key、列出並註冊模型。</p>
+      {providers.map((p) => (
+        <div key={p.id} className={`card list-row ${p.enabled ? "" : "disabled"}`}>
+          <div className="list-main">
+            <div className="row">
+              <strong>{p.name}</strong>
+              <span className="tag">{p.kind}</span>
+              <span className="muted">{models.filter((m) => m.provider_id === p.id).length} 個模型</span>
+            </div>
+            <div className="muted clamp">
+              {p.base_url || "（官方預設端點）"}・{p.has_api_key ? `🔒 ${p.api_key_hint}` : "未設定 API key"}
+            </div>
+          </div>
+          <label className="toggle">
+            <input type="checkbox" checked={p.enabled} onChange={(e) => run(() => llm.updateProvider(p.id, { enabled: e.target.checked }))} />
+            啟用
+          </label>
+          <button onClick={() => setManaging(p.id)}>管理</button>
+        </div>
+      ))}
+      <button className="link" onClick={() => setAdding(true)}>
+        ＋ 新增供應商
+      </button>
+      {current && <ProviderModal p={current} models={models} run={run} onClose={() => setManaging(null)} />}
+      {adding && <AddProviderModal run={run} onClose={() => setAdding(false)} />}
+    </section>
+  );
+}
+
+function ProviderModal({ p, models, run, onClose }: { p: Provider; models: Model[]; run: Run; onClose: () => void }) {
+  const [remote, setRemote] = useState<RemoteModel[] | string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const registered = models.filter((m) => m.provider_id === p.id);
+
+  const listRemote = async () => {
+    setRemote("連線中…");
+    try {
+      setRemote(await llm.remoteModels(p.id));
+    } catch (e) {
+      setRemote(`❌ ${(e as Error).message}`);
+    }
+  };
+  const shown = Array.isArray(remote) ? remote.filter((m) => m.id.toLowerCase().includes(filter.trim().toLowerCase())) : [];
+
+  return (
+    <Modal title={`管理供應商：${p.name}`} onClose={onClose}>
+      <form
+        className="field"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const v = (new FormData(e.currentTarget).get("base_url") as string).trim();
+          run(() => llm.updateProvider(p.id, { base_url: v }));
+        }}
+      >
+        <span className="field-label">Base URL</span>
+        <div className="row">
+          <input name="base_url" defaultValue={p.base_url ?? ""} placeholder="留空 = 官方預設端點" style={{ flex: 1 }} />
+          <button type="submit">儲存</button>
+        </div>
+      </form>
+
+      <div className="field">
+        <span className="field-label">API key</span>
+        <div className="row">
+          <span className="muted">{p.has_api_key ? `🔒 ${p.api_key_hint}（已加密）` : "未設定"}</span>
+          <button className="link" onClick={() => setEditingKey(!editingKey)}>
+            {p.has_api_key ? "更換" : "設定"}
+          </button>
+          {p.has_api_key && (
+            <button className="link danger" onClick={() => confirm("確定清除這個 API key？") && run(() => llm.updateProvider(p.id, { clear_api_key: true }))}>
+              清除
+            </button>
+          )}
+        </div>
+        {editingKey && (
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const v = (new FormData(e.currentTarget).get("key") as string).trim();
+              if (v) run(() => llm.updateProvider(p.id, { api_key: v })).then((ok) => ok && setEditingKey(false));
+            }}
+          >
+            <input name="key" type="password" autoComplete="new-password" placeholder="新的 API key" style={{ flex: 1 }} />
+            <button type="submit">儲存（加密）</button>
+          </form>
+        )}
+      </div>
+
+      <div className="field">
+        <span className="field-label">模型</span>
+        <div className="row">
+          <button onClick={listRemote}>測試連線 / 列出模型</button>
+          <span className="muted">已註冊 {registered.length} 個</span>
+        </div>
+        {typeof remote === "string" && <div className="muted">{remote}</div>}
+        {Array.isArray(remote) && (
+          <>
+            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`搜尋模型（共 ${remote.length} 個），例如 deepseek、glm`} autoFocus />
+            <ul className="remote-list scroll">
+              {shown.length === 0 && <li className="muted">沒有符合的模型</li>}
+              {shown.slice(0, 200).map((m) => (
+                <li key={m.id}>
+                  <code>{m.id}</code>
+                  {m.registered || registered.some((x) => x.model === m.id) ? (
+                    <span className="tag ok">已註冊</span>
+                  ) : (
+                    <button
+                      className="link"
+                      onClick={() => run(() => llm.createModel({ provider_id: p.id, model: m.id, display_name: m.display_name, context_window: m.context_window }))}
+                    >
+                      ＋註冊
+                    </button>
+                  )}
+                </li>
+              ))}
+              {shown.length > 200 && <li className="muted">還有 {shown.length - 200} 個，請輸入關鍵字縮小範圍</li>}
+            </ul>
+          </>
+        )}
+      </div>
+
+      <div className="row modal-foot">
+        <button
+          className="danger"
+          onClick={() => confirm(`刪除 ${p.name}？其下 ${registered.length} 個模型也會移除`) && run(() => llm.deleteProvider(p.id)).then((ok) => ok && onClose())}
+        >
+          刪除供應商
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function AddProviderModal({ run, onClose }: { run: Run; onClose: () => void }) {
+  const [kind, setKind] = useState<ProviderKind>("openai_compat");
   const [defaultUrl, setDefaultUrl] = useState(FALLBACK_URL);
   useEffect(() => {
     llm
@@ -97,99 +262,14 @@ function ProviderSection({ providers, models, run }: { providers: Provider[]; mo
       .then((d) => setDefaultUrl((f) => ({ ...f, ...Object.fromEntries(Object.entries(d.base_urls).filter(([, v]) => v)) })))
       .catch(() => {});
   }, []);
-  const [remote, setRemote] = useState<Record<string, RemoteModel[] | string>>({});
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-
-  const listRemote = async (id: string) => {
-    setRemote((r) => ({ ...r, [id]: "連線中…" }));
-    try {
-      const list = await llm.remoteModels(id);
-      setRemote((r) => ({ ...r, [id]: list }));
-    } catch (e) {
-      setRemote((r) => ({ ...r, [id]: `❌ ${(e as Error).message}` }));
-    }
-  };
 
   return (
-    <section>
-      <h3>① Provider</h3>
-      {providers.map((p) => {
-        const r = remote[p.id];
-        const registered = models.filter((m) => m.provider_id === p.id);
-        return (
-          <div key={p.id} className="card">
-            <div className="row">
-              <strong>{p.name}</strong>
-              <span className="tag">{p.kind}</span>
-              <label className="toggle">
-                <input type="checkbox" checked={p.enabled} onChange={(e) => run(() => llm.updateProvider(p.id, { enabled: e.target.checked }))} />
-                啟用
-              </label>
-            </div>
-            <div className="muted">{p.base_url || "（官方預設端點）"}</div>
-            <div className="row">
-              <span className="muted">API key：{p.has_api_key ? `🔒 ${p.api_key_hint}` : "未設定"}</span>
-              <button className="link" onClick={() => setEditingKey(editingKey === p.id ? null : p.id)}>
-                {p.has_api_key ? "更換" : "設定"}
-              </button>
-              {p.has_api_key && (
-                <button className="link danger" onClick={() => confirm("確定清除這個 API key？") && run(() => llm.updateProvider(p.id, { clear_api_key: true }))}>
-                  清除
-                </button>
-              )}
-            </div>
-            {editingKey === p.id && (
-              <form
-                className="row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const v = (new FormData(e.currentTarget).get("key") as string).trim();
-                  if (v) run(() => llm.updateProvider(p.id, { api_key: v })).then(() => setEditingKey(null));
-                }}
-              >
-                <input name="key" type="password" autoComplete="new-password" placeholder="新的 API key" />
-                <button type="submit">儲存（加密）</button>
-              </form>
-            )}
-            <div className="row">
-              <button onClick={() => listRemote(p.id)}>測試連線 / 列出模型</button>
-              <button className="danger" onClick={() => confirm(`刪除 ${p.name}？其下 ${registered.length} 個模型也會移除`) && run(() => llm.deleteProvider(p.id))}>
-                刪除
-              </button>
-            </div>
-            {typeof r === "string" && <div className="muted">{r}</div>}
-            {Array.isArray(r) && (
-              <ul className="remote-list">
-                {r.length === 0 && <li className="muted">沒有可用模型</li>}
-                {r.map((m) => (
-                  <li key={m.id}>
-                    <code>{m.id}</code>
-                    {m.registered || registered.some((x) => x.model === m.id) ? (
-                      <span className="tag ok">已註冊</span>
-                    ) : (
-                      <button
-                        className="link"
-                        onClick={() =>
-                          run(() => llm.createModel({ provider_id: p.id, model: m.id, display_name: m.display_name, context_window: m.context_window }))
-                        }
-                      >
-                        ＋註冊
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      })}
-
+    <Modal title="新增供應商" onClose={onClose}>
       <form
-        className="card"
+        className="spec-form"
         onSubmit={(e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
-          const form = e.currentTarget;
           const api_key = (f.get("api_key") as string).trim();
           run(() =>
             llm.createProvider({
@@ -198,30 +278,147 @@ function ProviderSection({ providers, models, run }: { providers: Provider[]; mo
               base_url: (f.get("base_url") as string).trim() || undefined,
               api_key: api_key || undefined,
             }),
-          ).then(() => form.reset());
+          ).then((ok) => ok && onClose());
         }}
       >
-        <strong>新增 Provider</strong>
-        <select value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)}>
-          {(Object.keys(KIND_LABEL) as ProviderKind[]).map((k) => (
-            <option key={k} value={k}>
-              {KIND_LABEL[k]}
-            </option>
-          ))}
-        </select>
-        <input name="name" required placeholder="名稱，例如 本機 Ollama" />
-        <input name="base_url" key={kind + defaultUrl[kind]} defaultValue={defaultUrl[kind]} placeholder={kind === "anthropic" ? "留空 = 官方端點" : "base URL"} />
-        <input name="api_key" type="password" autoComplete="new-password" placeholder={kind === "ollama" ? "API key（本地通常留空）" : "API key"} />
-        <p className="hint">API key 送出後以 AES-256-GCM 加密存入資料庫，之後畫面只會顯示遮罩。</p>
-        <button type="submit">新增</button>
+        <label className="field">
+          <span className="field-label">類型</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)}>
+            {(Object.keys(KIND_LABEL) as ProviderKind[]).map((k) => (
+              <option key={k} value={k}>
+                {KIND_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">名稱</span>
+          <input name="name" required placeholder="例如 OpenRouter、本機 Ollama" />
+        </label>
+        <label className="field">
+          <span className="field-label">Base URL</span>
+          <input name="base_url" key={kind + defaultUrl[kind]} defaultValue={defaultUrl[kind]} placeholder={kind === "anthropic" ? "留空 = 官方端點" : "base URL"} />
+          {kind === "openai_compat" && <span className="hint">OpenRouter 填 https://openrouter.ai/api/v1</span>}
+        </label>
+        <label className="field">
+          <span className="field-label">API key</span>
+          <input name="api_key" type="password" autoComplete="new-password" placeholder={kind === "ollama" ? "本地通常留空" : "API key"} />
+          <span className="hint">以 AES-256-GCM 加密存入資料庫，之後畫面只會顯示遮罩。</span>
+        </label>
+        <div className="row modal-foot">
+          <span style={{ flex: 1 }} />
+          <button type="button" className="link" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit">新增</button>
+        </div>
       </form>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- models
+
+const EFFORT_HELP =
+  "思考型模型（qwen3.5、gpt-5、DeepSeek…）設 none 可大幅加速，也避免 token 全花在思考上。gpt-5 沒有 none 會自動改用 minimal；一定要思考的模型（GLM 5.3）會自動改用 low；不支援思考的模型（gpt-4o-mini）會自動略過。";
+
+function tierBadges(id: string, tiers: Tiers) {
+  return (["large", "small"] as const)
+    .filter((t) => tiers[t].includes(id))
+    .map((t) => `${t} #${tiers[t].indexOf(id) + 1}`);
+}
+
+function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tiers; run: Run; goto: (s: Sub) => void }) {
+  const [filter, setFilter] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const q = filter.trim().toLowerCase();
+  const shown = models.filter((m) => !q || `${m.model} ${m.provider_name} ${m.display_name ?? ""}`.toLowerCase().includes(q));
+  const current = models.find((m) => m.id === editing);
+
+  if (models.length === 0)
+    return (
+      <p className="hint">
+        還沒有註冊模型。到「
+        <button className="link" onClick={() => goto("providers")}>
+          供應商
+        </button>
+        」按「管理」→「列出模型」→「＋註冊」。
+      </p>
+    );
+
+  return (
+    <section>
+      {models.length > 6 && <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜尋已註冊的模型" />}
+      {shown.map((m) => (
+        <div key={m.id} className={`card list-row ${m.enabled ? "" : "disabled"}`}>
+          <div className="list-main">
+            <div className="row">
+              <code>{m.model}</code>
+              {tierBadges(m.id, tiers).map((b) => (
+                <span key={b} className="tag ok">
+                  {b}
+                </span>
+              ))}
+            </div>
+            <div className="muted">
+              {m.provider_name}・思考：{m.reasoning_effort ?? "預設"}
+              {!m.supports_json_schema && "・不支援 JSON schema"}
+            </div>
+          </div>
+          <label className="toggle">
+            <input type="checkbox" checked={m.enabled} onChange={(e) => run(() => llm.updateModel(m.id, { enabled: e.target.checked }))} />
+            啟用
+          </label>
+          <button onClick={() => setEditing(m.id)}>設定</button>
+        </div>
+      ))}
+      {current && (
+        <Modal title={`模型設定：${current.model}`} onClose={() => setEditing(null)}>
+          <div className="muted">
+            {current.provider_name}
+            {current.context_window ? `・context ${current.context_window.toLocaleString()}` : ""}
+            {tierBadges(current.id, tiers).length ? `・在分級 ${tierBadges(current.id, tiers).join("、")}` : "・還沒加入分級"}
+          </div>
+          <label className="field">
+            <span className="field-label">思考強度</span>
+            <select
+              value={current.reasoning_effort ?? ""}
+              onChange={(e) => run(() => llm.updateModel(current.id, { reasoning_effort: (e.target.value || null) as ReasoningEffort | null }))}
+            >
+              <option value="">預設（由模型決定）</option>
+              <option value="none">none（不思考，最快）</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high（最慢、最貴）</option>
+            </select>
+            <span className="hint">{EFFORT_HELP}</span>
+          </label>
+          <label className="toggle">
+            <input type="checkbox" checked={current.supports_json_schema} onChange={(e) => run(() => llm.updateModel(current.id, { supports_json_schema: e.target.checked }))} />
+            支援 JSON schema
+          </label>
+          <span className="hint">村長規劃與工匠需要用 JSON schema 約束輸出。若這個模型一直出現 JSON 相關錯誤就取消勾選，系統會改用其他模型或退路。</span>
+          <label className="toggle">
+            <input type="checkbox" checked={current.enabled} onChange={(e) => run(() => llm.updateModel(current.id, { enabled: e.target.checked }))} />
+            啟用
+          </label>
+          <div className="row modal-foot">
+            <button
+              className="danger"
+              onClick={() => confirm(`移除 ${current.model}？`) && run(() => llm.deleteModel(current.id)).then((ok) => ok && setEditing(null))}
+            >
+              移除模型
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }
 
 // ---------------------------------------------------------------- tiers
 
-function TierSection({ models, tiers, run }: { models: Model[]; tiers: Tiers; run: (fn: () => Promise<unknown>) => Promise<void> }) {
+function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tiers; run: Run; goto: (s: Sub) => void }) {
   const [draft, setDraft] = useState<Tiers>(tiers);
   useEffect(() => setDraft(tiers), [tiers]);
   const byId = Object.fromEntries(models.map((m) => [m.id, m]));
@@ -236,73 +433,35 @@ function TierSection({ models, tiers, run }: { models: Model[]; tiers: Tiers; ru
       return { ...t, [tier]: list };
     });
 
+  if (models.length === 0)
+    return (
+      <p className="hint">
+        還沒有註冊模型。先到「
+        <button className="link" onClick={() => goto("providers")}>
+          供應商
+        </button>
+        」新增供應商並註冊模型，再回來排分級。
+      </p>
+    );
+
   return (
     <section>
-      <h3>② 已註冊模型與分級</h3>
-      {models.length === 0 && <p className="muted">先在上方 provider「列出模型」並註冊。</p>}
-      {models.length > 0 && (
-        <table>
-          <tbody>
-            {models.map((m) => (
-              <tr key={m.id}>
-                <td>
-                  <code>{m.model}</code>
-                  <div className="muted">{m.provider_name}</div>
-                </td>
-                <td>
-                  <label className="toggle" title="能否用 JSON schema 約束輸出（村長規劃需要）">
-                    <input type="checkbox" checked={m.supports_json_schema} onChange={(e) => run(() => llm.updateModel(m.id, { supports_json_schema: e.target.checked }))} />
-                    JSON
-                  </label>
-                </td>
-                <td>
-                  <select
-                    title="思考強度：思考型模型（如 qwen3.5、gpt-5）設 none 可大幅加速，也避免 token 全花在思考上；gpt-5 沒有 none 會自動改用 minimal，一定要思考的模型（如 GLM 5.3）會自動改用 low"
-                    value={m.reasoning_effort ?? ""}
-                    onChange={(e) => run(() => llm.updateModel(m.id, { reasoning_effort: (e.target.value || null) as ReasoningEffort | null }))}
-                  >
-                    <option value="">思考：預設</option>
-                    <option value="none">思考：none</option>
-                    <option value="low">思考：low</option>
-                    <option value="medium">思考：medium</option>
-                    <option value="high">思考：high</option>
-                  </select>
-                </td>
-                <td>
-                  <label className="toggle">
-                    <input type="checkbox" checked={m.enabled} onChange={(e) => run(() => llm.updateModel(m.id, { enabled: e.target.checked }))} />
-                    啟用
-                  </label>
-                </td>
-                <td>
-                  <button className="link danger" onClick={() => run(() => llm.deleteModel(m.id))}>
-                    移除
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
+      <p className="hint">村長、工匠用 large；村民依自己的設定用 large 或 small。排在前面的優先使用，失敗依序往下；兩級互為備援。</p>
       <div className="tiers">
         {(["large", "small"] as const).map((tier) => (
           <div key={tier} className="card">
-            <strong>{tier === "large" ? "large（村長、困難任務）" : "small（簡單任務、備援）"}</strong>
+            <strong>{tier === "large" ? "large（村長、工匠、困難任務）" : "small（村民日常、備援）"}</strong>
             <ol>
               {draft[tier].map((id, i) => (
                 <li key={id}>
-                  <code>{byId[id]?.model ?? id}</code>
+                  <code className={byId[id]?.enabled === false ? "muted" : ""}>{byId[id]?.model ?? id}</code>
                   <button className="link" onClick={() => move(tier, i, -1)}>↑</button>
                   <button className="link" onClick={() => move(tier, i, 1)}>↓</button>
                   <button className="link danger" onClick={() => setDraft((t) => ({ ...t, [tier]: t[tier].filter((x) => x !== id) }))}>✕</button>
                 </li>
               ))}
             </ol>
-            <select
-              value=""
-              onChange={(e) => e.target.value && setDraft((t) => ({ ...t, [tier]: [...t[tier], e.target.value] }))}
-            >
+            <select value="" onChange={(e) => e.target.value && setDraft((t) => ({ ...t, [tier]: [...t[tier], e.target.value] }))}>
               <option value="">＋加入模型…</option>
               {models
                 .filter((m) => !draft[tier].includes(m.id))
@@ -315,10 +474,12 @@ function TierSection({ models, tiers, run }: { models: Model[]; tiers: Tiers; ru
           </div>
         ))}
       </div>
-      <p className="hint">排在前面的優先使用，失敗依序往下；兩級互為備援（large 失敗退到 small，small 沒設定或失敗則用 large）。</p>
-      <button disabled={!dirty} onClick={() => run(() => llm.saveTiers(draft))}>
-        儲存分級
-      </button>
+      <div className="row">
+        <button disabled={!dirty} onClick={() => run(() => llm.saveTiers(draft))}>
+          儲存分級
+        </button>
+        {dirty && <span className="hint">● 有未儲存的變更</span>}
+      </div>
     </section>
   );
 }
@@ -333,7 +494,7 @@ function TrySection({ models }: { models: Model[] }) {
 
   return (
     <section>
-      <h3>③ 試打</h3>
+      <p className="hint">直接問模型一句話，確認連得上、回答正常。</p>
       <div className="row">
         <select value={target} onChange={(e) => setTarget(e.target.value)}>
           <option value="tier:large">tier: large</option>
