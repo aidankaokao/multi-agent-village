@@ -23,7 +23,7 @@ export const VillageCanvas = forwardRef<VillageHandle, { villagers: VillagerInfo
   useEffect(() => {
     let game: Phaser.Game | undefined;
     let cancelled = false;
-    fetch("/assets/sprites/manifest.json")
+    fetch("/assets/sprites/manifest.json", { cache: "no-cache" })
       .then((r) => r.json())
       .then((manifest: SpriteManifest) => {
         if (cancelled || !host.current) return;

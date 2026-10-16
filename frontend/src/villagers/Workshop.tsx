@@ -14,12 +14,14 @@ interface Entry {
 export interface WorkshopSession {
   log: Entry[];
   draft: AgentSpec | null;
+  base: AgentSpec | null; // 修改已建立的村民時，這是目前存在 DB 的版本
+
   ready: boolean;
   target: string;
   results: (TryResult | "running" | undefined)[];
 }
 
-export const NEW_SESSION: WorkshopSession = { log: [], draft: null, ready: false, target: "", results: [] };
+export const NEW_SESSION: WorkshopSession = { log: [], draft: null, base: null, ready: false, target: "", results: [] };
 
 const GREETING = "嗨！我是工匠，專門幫村子打造新村民。\n跟我說說你想要什麼樣的村民？一句話就可以，例如：";
 const IDEAS = ["一個幫我整理會議重點的人", "會推薦今天晚餐吃什麼的人", "幫我把文章改得更口語的人"];
@@ -45,7 +47,7 @@ export function Workshop({
   const [busy, setBusy] = useState<null | "interview" | "generate">(null);
   const [error, setError] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
-  const { log, draft, ready } = session;
+  const { log, draft, ready, base } = session;
   const hasUser = log.some((e) => e.role === "user");
 
   useEffect(() => {
@@ -117,15 +119,16 @@ export function Workshop({
         </button>
         <SpriteThumb sprite="craftsman" manifest={manifest} />
         <div>
-          <strong>村民工坊</strong>
-          <div className="muted">跟工匠聊聊，他會幫你做出第一版</div>
+          <strong>村民工坊{base ? `：修改「${base.card.name}」` : ""}</strong>
+          <div className="muted">{base ? "跟工匠說哪裡要改，他會改一版給你看" : "跟工匠聊聊，他會幫你做出第一版"}</div>
         </div>
         <span style={{ flex: 1 }} />
         {(hasUser || draft) && (
           <button
             className="link danger"
             onClick={() => {
-              if (confirm("清空對話和草稿，重新開始？")) setSession({ ...NEW_SESSION, target: session.target });
+              if (confirm("清空對話和草稿，重新開始？"))
+                setSession(base ? { ...NEW_SESSION, draft: base, base, target: session.target } : { ...NEW_SESSION, target: session.target });
             }}
           >
             重新開始
@@ -137,8 +140,11 @@ export function Workshop({
         <div className="ws-msg craftsman">
           <SpriteThumb sprite="craftsman" manifest={manifest} scale={1} />
           <div className="bubble village">
-            {GREETING}
+            {base
+              ? `要幫「${base.card.name}」改什麼呢？直接說哪裡不滿意就好，例如：「回答常常太長」「語氣太生硬」「不要用條列」。\n改好後一樣會先給你看草稿，你按「儲存」才會生效。`
+              : GREETING}
             {!hasUser &&
+              !base &&
               IDEAS.map((x) => (
                 <button key={x} className="example" onClick={() => send(x)}>
                   {x}
@@ -196,24 +202,28 @@ export function Workshop({
           <span style={{ flex: 1 }} />
           <span className="hint">{ready ? "工匠覺得可以動手了 →" : hasUser ? "資訊不夠也沒關係，隨時可以先做一版" : ""}</span>
           <button className={ready ? "glow" : ""} onClick={build} disabled={!!busy || !hasUser}>
-            🔨 {draft ? "照對話重新打造" : "打造村民"}
+            🔨 {base ? "照對話修改" : draft ? "照對話重新打造" : "打造村民"}
           </button>
         </div>
       </div>
 
-      {draft && <DraftCard spec={draft} results={session.results} manifest={manifest} onRetest={() => runTests(draft)} onOpen={() => onOpenEditor(draft)} />}
+      {draft && (base === null || JSON.stringify(draft) !== JSON.stringify(base)) && (
+        <DraftCard spec={draft} isEdit={!!base} results={session.results} manifest={manifest} onRetest={() => runTests(draft)} onOpen={() => onOpenEditor(draft)} />
+      )}
     </div>
   );
 }
 
 function DraftCard({
   spec,
+  isEdit,
   results,
   manifest,
   onRetest,
   onOpen,
 }: {
   spec: AgentSpec;
+  isEdit: boolean;
   results: WorkshopSession["results"];
   manifest: SpriteManifest | null;
   onRetest: () => void;
@@ -231,11 +241,11 @@ function DraftCard({
         <SpriteThumb sprite={v.sprite} manifest={manifest} />
         <div>
           <strong>{spec.card.name}</strong> <code className="muted">@{spec.card.id}</code>
-          <div className="muted">草稿，還沒建立</div>
+          <div className="muted">{isEdit ? "修改後的草稿，還沒儲存" : "草稿，還沒建立"}</div>
         </div>
         <span style={{ flex: 1 }} />
         <button onClick={onOpen} disabled={running}>
-          打開編輯器，確認後建立 →
+          打開編輯器，確認後{isEdit ? "儲存" : "建立"} →
         </button>
       </div>
       <div>{spec.card.description}</div>
@@ -311,7 +321,7 @@ function DraftCard({
               </div>
             );
           })}
-          <p className="hint">測試用村民自己的模型（small 分級）跑。沒通過的話，可以直接跟工匠說哪裡不好，或到編輯器調整。</p>
+          <p className="hint">測試用村民自己的模型跑。沒通過的話，可以直接跟工匠說哪裡不好，或到編輯器調整。</p>
         </div>
       )}
     </div>

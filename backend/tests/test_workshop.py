@@ -21,7 +21,7 @@ BLUEPRINT = {
     "tags": ["cooking"],
     "sprite": "chef",
     "creativity": "stable",
-    "length": "medium",
+    "max_chars": 1000,
     "system_prompt": "你是村子裡的食譜師，親切實在。\n規則：\n- 列出材料與步驟。\n- 只輸出食譜本身。",
     "tests": [
         {"input": "番茄炒蛋怎麼做", "context": "", "contains": ["蛋", "番茄", "美味"], "not_contains": ["以下是", "好的"], "lang": "zh"},
@@ -57,7 +57,8 @@ def test_helpers():
 def test_build_spec_maps_choices():
     spec = build_spec(BLUEPRINT, SPRITES, NEIGHBORS)
     assert spec.id == "recipe-maker" and spec.village.sprite == "chef"
-    assert spec.model.temperature == 0.2 and spec.checks.max_chars == 1000 and spec.model.max_tokens == 2048
+    assert spec.model.temperature == 0.2 and spec.checks.max_chars == 1000 and spec.model.max_tokens == 3072
+    assert spec.prompt.system.endswith("- 長度：全部內容不超過 1000 字。寧可精簡；寫不下時減少點數或縮短每一點，不要硬塞。")
     assert spec.prompt.user_template == workshop.DEFAULT_TEMPLATE
     assert len(spec.tests) == 1 and spec.tests[0].expect.lang == "zh" and spec.tests[0].expect.max_chars == 1000
     assert spec.tests[0].expect.not_contains == ["以下是"]  # 太短的詞拿掉
@@ -75,9 +76,17 @@ def test_build_spec_keeps_draft_identity():
     draft = build_spec(BLUEPRINT, SPRITES, NEIGHBORS).to_doc()
     draft["x-village"]["home"] = [3, 3]
     draft["model"]["model_id"] = "m1"
-    spec = build_spec({**BLUEPRINT, "id": "other", "creativity": "creative"}, SPRITES, NEIGHBORS, draft)
-    assert spec.id == "recipe-maker" and spec.village.home == (3, 3)
+    draft["card"]["skills"][0]["id"] = "cook"
+    draft["tests"].append({"input": "使用者自己寫的", "context": "", "expect": {"contains": ["x"], "max_chars": None}})
+    # 工匠回傳的守則已含上一輪的長度規則 → 換成新的，不會重複
+    bp = {**BLUEPRINT, "id": "other", "creativity": "creative", "max_chars": 300, "system_prompt": draft["prompt"]["system"]}
+    spec = build_spec(bp, SPRITES, NEIGHBORS, draft)
+    assert spec.id == "recipe-maker" and spec.village.home == (3, 3) and spec.card.skills[0].id == "cook"
     assert spec.model.model_id == "m1" and spec.model.temperature == 0.9
+    assert spec.prompt.system.count("- 長度：") == 1 and "不超過 300 字" in spec.prompt.system
+    assert [t.input for t in spec.tests] == ["番茄炒蛋怎麼做", "使用者自己寫的"]  # 保留原本的測試題
+    assert spec.tests[0].expect.max_chars == 300 and spec.tests[1].expect.max_chars is None
+    assert build_spec({**BLUEPRINT, "max_chars": 99999}, SPRITES, NEIGHBORS).checks.max_chars == 5000
 
 
 async def test_generate_retries_with_feedback_then_falls_back():

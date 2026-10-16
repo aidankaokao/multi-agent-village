@@ -66,6 +66,12 @@ export function VillagerManager() {
           if (editing.fromWorkshop) setSession(NEW_SESSION); // 建立完成，工坊這一輪結束
           reload();
         }}
+        onAskCraftsman={(spec, saved) => {
+          if (session.log.length && !session.base && !confirm("工坊裡還有正在打造的新村民，要放棄那段對話嗎？")) return;
+          setSession((s) => ({ ...NEW_SESSION, draft: spec, base: saved, target: s.target }));
+          setEditing(null);
+          setInWorkshop(true);
+        }}
         onBackToWorkshop={
           editing.fromWorkshop
             ? (spec) => {
@@ -89,7 +95,7 @@ export function VillagerManager() {
         onClose={() => setInWorkshop(false)}
         onOpenEditor={(spec) => {
           setInWorkshop(false);
-          setEditing(open(spec, null, true));
+          setEditing(open(spec, session.base, true));
         }}
       />
     );
@@ -209,6 +215,7 @@ function Editor({
   onClose,
   onSaved,
   onBackToWorkshop,
+  onAskCraftsman,
 }: {
   initial: Editing;
   list: Villager[];
@@ -217,6 +224,7 @@ function Editor({
   onClose: () => void;
   onSaved: () => void;
   onBackToWorkshop?: (spec: AgentSpec) => void;
+  onAskCraftsman: (spec: AgentSpec, saved: AgentSpec) => void;
 }) {
   const [spec, setSpec] = useState<AgentSpec>(() => structuredClone(initial.spec));
   const [saved, setSaved] = useState<AgentSpec | null>(initial.saved);
@@ -269,7 +277,7 @@ function Editor({
   return (
     <div className="panel-body editor">
       <div className="editor-head">
-        {onBackToWorkshop && isNew ? (
+        {onBackToWorkshop && (isNew || dirty) ? (
           <button className="link" onClick={() => onBackToWorkshop(spec)} title="編輯的內容會一起帶回去">
             ← 回工坊
           </button>
@@ -284,6 +292,11 @@ function Editor({
           <div className="muted">{isNew ? "新村民（尚未建立）" : dirty ? "● 有未儲存的變更" : "已儲存"}</div>
         </div>
         <span style={{ flex: 1 }} />
+        {!isNew && !onBackToWorkshop && (
+          <button className="link" onClick={() => onAskCraftsman(spec, saved!)} title="用聊天的方式說哪裡要改">
+            🔨 請工匠幫忙改
+          </button>
+        )}
         <button onClick={save} disabled={busy || (!dirty && !isNew)}>
           {busy ? "儲存中…" : isNew ? "建立" : "儲存"}
         </button>

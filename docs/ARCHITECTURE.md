@@ -119,7 +119,8 @@ class BaseAgent(Protocol):
 - `POST /interview`：工匠回 `{reply, ready}`——資訊不夠就用日常問題追問，夠了就複述理解並請使用者按「打造」
 - `POST /generate`：LLM 只填扁平的「藍圖」，程式組成 AgentSpec（ID、外觀、住處、模板、temperature / 字數換算、過濾測試題條件）；
   不合格帶錯誤重做，仍失敗則用對話內容拼基本草稿。帶 `draft` 時是在既有草稿上修改（id、住處、指定模型沿用）
-- 草稿不會自動儲存，交給前端編輯器確認後走 `POST /api/villagers` 建立
+- 草稿不會自動儲存，交給前端編輯器確認後走 `POST /api/villagers` 建立（修改既有村民則走 `PUT`）
+- 字數上限（`validate.max_chars`）由程式寫成工作守則最後一條 `- 長度：…`，重新打造時替換，不會重複
 - 可選外觀由前端從 `manifest.json` 傳入（`system: true` 的角色排除），`desc` 給工匠挑外觀參考
 
 ### 3.3 Orchestrator（村長）

@@ -85,7 +85,7 @@ let manifestPromise: Promise<SpriteManifest> | null = null;
 export function useManifest(): SpriteManifest | null {
   const [m, setM] = useState<SpriteManifest | null>(null);
   useEffect(() => {
-    manifestPromise ??= fetch("/assets/sprites/manifest.json").then((r) => r.json());
+    manifestPromise ??= fetch("/assets/sprites/manifest.json", { cache: "no-cache" }).then((r) => r.json());
     manifestPromise.then(setM).catch(() => {});
   }, []);
   return m;

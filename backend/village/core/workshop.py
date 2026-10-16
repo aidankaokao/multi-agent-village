@@ -32,11 +32,20 @@ SYSTEM_HOMES = [(15, 9), (26, 16)]  # 村長、工匠
 ROAD_ROW, ROAD_COL = 9, 15
 
 CREATIVITY = {"stable": 0.2, "balanced": 0.6, "creative": 0.9}
-LENGTH = {  # 字數上限, max_tokens
-    "short": (300, 1024),
-    "medium": (1000, 2048),
-    "long": (3000, 4096),
-}
+MIN_CHARS, MAX_CHARS = 50, 5000
+LENGTH_RULE = "- 長度："  # 由程式加在工作守則最後一條，重新打造時會換掉舊的那條
+
+
+def max_tokens_for(max_chars: int) -> int:
+    """中文約 1～2 token / 字，再留給思考型模型一些空間。"""
+    return min(8192, max(1024, -(-max_chars * 3 // 256) * 256))
+
+
+def with_length_rule(system: str, max_chars: int) -> str:
+    """把字數上限寫進工作守則：村民事先就知道，不用等超過被退回才知道。"""
+    lines = [ln for ln in system.rstrip().splitlines() if not ln.strip().startswith(LENGTH_RULE)]
+    rule = f"{LENGTH_RULE}全部內容不超過 {max_chars} 字。寧可精簡；寫不下時減少點數或縮短每一點，不要硬塞。"
+    return "\n".join(lines + [rule])
 DEFAULT_TEMPLATE = "任務：{instruction}\n{context}"
 
 
@@ -181,7 +190,7 @@ def blueprint_schema(sprite_ids: list[str]) -> dict:
         "tags": strs,
         "sprite": {"type": "string", "enum": sprite_ids} if sprite_ids else s,
         "creativity": {"type": "string", "enum": list(CREATIVITY)},
-        "length": {"type": "string", "enum": list(LENGTH)},
+        "max_chars": {"type": "integer"},
         "system_prompt": s,
         "tests": {"type": "array", "items": test},
         "summary": s,
@@ -216,11 +225,14 @@ def generate_system_prompt(sprites: list[SpriteOption], neighbors: list[Neighbor
 - tags：1～3 個英文小寫標籤。
 - sprite：從可選外觀挑最符合的 id。
 - creativity：stable（答案要正確一致，例如翻譯、計算、整理）/ balanced / creative（創作、點子）。
-- length：short（300 字內）/ medium（1000 字內）/ long（3000 字內）。
+- max_chars：整份回答的字數上限（整數）。使用者有說就照他說的；沒說就依內容：短答 300、一般 1000、長文 3000。
+- 使用者抱怨「太長」時：除了守住 max_chars，還要在 system_prompt 用「結構」限制長度（例如最多 4 點、每點 40 字內），
+  並拿掉使用者沒要求的附加內容（例如額外的標註、引句）。模型很難數字數，但做得到「幾點、每點一句」。
 - system_prompt：村民自己的工作守則，用繁體中文，格式：
   第一行「你是村子裡的<name>，<一句個性描述>。」
   接著「規則：」和 4～7 條以「- 」開頭的規則，要包含：做什麼、輸出格式、有參考資料時要以參考資料為素材、
   只輸出成果本身（不要前言、不要解釋、不要結語）、使用者說不能做的事、使用繁體中文（除非任務指定其他語言）。
+  不用寫總字數規則，程式會依 max_chars 自動加上。
 - tests：3～4 題測試。input 是村長會給的一句任務；context 通常是空字串，測「接在別人後面」時填一段素材。
   contains 只放「任務或素材裡已經出現、結果一定會沿用」的詞（例如素材是清蒸魚，結果要提到清蒸魚），其他一律留空陣列；
   not_contains 放不該出現的前言整句片段（至少 3 個字），例如「以下是」「希望你喜歡」「Here is」，不要放「好的」這種常見短詞；
@@ -243,6 +255,8 @@ def _draft_digest(spec: dict | None) -> dict:
         "keywords": v.get("keywords"),
         "sprite": v.get("sprite"),
         "system_prompt": (spec.get("prompt") or {}).get("system"),
+        "max_chars": (spec.get("validate") or {}).get("max_chars"),
+        "temperature": (spec.get("model") or {}).get("temperature"),
     }
 
 
@@ -310,8 +324,12 @@ def build_spec(
     examples = _strs(data, "examples", 2)
     keywords = _strs(data, "keywords", 2)
     creativity = data.get("creativity") if data.get("creativity") in CREATIVITY else "balanced"
-    length = data.get("length") if data.get("length") in LENGTH else "medium"
-    max_chars, max_tokens = LENGTH[length]
+    try:
+        max_chars = min(MAX_CHARS, max(MIN_CHARS, int(data.get("max_chars") or 1000)))
+    except (TypeError, ValueError):
+        max_chars = 1000
+    max_tokens = max_tokens_for(max_chars)
+    system = with_length_rule(system, max_chars)
 
     sprite_ids = [s.id for s in sprites]
     sprite = data.get("sprite") if data.get("sprite") in sprite_ids else (sprite_ids[0] if sprite_ids else None)
@@ -345,13 +363,23 @@ def build_spec(
             },
         })
 
+    skill_id = ((draft or {}).get("card", {}).get("skills") or [{}])[0].get("id") or "main"  # 修改時沿用
+
+    if draft and draft.get("tests"):
+        # 修改既有草稿 / 村民：保留原本的測試題（可能是使用者自己寫的），只更新跟著字數上限走的條件
+        old_max = (draft.get("validate") or {}).get("max_chars")
+        tests = [
+            {**t, "expect": {**t["expect"], "max_chars": max_chars}} if t.get("expect", {}).get("max_chars") == old_max else t
+            for t in draft["tests"]
+        ]
+
     doc = {
         "card": {
             "id": vid,
             "name": name,
             "description": description,
             "version": "0.1.0",
-            "skills": [{"id": "main", "description": str(data.get("skill") or description).strip(), "examples": examples}],
+            "skills": [{"id": skill_id, "description": str(data.get("skill") or description).strip(), "examples": examples}],
             "tags": _strs(data, "tags")[:5],
         },
         "x-village": {"sprite": sprite, "home": home, "keywords": keywords},
