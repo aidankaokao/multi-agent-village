@@ -47,6 +47,10 @@ class Tool:
     def run(self, args: dict[str, Any]) -> ToolResult:
         raise NotImplementedError
 
+    def context(self) -> str:
+        """每次呼叫時附在參數整理說明後面的即時資訊（例如今天的日期）；自訂說明也會附上。"""
+        return ""
+
     def fallback(self, instruction: str, context: str) -> dict[str, Any] | None:
         """不靠 LLM，直接從文字抓參數；抓不到回 None。"""
         return None

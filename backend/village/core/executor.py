@@ -340,6 +340,8 @@ async def run_tool_agent(
     assert spec.tool is not None
     tool = TOOLS[spec.tool.id]
     system = spec.prompt.system.strip() if spec.prompt and spec.prompt.system.strip() else tool.default_prompt
+    if extra := tool.context():
+        system = f"{system}\n\n{extra}"
     template = spec.prompt.user_template if spec.prompt else "任務：{instruction}\n{context}"
     r.input = render_user(template, instruction, context)
     messages = [ChatMessage("user", r.input)]

@@ -317,3 +317,42 @@ async def test_openai_compat_adapts_unsupported_params():
     with pytest.raises(LLMError, match="HTTP 400"):
         await client.chat("other", [ChatMessage("user", "hi")], max_tokens=10)
     await client.aclose()
+
+
+async def test_truncated_json_fails_over_and_non_schema_models_still_used(env_llm=None):
+    import json as _json
+
+    from village.llm.base import ChatMessage
+    from village.llm.openai_compat import OpenAICompatClient
+
+    def handler(request: httpx.Request):
+        body = _json.loads(request.content)
+        if "response_format" in body:  # 卡在空白直到 token 用完
+            return httpx.Response(200, json={"model": "glm", "choices": [{"message": {"content": '{   \n\n  "steps"  \n'}, "finish_reason": "length"}]})
+        return httpx.Response(200, json={"model": "glm", "choices": [{"message": {"content": '{"steps":[]}'}, "finish_reason": "stop"}]})
+
+    client = OpenAICompatClient("http://x/v1", None)
+    client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMError, match="被截斷"):
+        await client.chat("glm", [ChatMessage("user", "hi")], json_schema={"type": "object"}, max_tokens=50)
+    r = await client.chat("glm", [ChatMessage("user", "hi")], max_tokens=50)
+    assert r.text == '{"steps":[]}'
+    await client.aclose()
+
+
+async def test_model_without_schema_support_is_used_without_schema(env):
+    c, _ = env
+    got: list = []
+
+    class Recording(FakeClient):
+        async def chat(self, model, messages, **kw):
+            got.append((model, kw.get("json_schema")))
+            return ChatResult(text="{}", model=model)
+
+    ctx = c._transport.app.state.ctx
+    ctx.llm._factory = Recording
+    p = await _provider(c, name="or", base_url="http://or/v1", api_key=None)
+    m = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "glm", "supports_json_schema": False})).json()
+    await c.put("/api/llm/tiers", json={"large": [m["id"]]})
+    await ctx.llm.chat("tier:large", [], json_schema={"type": "object"})
+    assert got == [("glm", None)]  # 照樣使用，只是不送 schema 約束

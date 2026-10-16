@@ -180,3 +180,49 @@ async def test_tools_api_and_try(tmp_path, monkeypatch):
             calc = next(v for v in (await c.get("/api/villagers")).json() if v["id"] == "calculator")
             r = (await c.post("/api/villagers/try", json={"spec": calc["spec"], "instruction": "123 乘以 456"})).json()
             assert r["ok"] and "56,088" in r["output"] and r["tool_args"] == {"expression": "123 * 456"}
+
+
+def test_clock_years_are_decided_by_program(monkeypatch):
+    from datetime import date
+
+    import village.tools.clock as clock_mod
+
+    monkeypatch.setattr(clock_mod, "today", lambda: date(2026, 10, 17))
+    run = TOOLS["clock"].run
+
+    def ask(op, d1="", d2="", days=0):
+        return run({"operation": op, "date1": d1, "date2": d2, "days": days}).text
+
+    # 「距離跨年還有幾天」：抓今年底，不是今年初
+    assert ask("until", d2="跨年") == "距離 2026 年 12 月 31 日（星期四）（跨年）還有 75 天"
+    # 生日 5/20 今年已經過了 → 明年
+    assert ask("until", d2="05-20") == "距離 2027 年 5 月 20 日（星期四）還有 215 天"
+    assert ask("until", d2="5月20日").endswith("還有 215 天")
+    assert ask("until", d2="10-17").startswith("就是今天")
+    assert ask("until", d2="2026-01-01").endswith("已經過了 289 天")  # 使用者明確寫了年份才算過去
+    assert ask("between", "03-01", "03-15") == "2026 年 3 月 1 日（星期日） 到 2026 年 3 月 15 日（星期日） 相差 14 天"
+    assert ask("between", "12-20", "01-05").endswith("相差 16 天")  # 跨年的區間
+    assert ask("add", days=100).endswith("2027 年 1 月 25 日（星期一）")
+    assert "今天是 2026-10-17" in TOOLS["clock"].context()
+    with pytest.raises(ToolError, match="農曆"):
+        ask("until", d2="除夕夜")
+    with pytest.raises(ToolError, match="不是存在的日期"):
+        ask("until", d2="02-30")
+
+    fb = TOOLS["clock"].fallback
+    assert fb("距離跨年還有幾天", "")["date2"] == "跨年" and fb("距離跨年還有幾天", "")["operation"] == "until"
+    assert fb("我的生日是 5 月 20 日，還剩幾天", "")["date2"] == "5月20日"
+    assert fb("從 3 月 1 日到 3 月 15 日相差幾天？", "")["operation"] == "between"
+
+
+async def test_tool_prompt_includes_today(monkeypatch):
+    seen = {}
+
+    def handler(target, messages, kw):
+        seen["system"] = kw["system"]
+        return '{"operation":"until","date1":"","date2":"跨年","days":0}'
+
+    s = AgentSpec.model_validate({**CALC, "tool": {"id": "clock"}})
+    r = StepResult(id="s1", agent="clock", instruction="", use=[])
+    await run_agent(FakeLLM(handler), s, "距離跨年還有幾天", "", r)
+    assert "今天是" in seen["system"] and "until" in seen["system"] and "跨年" in r.output

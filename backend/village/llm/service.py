@@ -82,9 +82,10 @@ class LLMService:
             raise LLMError(f"no enabled model for {target}; register one in LLM 設定")
         errors: list[str] = []
         for m in models:
-            if kw.get("json_schema") is not None and not m.supports_json_schema:
-                errors.append(f"{m.model}: json_schema not supported")
-                continue
+            call_kw = dict(kw)
+            if call_kw.get("json_schema") is not None and not m.supports_json_schema:
+                # 不送 schema 約束，改靠 prompt 裡的格式說明 + 上層的 JSON 解析與重試（弱模型 / 不支援的供應商也能用）
+                call_kw["json_schema"] = None
             client = self.client_for(m.provider)
             on_delta = None
             if on_text is not None:
@@ -96,7 +97,7 @@ class LLMService:
 
             try:
                 return await client.chat(
-                    m.model, messages, **{"reasoning_effort": m.reasoning_effort, **kw}, on_delta=on_delta
+                    m.model, messages, **{"reasoning_effort": m.reasoning_effort, **call_kw}, on_delta=on_delta
                 )
             except LLMError as e:
                 log.warning("model %s failed, trying next: %s", m.model, e)

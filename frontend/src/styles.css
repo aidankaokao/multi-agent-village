@@ -1075,6 +1075,21 @@ details summary {
   display: block;
   width: 100%;
   height: auto;
+  cursor: zoom-in;
+}
+
+.modal.wide {
+  width: min(1100px, 100%);
+}
+
+img.zoomed {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 180px);
+  object-fit: contain;
+  background: #fffdf6;
+  border: 2px solid var(--line);
+  cursor: default;
 }
 
 .attachments figcaption {

@@ -44,6 +44,8 @@ class AnthropicClient(LLMClient):
         if resp.stop_reason == "refusal":
             raise LLMError("model refused the request")
         text = "".join(b.text for b in resp.content if b.type == "text")
+        if json_schema is not None and resp.stop_reason == "max_tokens":
+            raise LLMError(f"JSON 輸出在 {max_tokens} tokens 被截斷")
         if not text.strip() and resp.stop_reason == "max_tokens":
             raise LLMError(f"輸出在 {max_tokens} tokens 被截斷且沒有內容")
         return ChatResult(

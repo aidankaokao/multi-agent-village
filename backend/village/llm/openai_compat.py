@@ -143,6 +143,10 @@ class OpenAICompatClient(LLMClient):
                     raise
                 log.info("%s 不支援參數 %s，改用 %s 重試", model, e.param, fix)
                 quirks.add(fix)
+        if json_schema is not None and finish == "length":
+            # 結構化輸出被截斷（有些模型 / 供應商會在 JSON 裡一直輸出空白直到 token 用完）：
+            # 半個 JSON 解析不了，直接當失敗讓上層換下一個模型，比叫同一個模型重試有用
+            raise LLMError(f"JSON 輸出在 {max_tokens} tokens 被截斷（模型可能卡在輸出空白）")
         if not text.strip() and finish == "length":
             raise LLMError(
                 f"輸出在 {max_tokens} tokens 被截斷且沒有內容（思考型模型？可在 LLM 設定把思考強度設為 none）"

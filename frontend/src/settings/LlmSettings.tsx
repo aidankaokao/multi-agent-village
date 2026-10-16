@@ -362,7 +362,7 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
             </div>
             <div className="muted">
               {m.provider_name}・思考：{m.reasoning_effort ?? "預設"}
-              {!m.supports_json_schema && "・不支援 JSON schema"}
+              {!m.supports_json_schema && "・不送 JSON schema"}
             </div>
           </div>
           <label className="toggle">
@@ -397,7 +397,10 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
             <input type="checkbox" checked={current.supports_json_schema} onChange={(e) => run(() => llm.updateModel(current.id, { supports_json_schema: e.target.checked }))} />
             支援 JSON schema
           </label>
-          <span className="hint">村長規劃與工匠需要用 JSON schema 約束輸出。若這個模型一直出現 JSON 相關錯誤就取消勾選，系統會改用其他模型或退路。</span>
+          <span className="hint">
+            村長規劃、工匠、審核員、工具型村民會要求 JSON 輸出。勾選＝送出 JSON schema 約束；取消勾選＝不送約束，改靠說明文字與解析（照樣會使用這個模型）。
+            如果這個模型常出現「JSON 輸出被截斷」或「找不到 JSON 物件」（例如有些模型在約束下會一直輸出空白），就取消勾選。
+          </span>
           <label className="toggle">
             <input type="checkbox" checked={current.enabled} onChange={(e) => run(() => llm.updateModel(current.id, { enabled: e.target.checked }))} />
             啟用
