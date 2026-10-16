@@ -1,4 +1,4 @@
-"""執行一次問答：村長規劃 → 依序執行步驟 → harness 檢查 → 發事件。
+"""執行一次問答：村長規劃 → 執行步驟（互不依賴的可平行）→ harness 檢查 → 審核員 → 發事件、寫執行紀錄。
 
 每個動作都發事件到 EventBus，前端的村落動畫與聊天框完全由事件驅動。
 """
@@ -13,8 +13,11 @@ from village.core.card import AgentSpec
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import ChatLLM, Plan, Step, direct_reply, make_plan
 from village.core.registry import AgentRegistry
+from village.core.reviewer import REVIEWER_ID, Leaf, Review, review
 from village.events import EventBus
 from village.llm.base import ChatMessage, LLMError, TextCallback
+from village.store.runs import TraceStore
+from village.store.settings import RulesStore, VillageRules
 
 log = logging.getLogger("village.executor")
 
@@ -59,6 +62,11 @@ class StepResult:
     elapsed_ms: int = 0
     attempts: int = 0
     warnings: list[str] = field(default_factory=list)
+    input: str = ""  # 實際送給村民 LLM 的任務訊息（含前一步成果），執行紀錄用
+    retry_reasons: list[str] = field(default_factory=list)
+    tokens_in: int = 0
+    tokens_out: int = 0
+    rejected: list[dict] = field(default_factory=list)  # 被審核員退回的舊版本 {output, reason}
 
 
 def render_context(step: Step, results: dict[str, StepResult], registry: AgentRegistry) -> str:
@@ -75,16 +83,70 @@ def render_user(template: str, instruction: str, context: str) -> str:
     return template.replace("{instruction}", instruction).replace("{context}", context).strip()
 
 
+def leaf_steps(plan: Plan) -> list[Step]:
+    """最後交給使用者的步驟：沒有其他步驟用到它的成果（例如「同時翻成英文和日文」就有兩個）。"""
+    used = {u for s in plan.steps for u in s.use}
+    return [s for s in plan.steps if s.id not in used]
+
+
+def compose_answer(plan: Plan, results: dict[str, StepResult], registry: AgentRegistry) -> tuple[str, bool]:
+    ok = all(r.status == "done" for r in results.values())
+    leaves = [results[s.id] for s in leaf_steps(plan)]
+    done = [r for r in leaves if r.status == "done"]
+    if len(leaves) == 1:
+        return (done[0].output if done else ""), ok
+    blocks = []
+    for r in done:
+        spec = registry.get(r.agent)
+        blocks.append(f"【{spec.name if spec else r.agent}】{r.instruction}\n{r.output}")
+    return "\n\n".join(blocks), ok
+
+
+DEFAULT_RULES = VillageRules(reviewer_enabled=False, parallel=False)  # 沒接 DB 時（測試）維持最單純的行為
+
+
 class Runner:
-    def __init__(self, registry: AgentRegistry, llm: ChatLLM, bus: EventBus, handoff_delay: float = 1.0):
+    def __init__(
+        self,
+        registry: AgentRegistry,
+        llm: ChatLLM,
+        bus: EventBus,
+        handoff_delay: float = 1.0,
+        rules: RulesStore | None = None,
+        trace: TraceStore | None = None,
+    ):
         self.registry = registry
         self.llm = llm
         self.bus = bus
         self.handoff_delay = handoff_delay  # 讓前端有時間播放「走過去交接」的動畫
+        self.rules = rules
+        self.trace = trace
 
-    async def run(self, run_id: str, message: str) -> dict:
+    async def run(self, run_id: str, message: str, traced: bool = False) -> dict:
+        """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）。"""
         emit = self.bus.publish
+        rules = self.rules.current if self.rules else DEFAULT_RULES
         agents = self.registry.all()
+        t0 = time.monotonic()
+        plan: Plan | None = None
+        results: dict[str, StepResult] = {}
+        reviews: list[Review] = []
+        if self.trace:
+            self.trace.keep = rules.keep_runs
+            if not traced:
+                await self.trace.start(run_id, message)
+
+        async def record(status: str, **fields) -> None:
+            if self.trace:
+                await self.trace.finish(
+                    run_id, status=status, plan=plan.to_dict() if plan else None,
+                    steps=[asdict(r) for r in results.values()], reviews=[rv.to_dict() for rv in reviews],
+                    elapsed_ms=int((time.monotonic() - t0) * 1000),
+                    extra_tokens_in=sum(rv.tokens_in for rv in reviews),
+                    extra_tokens_out=sum(rv.tokens_out for rv in reviews),
+                    **fields,
+                )
+
         await emit("run.started", run_id=run_id, agent=MAYOR, message=message)
         try:
             async def on_note(note: str) -> None:
@@ -98,41 +160,70 @@ class Runner:
                 on_text = DeltaEmitter(self.bus, run_id=run_id, step_id=None, agent=MAYOR)
                 answer = await direct_reply(message, agents, self.llm, on_text=on_text)
                 await emit("agent.finished", run_id=run_id, step_id=None, agent=MAYOR, output=answer)
-                await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[])
-                return {"ok": True, "answer": answer, "plan": plan.to_dict(), "steps": []}
+                await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[], reviews=[])
+                await record("done", answer=answer)
+                return {"ok": True, "answer": answer, "plan": plan.to_dict(), "steps": [], "reviews": []}
 
-            results = await self._execute(run_id, plan)
-            last = results[plan.steps[-1].id]
-            ok = all(r.status == "done" for r in results.values())
-            answer = last.output if last.status == "done" else ""
+            results = {s.id: StepResult(id=s.id, agent=s.agent, instruction=s.instruction, use=s.use) for s in plan.steps}
+            await self._execute(run_id, plan, results, rules)
+            answer, ok = compose_answer(plan, results, self.registry)
+            if ok and rules.reviewer_enabled:
+                await self._review_loop(run_id, message, plan, results, reviews, rules)
+                answer, ok = compose_answer(plan, results, self.registry)
+
             steps = [asdict(r) for r in results.values()]
-            await emit("run.finished", run_id=run_id, ok=ok, answer=answer, steps=steps)
-            return {"ok": ok, "answer": answer, "plan": plan.to_dict(), "steps": steps}
+            rv = [x.to_dict() for x in reviews]
+            await emit("run.finished", run_id=run_id, ok=ok, answer=answer, steps=steps, reviews=rv)
+            await record("done" if ok else "error", answer=answer)
+            return {"ok": ok, "answer": answer, "plan": plan.to_dict(), "steps": steps, "reviews": rv}
+        except asyncio.CancelledError:
+            # 使用者按「停止」：通知前端讓村民收工，紀錄標成 cancelled，再把取消往上傳
+            await emit("run.cancelled", run_id=run_id, agent=MAYOR)
+            await record("cancelled", error="使用者取消")
+            raise
         except Exception as e:
             log.exception("run %s failed", run_id)
             await emit("run.failed", run_id=run_id, agent=MAYOR, error=str(e))
+            await record("error", error=str(e))
             return {"ok": False, "error": str(e)}
 
-    async def _execute(self, run_id: str, plan: Plan) -> dict[str, StepResult]:
-        results: dict[str, StepResult] = {
-            s.id: StepResult(id=s.id, agent=s.agent, instruction=s.instruction, use=s.use) for s in plan.steps
-        }
-        for step in plan.steps:
-            r = results[step.id]
-            deps = [results[u] for u in step.use]
-            if any(d.status != "done" for d in deps):
-                r.status, r.error = "error", "前一步失敗，略過"
-                await self.bus.publish("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
-                continue
-            for d in deps:
-                if d.agent != step.agent:
-                    await self.bus.publish("agent.handoff", run_id=run_id, from_agent=d.agent, to_agent=step.agent)
-            if deps and self.handoff_delay:
-                await asyncio.sleep(self.handoff_delay)
-            await self._run_step(run_id, step, r, results)
-        return results
+    async def _execute(self, run_id: str, plan: Plan, results: dict[str, StepResult], rules: VillageRules) -> None:
+        """依相依關係一批一批執行：同一批互不依賴，開啟平行時同時跑（最多 max_parallel 個）。"""
+        sem = asyncio.Semaphore(rules.max_parallel if rules.parallel else 1)
+        remaining = list(plan.steps)
+        while remaining:
+            ready = [s for s in remaining if all(results[u].status != "pending" for u in s.use)]
+            if not ready:  # 理論上不會發生（use 只能引用前面的步驟）
+                break
+            remaining = [s for s in remaining if s not in ready]
 
-    async def _run_step(self, run_id: str, step: Step, r: StepResult, results: dict[str, StepResult]) -> None:
+            async def one(step: Step) -> None:
+                async with sem:
+                    await self._start_step(run_id, step, results, rules)
+
+            if rules.parallel and len(ready) > 1:
+                await asyncio.gather(*(one(s) for s in ready))
+            else:
+                for s in ready:
+                    await one(s)
+
+    async def _start_step(self, run_id: str, step: Step, results: dict[str, StepResult], rules: VillageRules) -> None:
+        r = results[step.id]
+        deps = [results[u] for u in step.use]
+        if any(d.status != "done" for d in deps):
+            r.status, r.error = "error", "前一步失敗，略過"
+            await self.bus.publish("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
+            return
+        for d in deps:
+            if d.agent != step.agent:
+                await self.bus.publish("agent.handoff", run_id=run_id, from_agent=d.agent, to_agent=step.agent)
+        if deps and self.handoff_delay:
+            await asyncio.sleep(self.handoff_delay)
+        await self._run_step(run_id, step, r, rules, step.instruction, render_context(step, results, self.registry))
+
+    async def _run_step(
+        self, run_id: str, step: Step, r: StepResult, rules: VillageRules, instruction: str, context: str
+    ) -> None:
         emit = self.bus.publish
         spec = self.registry.get(step.agent)
         await emit("agent.started", run_id=run_id, step_id=step.id, agent=step.agent, instruction=step.instruction)
@@ -140,18 +231,24 @@ class Runner:
         try:
             if spec is None:
                 raise LLMError(f"村民「{step.agent}」不存在")
+
             async def on_retry(reason: str) -> None:
                 await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=reason)
 
-            await run_prompt_agent(
-                self.llm, spec, step.instruction, render_context(step, results, self.registry), r,
-                on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
-                on_retry=on_retry,
+            await asyncio.wait_for(
+                run_prompt_agent(
+                    self.llm, spec, instruction, context, r,
+                    on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
+                    on_retry=on_retry,
+                ),
+                timeout=rules.step_timeout_s,
             )
-            r.status = "done"
+            r.status, r.error = "done", None
+        except TimeoutError:
+            r.status, r.error = "error", f"逾時：超過 {rules.step_timeout_s} 秒沒有完成（可在「村規」調整）"
         except LLMError as e:
             r.status, r.error = "error", str(e)
-        r.elapsed_ms = int((time.monotonic() - t0) * 1000)
+        r.elapsed_ms += int((time.monotonic() - t0) * 1000)
         if r.status == "done":
             await emit(
                 "agent.finished", run_id=run_id, step_id=step.id, agent=step.agent,
@@ -159,6 +256,41 @@ class Runner:
             )
         else:
             await emit("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
+
+    async def _review_loop(
+        self, run_id: str, message: str, plan: Plan, results: dict[str, StepResult], reviews: list[Review],
+        rules: VillageRules,
+    ) -> None:
+        """審核員檢查最終成果；不合格就把理由交給負責的村民重做（最多 review_redo 次），之後照實交出。"""
+        emit = self.bus.publish
+        by_id = {s.id: s for s in plan.steps}
+        for round_ in range(rules.review_redo + 1):
+            leaves = [
+                Leaf(s.id, self._name(s.agent), s.instruction, results[s.id].output) for s in leaf_steps(plan)
+            ]
+            await emit("review.started", run_id=run_id, agent=REVIEWER_ID, round=round_ + 1)
+            rv = await review(self.llm, message, leaves, rules.reviewer_target)
+            if rv is None:
+                await emit("review.finished", run_id=run_id, agent=REVIEWER_ID, skipped=True, reason="審核員無法使用，略過審核")
+                return
+            reviews.append(rv)
+            await emit("review.finished", run_id=run_id, agent=REVIEWER_ID, **rv.to_dict())
+            if rv.passed or round_ == rules.review_redo:
+                return
+            step, r = by_id[rv.step], results[rv.step]
+            r.rejected.append({"output": r.output, "reason": rv.reason})
+            await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=f"審核員退回：{rv.reason}")
+            await emit("agent.handoff", run_id=run_id, from_agent=REVIEWER_ID, to_agent=step.agent)
+            instruction = f"{step.instruction}\n\n審核員退回了你上一次的成果。原因：{rv.reason}\n請這樣修正：{rv.fix or rv.reason}"
+            context = render_context(step, results, self.registry)
+            context = f"{context}\n\n你上一次的成果（被退回）：\n{r.output}".strip()
+            await self._run_step(run_id, step, r, rules, instruction, context)
+            if r.status != "done":
+                return
+
+    def _name(self, agent_id: str) -> str:
+        spec = self.registry.get(agent_id)
+        return spec.name if spec else agent_id
 
 
 async def run_prompt_agent(
@@ -177,10 +309,11 @@ async def run_prompt_agent(
     問答流程與「村民管理 → 試打 / 測試」共用。target 可指定模型（比較雲端與本地用），預設依村民設定。
     """
     assert spec.prompt is not None
-    messages = [ChatMessage("user", render_user(spec.prompt.user_template, instruction, context))]
+    r.input = render_user(spec.prompt.user_template, instruction, context)
+    messages = [ChatMessage("user", r.input)]
     feedback: str | None = None
-    for attempt in range(STEP_RETRIES + 1):
-        r.attempts = attempt + 1
+    for _ in range(STEP_RETRIES + 1):
+        r.attempts += 1
         result = await llm.chat(
             target or spec.model.target,
             messages,
@@ -191,9 +324,12 @@ async def run_prompt_agent(
         )
         text = normalize(result.text)
         r.output, r.model = text, result.model
+        r.tokens_in += result.usage.get("input_tokens", 0)
+        r.tokens_out += result.usage.get("output_tokens", 0)
         feedback = check_output(text, spec.checks)
         if feedback is None:
             return
+        r.retry_reasons.append(feedback)
         if on_retry:
             await on_retry(feedback)
         messages += [ChatMessage("assistant", text or "（空白）"), ChatMessage("user", feedback)]

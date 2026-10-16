@@ -21,10 +21,19 @@ export interface StepView {
 
 export type PlanSource = "mention" | "llm" | "keyword" | "direct";
 
+export interface ReviewView {
+  passed?: boolean;
+  reason: string;
+  skipped?: boolean;
+  step?: string | null;
+}
+
 export interface RunView {
   id: string;
   message: string;
-  status: "planning" | "running" | "done" | "failed";
+  status: "planning" | "running" | "done" | "failed" | "cancelled";
+  reviewing?: boolean; // 審核員檢查中
+  reviews: ReviewView[];
   source?: PlanSource;
   notes: string[];
   steps: StepView[];
@@ -46,7 +55,7 @@ type Action =
   | { type: "reset" };
 
 function newRun(id: string, message: string): RunView {
-  return { id, message, status: "planning", notes: [], steps: [], startedAt: Date.now() };
+  return { id, message, status: "planning", notes: [], steps: [], reviews: [], startedAt: Date.now() };
 }
 
 function patchStep(run: RunView, stepId: unknown, patch: (s: StepView) => StepView): RunView {
@@ -89,8 +98,8 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
       };
       break;
     }
-    case "agent.started":
-      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "running", startedAt: Date.now() }));
+    case "agent.started": // 審核員退回重做時同一步會再 started 一次
+      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "running", startedAt: s.startedAt ?? Date.now(), elapsed_ms: undefined }));
       break;
     case "agent.delta":
       if (e.step_id == null) run = { ...run, liveAnswer: e.text as string };
@@ -115,13 +124,39 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
       run = patchStep(run, e.step_id, (s) => ({ ...s, status: "error", live: undefined, error: e.error as string }));
       break;
     case "run.finished":
-      run = { ...run, status: "done", ok: e.ok as boolean, answer: e.answer as string, finishedAt: Date.now() };
+      run = { ...run, status: "done", reviewing: false, ok: e.ok as boolean, answer: e.answer as string, finishedAt: Date.now() };
       break;
     case "run.failed":
       run = { ...run, status: "failed", ok: false, error: e.error as string, finishedAt: Date.now() };
+      break;
+    case "run.cancelled":
+      run = {
+        ...run,
+        status: "cancelled",
+        ok: false,
+        reviewing: false,
+        finishedAt: Date.now(),
+        steps: run.steps.map((s) => (s.status === "running" || s.status === "pending" ? { ...s, status: "error", live: undefined, error: "已取消" } : s)),
+      };
+      break;
+    case "review.started":
+      run = { ...run, reviewing: true };
+      break;
+    case "review.finished":
+      run = {
+        ...run,
+        reviewing: false,
+        reviews: [...run.reviews, { passed: e.passed as boolean | undefined, reason: e.reason as string, skipped: !!e.skipped, step: e.step as string | null }],
+      };
       break;
     default:
       if (run === state.byId[id]) return state;
   }
   return { order, byId: { ...state.byId, [id]: run } };
+}
+
+/** 最後交給使用者的步驟（沒有其他步驟用到它的成果）；平行時可能有好幾個 */
+export function leafIds(run: RunView): Set<string> {
+  const used = new Set(run.steps.flatMap((s) => s.use));
+  return new Set(run.steps.filter((s) => !used.has(s.id)).map((s) => s.id));
 }

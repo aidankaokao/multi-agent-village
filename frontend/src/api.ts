@@ -127,6 +127,87 @@ export interface AgentInfo {
 export const village = {
   agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
   chat: (message: string) => api<{ run_id: string }>("/api/chat", { method: "POST", json: { message } }),
+  cancel: (runId: string) => api<{ ok: boolean }>(`/api/chat/${runId}/cancel`, { method: "POST" }),
+};
+
+// ---------------------------------------------------------------- 執行紀錄與村規
+
+export type RunStatus = "running" | "done" | "error" | "cancelled" | "interrupted";
+
+export interface RunSummary {
+  id: string;
+  message: string;
+  status: RunStatus;
+  agents: string[];
+  review: boolean | null;
+  elapsed_ms: number | null;
+  tokens_in: number;
+  tokens_out: number;
+  created_at: string;
+}
+
+export interface TraceStep {
+  id: string;
+  agent: string;
+  instruction: string;
+  use: string[];
+  status: string;
+  output: string;
+  error: string | null;
+  model: string | null;
+  elapsed_ms: number;
+  attempts: number;
+  warnings: string[];
+  input: string;
+  retry_reasons: string[];
+  tokens_in: number;
+  tokens_out: number;
+  rejected: { output: string; reason: string }[];
+}
+
+export interface TraceReview {
+  passed: boolean;
+  reason: string;
+  fix: string;
+  step: string | null;
+  model: string | null;
+  elapsed_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export interface RunDetail extends RunSummary {
+  answer: string | null;
+  error: string | null;
+  plan: { steps: { id: string; agent: string; instruction: string; use: string[] }[]; source: string; notes: string[] } | null;
+  steps: TraceStep[];
+  reviews: TraceReview[];
+  finished_at: string | null;
+}
+
+export interface VillageRules {
+  reviewer_enabled: boolean;
+  reviewer_target: string;
+  review_redo: number;
+  step_timeout_s: number;
+  parallel: boolean;
+  max_parallel: number;
+  keep_runs: number;
+}
+
+export const traces = {
+  list: (p: { before?: string; q?: string; limit?: number } = {}) => {
+    const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "") as [string, string][]);
+    return api<RunSummary[]>(`/api/runs?${qs}`);
+  },
+  get: (id: string) => api<RunDetail>(`/api/runs/${id}`),
+  remove: (id: string) => api<void>(`/api/runs/${id}`, { method: "DELETE" }),
+  clear: () => api<void>("/api/runs", { method: "DELETE" }),
+};
+
+export const rules = {
+  get: () => api<VillageRules>("/api/rules"),
+  save: (r: VillageRules) => api<VillageRules>("/api/rules", { method: "PUT", json: r }),
 };
 
 // ---------------------------------------------------------------- 村民管理

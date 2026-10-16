@@ -14,7 +14,8 @@ frontend/public/assets/sprites/
 │   ├── reviewer.png            # 審核員
 │   ├── scholar.png / merchant.png / farmer.png / chef.png  # 學者、商人、農夫、廚師：給新村民挑的外觀
 │   ├── mayor.png               # 村長 = orchestrator（system，不給村民用）
-│   └── craftsman.png           # 工匠 = 村民工坊（system，不給村民用）
+│   ├── craftsman.png           # 工匠 = 村民工坊（system，不給村民用）
+│   └── auditor.png             # 審核員 = 最終答案檢查（system，不給村民用）；reviewer.png 改名「巡查員」給村民用
 ├── deco/                       # 地圖裝飾：tree、pine、bush、flowers、rock、well、house_red、house_blue、sign、workbench
 └── ui/status_bubbles.png       # 頭頂狀態泡泡
 ```
@@ -70,6 +71,7 @@ No text, no shadows outside the character, no background scenery.
 | farmer | a farmer in a wide straw hat and green overalls, holding a rice stalk |
 | chef | a chef in a tall white toque and white apron, holding a ladle |
 | craftsman | a craftsman in an orange hard hat, blue work clothes, tool belt, holding a hammer |
+| auditor | a stern judge-like auditor in a black robe with a white collar and a square cap, holding a magnifying glass |
 | calculator | a small merchant with an abacus, green apron, round cheeks (Phase 4) |
 | chart | a cartographer with a rolled map and colored pencils, yellow scarf (Phase 4) |
 | taiwan-history | an elderly storyteller in traditional Taiwanese clothing, holding an old scroll, wise expression (Phase 6) |

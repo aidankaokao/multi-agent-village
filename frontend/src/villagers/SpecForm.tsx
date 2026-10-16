@@ -1,5 +1,5 @@
 import type { AgentSpec, Model } from "../api";
-import { BLOCKED, CRAFTSMAN, MAP_H, MAP_W, MAYOR, nearestFree, type SpriteManifest } from "../village/VillageScene";
+import { BLOCKED, CRAFTSMAN, MAP_H, MAP_W, MAYOR, nearestFree, REVIEWER, type SpriteManifest } from "../village/VillageScene";
 import { Field, ListInput, NumInput, SpriteThumb } from "./fields";
 
 interface Props {
@@ -194,7 +194,7 @@ function HomePicker({
   homes: { id: string; name: string; home: [number, number] }[];
   onPick: (h: [number, number] | null) => void;
 }) {
-  const others = [MAYOR, CRAFTSMAN].map((s) => ({ id: s.id, name: s.name, home: s.home! })).concat(homes);
+  const others = [MAYOR, CRAFTSMAN, REVIEWER].map((s) => ({ id: s.id, name: s.name, home: s.home! })).concat(homes);
   return (
     <div className="row" style={{ alignItems: "flex-start" }}>
       <div

@@ -843,3 +843,43 @@ details summary {
   opacity: 0.7;
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------------- 審核員、執行紀錄 */
+
+.pnote.review.ok {
+  color: var(--ok);
+}
+
+.pnote.review.bad {
+  color: var(--accent);
+}
+
+.answer-foot {
+  font-size: 12px;
+}
+
+.trace-row {
+  cursor: pointer;
+}
+
+.trace-row:hover {
+  border-color: var(--accent);
+}
+
+.trace-meta {
+  text-align: right;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.trace-step.error {
+  border-color: var(--danger);
+}
+
+.review-card.ok {
+  border-left: 4px solid var(--ok);
+}
+
+.review-card.bad {
+  border-left: 4px solid var(--accent);
+}

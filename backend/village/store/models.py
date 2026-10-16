@@ -80,3 +80,33 @@ class AgentDef(Base):
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)  # 內建範例刪除後保留紀錄，避免重啟又被匯入
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class Setting(Base):
+    """村規等全域設定：key → JSON（例如 village → 審核員、逾時、平行執行）。"""
+
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class RunTrace(Base):
+    """一次問答的執行紀錄：計畫、每一步的輸入輸出、審核結果、耗時與 token。steps 存 JSON（總是跟著 run 一起讀）。"""
+
+    __tablename__ = "runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    message: Mapped[str] = mapped_column(String(4000))
+    status: Mapped[str] = mapped_column(String(16), default="running", index=True)  # running/done/error/cancelled/interrupted
+    answer: Mapped[str | None] = mapped_column(String)
+    error: Mapped[str | None] = mapped_column(String(2000))
+    plan: Mapped[dict | None] = mapped_column(JSON)  # {steps, source, notes}
+    steps: Mapped[list | None] = mapped_column(JSON)
+    reviews: Mapped[list | None] = mapped_column(JSON)  # 審核員每一輪的判斷
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

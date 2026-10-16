@@ -180,7 +180,22 @@ class BaseAgent(Protocol):
 | Timeout / 取消 | 每步上限秒數，可從 UI 取消 | asyncio |
 | Trace | 每次 run、每一步的輸入輸出、耗時、token | 存進 DB，前端可展開看 |
 
-**審核員**本身也是一個 agent（`reviewer`），在村落裡也看得到它出來工作。
+**審核員**（`core/reviewer.py`）是系統角色 `reviewer`，在村落裡也看得到它出來工作。流程：
+
+1. 所有步驟完成後，把「使用者的請求」與最終步驟（沒有其他步驟用到它的成果，平行時可能有多個）的成果交給審核員
+2. 結構化輸出 `{pass, reason, fix, step}`；只有明顯問題才判不合格，風格偏好不算
+3. 不合格 → 把理由、修改建議與被退回的成果交給該步驟的村民重做（`review_redo` 次），再審一次
+4. 審核員不能用或輸出無法解析 → 略過，不擋答案
+
+**村規**（`store/settings.py`，`settings` 表，API `/api/rules`）：審核員開關 / 模型 / 重做次數、平行執行 / 上限、每步逾時、紀錄保留筆數。
+
+**執行紀錄**（`store/runs.py`，`runs` 表，API `/api/runs`）：`POST /api/chat` 先建立紀錄再回傳 run_id，結束時補上計畫、
+每一步（送出的完整訊息 `input`、輸出、模型、耗時、token、重做原因、被審核員退回的版本）、審核結果與總 token。
+伺服器重啟時沒跑完的標成 `interrupted`；超過保留筆數的舊紀錄自動刪除。
+
+**取消**：`POST /api/chat/{run_id}/cancel` 取消該問答的 asyncio task，正在等的 LLM 呼叫會中斷，發 `run.cancelled`。
+
+**平行**：Executor 依 `use` 一批一批執行，同一批互不依賴，開啟平行時用 `asyncio.gather` 同時跑（Semaphore 限制數量）。
 
 ### 3.6 事件流（驅動村落動畫）
 
@@ -195,7 +210,8 @@ class BaseAgent(Protocol):
 | `agent.delta` | 串流中的半成品，聊天框即時顯示 |
 | `agent.handoff` (from→to) | 角色走向下一位（帶著卷軸） |
 | `agent.finished` / `agent.error` | 泡泡變 ✓ / ❗，幾秒後恢復閒晃 |
-| `review.started/finished` | 審核員出動 |
+| `review.started` / `review.finished` | 審核員出動；finished 帶 `passed`、`reason`、`fix`、`step`（或 `skipped`） |
+| `run.cancelled` | 使用者按停止，所有忙碌的村民收工 |
 | `workshop.started` / `workshop.finished` / `workshop.error` | 工匠（`agent: craftsman`）追問或打造村民時的動態 |
 | `run.finished` | 聊天框出現最終答案 |
 
@@ -281,6 +297,7 @@ multi-agent-village/
 │       │   ├── remote_agent.py  # kind=remote（A2A client）
 │       │   ├── orchestrator.py  # 村長：規劃
 │       │   ├── workshop.py      # 工匠：對話打造村民草稿
+│       │   ├── reviewer.py      # 審核員：最終答案檢查
 │       │   └── executor.py      # DAG 執行 + retry
 │       ├── harness/             # input_guard, validators, content_guard
 │       ├── events.py            # Event bus

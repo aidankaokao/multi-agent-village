@@ -65,6 +65,8 @@ def _quirk_for(param: str, code: str, body: dict) -> str | None:
         if code == "reasoning_required":  # 一定要思考的模型：用最省的 low
             return "low_effort" if body["reasoning_effort"] in ("none", "minimal") else None
         return "no_reasoning_effort"
+    if param == "stream_options" and "stream_options" in body:
+        return "no_stream_usage"  # 不支援串流時回報 token 用量：拿掉，只是少了統計
     if param == "stream" and body.get("stream"):
         return "no_stream"  # 例如 OpenAI 組織未驗證時不能串流 gpt-5
     return None
@@ -84,7 +86,16 @@ def _apply(body: dict, quirks: set[str]) -> dict:
         b["reasoning_effort"] = "minimal"
     if "no_stream" in quirks:
         b.pop("stream", None)
+    if "no_stream_usage" in quirks or not b.get("stream"):
+        b.pop("stream_options", None)
     return b
+
+
+def _usage(u) -> dict:
+    """統一成 {input_tokens, output_tokens}（和 Anthropic 一樣），沒有就回空 dict。"""
+    if not isinstance(u, dict) or "prompt_tokens" not in u:
+        return {}
+    return {"input_tokens": u.get("prompt_tokens") or 0, "output_tokens": u.get("completion_tokens") or 0}
 
 
 class OpenAICompatClient(LLMClient):
@@ -120,6 +131,7 @@ class OpenAICompatClient(LLMClient):
             }
         if on_delta is not None:
             body["stream"] = True
+            body["stream_options"] = {"include_usage": True}  # 串流最後一塊附上 token 用量
         quirks = _QUIRKS.setdefault((self._base_url, model), set())
         for attempt in range(MAX_PARAM_RETRIES + 1):
             try:
@@ -139,8 +151,7 @@ class OpenAICompatClient(LLMClient):
 
     async def _send(self, body: dict, on_delta) -> tuple[str, str | None, str | None, dict]:
         if body.get("stream"):
-            text, finish, model_name = await self._stream(body, on_delta)
-            return text, finish, model_name, {}
+            return await self._stream(body, on_delta)
         data = await self._request("POST", "chat/completions", json=body)
         try:
             choice = data["choices"][0]
@@ -149,12 +160,13 @@ class OpenAICompatClient(LLMClient):
             raise LLMError(f"unexpected response shape: {e}") from None
         if on_delta is not None and text:  # 想串流但服務不允許：一次給完
             await on_delta(text)
-        return text, choice.get("finish_reason"), data.get("model"), data.get("usage") or {}
+        return text, choice.get("finish_reason"), data.get("model"), _usage(data.get("usage"))
 
-    async def _stream(self, body: dict, on_delta) -> tuple[str, str | None, str | None]:
+    async def _stream(self, body: dict, on_delta) -> tuple[str, str | None, str | None, dict]:
         """SSE 串流：每行 `data: {...}`，以 `data: [DONE]` 結束。"""
         parts: list[str] = []
         finish = model_name = None
+        usage: dict = {}
         try:
             async with self._http.stream("POST", "chat/completions", json=body) as resp:
                 if resp.status_code >= 400:
@@ -173,6 +185,7 @@ class OpenAICompatClient(LLMClient):
                     if err := chunk.get("error"):
                         raise LLMError(redact(f"stream error: {err}"))
                     model_name = chunk.get("model") or model_name
+                    usage = _usage(chunk.get("usage")) or usage
                     for choice in chunk.get("choices") or []:
                         if piece := (choice.get("delta") or {}).get("content"):
                             parts.append(piece)
@@ -180,7 +193,7 @@ class OpenAICompatClient(LLMClient):
                         finish = choice.get("finish_reason") or finish
         except httpx.HTTPError as e:
             raise LLMError(redact(f"{type(e).__name__}: {e}")) from None
-        return "".join(parts), finish, model_name
+        return "".join(parts), finish, model_name, usage
 
     async def list_models(self) -> list[RemoteModel]:
         data = await self._request("GET", "models")

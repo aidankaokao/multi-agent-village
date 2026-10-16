@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
+from village.api.runs import router as runs_router
 from village.api.workshop import router as workshop_router
 from village.config import Settings
 from village.core.executor import Runner
@@ -20,6 +21,8 @@ from village.security.crypto import SecretBox, load_keyring
 from village.security.redact import install_log_redaction
 from village.store.agents import load_registry, seed_builtin
 from village.store.db import init_db, make_engine, make_sessionmaker
+from village.store.runs import TraceStore
+from village.store.settings import RulesStore
 
 log = logging.getLogger("village")
 
@@ -35,7 +38,10 @@ class AppContext:
     admin_token: str | None
     registry: AgentRegistry
     runner: Runner
+    rules: RulesStore
+    trace: TraceStore
     tasks: set[asyncio.Task] = field(default_factory=set)
+    active: dict[str, asyncio.Task] = field(default_factory=dict)  # run_id → 執行中的問答（取消用）
 
 
 def create_app(
@@ -57,6 +63,11 @@ def create_app(
             log.info("匯入內建範例村民：%s", added)
         registry = AgentRegistry()
         await load_registry(sm, registry)
+        rules = RulesStore(sm)
+        await rules.load()
+        trace = TraceStore(sm, keep=rules.current.keep_runs)
+        if n := await trace.mark_interrupted():
+            log.info("上次中斷的問答 %d 筆標記為 interrupted", n)
         app.state.ctx = AppContext(
             settings=settings,
             engine=engine,
@@ -66,7 +77,9 @@ def create_app(
             bus=bus,
             admin_token=load_admin_token(),
             registry=registry,
-            runner=Runner(registry, llm, bus, handoff_delay=handoff_delay),
+            runner=Runner(registry, llm, bus, handoff_delay=handoff_delay, rules=rules, trace=trace),
+            rules=rules,
+            trace=trace,
         )
         if app.state.ctx.admin_token is None:
             log.warning("未設定 VILLAGE_ADMIN_TOKEN：LLM 設定 API 不需驗證")
@@ -80,6 +93,7 @@ def create_app(
     app.include_router(chat_router)
     app.include_router(villagers_router)
     app.include_router(workshop_router)
+    app.include_router(runs_router)
 
     @app.get("/api/health")
     async def health():

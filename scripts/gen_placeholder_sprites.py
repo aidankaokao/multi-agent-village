@@ -281,18 +281,35 @@ def acc_chef(d, view, frame, dy):
         r(d, 12, 19 + dy, 17, 25, white)
 
 
+def acc_auditor(d, view, frame, dy):
+    collar, glass, rim, handle = hexc("#f4f4f4"), hexc("#cfe3ff"), hexc("#c8a060"), hexc("#7a4e2a")
+    r(d, 9, 3 + dy, 22, 5 + dy, hexc("#2a2a3a"))  # 方帽
+    if view in ("down", "up"):
+        r(d, 13, 18 + dy, 18, 19 + dy, collar)
+        px(d, [(15, 20 + dy), (16, 20 + dy)], collar)
+    if view == "down":
+        r(d, 22, 12 + dy, 26, 16 + dy, rim)  # 放大鏡
+        r(d, 23, 13 + dy, 25, 15 + dy, glass)
+        r(d, 22, 17 + dy, 22, 20 + dy, handle)
+    elif view == "left":
+        r(d, 7, 12 + dy, 11, 16 + dy, rim)
+        r(d, 8, 13 + dy, 10, 15 + dy, glass)
+        r(d, 11, 17 + dy, 11, 20 + dy, handle)
+
+
 CHARACTERS = {
     # id: (中文名, 外觀說明（工匠挑外觀時參考）, 調色盤, 配件, 系統角色？)
     "poet": ("詩人", "貝雷帽、羽毛筆，文藝創作", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet, False),
     "jester": ("笑話師", "小丑帽，幽默娛樂", dict(hair="#e08a2c", cloth="#d8343c", cloth2="#7a2a8a", shoe="#3a2a20"), acc_jester, False),
     "translator": ("翻譯官", "眼鏡、書本，語言文字", dict(hair="#1e1e2a", cloth="#3a6fc4", cloth2="#28477d", shoe="#2a2a2a"), acc_translator, False),
-    "reviewer": ("審核員", "制服帽、徽章，檢查把關", dict(hair="#3b2a1e", cloth="#2b3a67", cloth2="#1b2442", shoe="#111111"), acc_reviewer, False),
+    "reviewer": ("巡查員", "制服帽、徽章，檢查把關", dict(hair="#3b2a1e", cloth="#2b3a67", cloth2="#1b2442", shoe="#111111"), acc_reviewer, False),
     "scholar": ("學者", "學士帽、卷軸，知識研究、教學解說", dict(hair="#4a3426", cloth="#5a4a8a", cloth2="#3a2f5e", shoe="#2a2a2a"), acc_scholar, False),
     "merchant": ("商人", "寬簷帽、錢袋，商業計算、買賣", dict(hair="#2a1e14", cloth="#2f7f7a", cloth2="#1f5552", shoe="#3a2a20"), acc_merchant, False),
     "farmer": ("農夫", "草帽、稻穗，生活實用、自然", dict(hair="#5a3a22", cloth="#7a9a3a", cloth2="#4a6a2a", shoe="#3a2a20"), acc_farmer, False),
     "chef": ("廚師", "高帽、湯匙，料理食譜", dict(hair="#3a2a1e", cloth="#e8e8ee", cloth2="#3a3a4a", shoe="#222222"), acc_chef, False),
     "mayor": ("村長", "王冠、法杖", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor, True),
     "craftsman": ("工匠", "安全帽、槌子", dict(hair="#3a2a1e", cloth="#4a6a8a", cloth2="#2a3a4a", shoe="#2a1a1a"), acc_craftsman, True),
+    "auditor": ("審核員", "黑袍、放大鏡", dict(hair="#5a4a3a", cloth="#2a2a3a", cloth2="#1a1a26", shoe="#111111"), acc_auditor, True),
 }
 
 

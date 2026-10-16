@@ -30,7 +30,7 @@
       "path": "characters/translator.png"
     },
     "reviewer": {
-      "name": "審核員",
+      "name": "巡查員",
       "desc": "制服帽、徽章，檢查把關",
       "path": "characters/reviewer.png"
     },
@@ -64,6 +64,12 @@
       "name": "工匠",
       "desc": "安全帽、槌子",
       "path": "characters/craftsman.png",
+      "system": true
+    },
+    "auditor": {
+      "name": "審核員",
+      "desc": "黑袍、放大鏡",
+      "path": "characters/auditor.png",
       "system": true
     }
   },

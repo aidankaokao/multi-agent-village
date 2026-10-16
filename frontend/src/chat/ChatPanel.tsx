@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo } from "../api";
-import type { RunsState, RunView, StepView } from "./runs";
+import { leafIds, type RunsState, type RunView, type StepView } from "./runs";
 
 const SOURCE_LABEL: Record<string, string> = {
   llm: "村長規劃",
@@ -28,16 +28,19 @@ interface Props {
   agents: AgentInfo[];
   onSend: (message: string) => Promise<void>;
   onReset: () => void;
+  onCancel: (runId: string) => Promise<void>;
+  onOpenTrace: (runId: string) => void;
 }
 
-export function ChatPanel({ runs, agents, onSend, onReset }: Props) {
+export function ChatPanel({ runs, agents, onSend, onReset, onCancel, onOpenTrace }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 使用者往上捲去看舊內容時，串流不要把畫面拉回底部
-  const names: Record<string, string> = { mayor: "村長", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
-  const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));
+  const names: Record<string, string> = { mayor: "村長", reviewer: "審核員", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
+  const active = runs.order.filter((id) => ["planning", "running"].includes(runs.byId[id].status));
+  const busy = active.length > 0;
 
   useEffect(() => {
     const el = log.current;
@@ -107,7 +110,7 @@ export function ChatPanel({ runs, agents, onSend, onReset }: Props) {
           </div>
         )}
         {runs.order.map((id) => (
-          <RunBlock key={id} run={runs.byId[id]} names={names} />
+          <RunBlock key={id} run={runs.byId[id]} names={names} onOpenTrace={() => onOpenTrace(id)} />
         ))}
       </div>
 
@@ -131,9 +134,21 @@ export function ChatPanel({ runs, agents, onSend, onReset }: Props) {
             }
           }}
         />
-        <button type="submit" disabled={sending || !text.trim()}>
-          {sending ? "送出中…" : busy ? "送出（村民忙碌中）" : "送出"}
-        </button>
+        <div className="row">
+          <button type="submit" disabled={sending || !text.trim()} style={{ flex: 1 }}>
+            {sending ? "送出中…" : busy ? "送出（村民忙碌中）" : "送出"}
+          </button>
+          {busy && (
+            <button
+              type="button"
+              className="danger"
+              title="停止執行中的問答（已完成的步驟會保留在紀錄裡）"
+              onClick={() => Promise.all(active.map(onCancel)).catch((e) => setError((e as Error).message))}
+            >
+              ■ 停止
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );
@@ -155,20 +170,25 @@ const secs = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
 function statusText(run: RunView, names: Record<string, string>): string {
   if (run.status === "planning") return "正在想要請誰幫忙…";
   if (run.status === "failed") return "失敗";
+  if (run.status === "cancelled") return "已停止";
   if (run.status === "done") return run.ok === false ? "部分失敗" : "完成";
+  if (run.reviewing) return "審核員檢查中…";
   if (run.source === "direct") return "回覆中…";
-  const active = run.steps.find((s) => s.status === "running");
-  if (active) return `${names[active.agent] ?? active.agent} 工作中…`;
+  const working = run.steps.filter((s) => s.status === "running");
+  if (working.length) return `${working.map((s) => names[s.agent] ?? s.agent).join("、")} 工作中…`;
   return run.steps.some((s) => s.status === "pending") ? "交接中…" : "整理結果中…";
 }
 
-function RunBlock({ run, names }: { run: RunView; names: Record<string, string> }) {
-  const finished = run.status === "done" || run.status === "failed";
+function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<string, string>; onOpenTrace: () => void }) {
+  const finished = run.status === "done" || run.status === "failed" || run.status === "cancelled";
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? !finished; // 執行中自動展開，完成後自動收起；使用者點過就照使用者的
   const now = useNow(!finished);
-  const last = run.steps[run.steps.length - 1];
-  const hasProcess = run.status === "planning" || run.steps.length > 0 || run.notes.length > 0;
+  const leaves = leafIds(run);
+  // 只有一個最終步驟時，它的成果就是下方的回答（串流也顯示在那裡）；平行有多個時各自顯示在執行過程
+  const last = leaves.size === 1 ? run.steps.find((s) => leaves.has(s.id)) : undefined;
+  const lastReview = run.reviews[run.reviews.length - 1];
+  const hasProcess = run.status === "planning" || run.steps.length > 0 || run.notes.length > 0 || run.reviews.length > 0;
 
   let answer = "";
   if (run.status === "done") answer = run.answer ?? "";
@@ -208,6 +228,12 @@ function RunBlock({ run, names }: { run: RunView; names: Record<string, string> 
             {run.steps.map((s) => (
               <StepItem key={s.id} step={s} names={names} now={now} isLast={s === last} />
             ))}
+            {run.reviews.map((r, i) => (
+              <div key={i} className={`pnote review ${r.skipped ? "" : r.passed ? "ok" : "bad"}`}>
+                🔍 審核員：{r.skipped ? r.reason : r.passed ? `合格。${r.reason}` : `退回 ${r.step ?? ""}。${r.reason}`}
+              </div>
+            ))}
+            {run.reviewing && <div className="pnote live">🔍 審核員正在檢查答案…</div>}
           </div>
         )}
 
@@ -219,6 +245,20 @@ function RunBlock({ run, names }: { run: RunView; names: Record<string, string> 
         )}
         {run.status === "done" && !run.answer && <div className="step-error">沒有產生結果，請展開執行過程查看原因。</div>}
         {run.status === "failed" && <div className="step-error">執行失敗：{run.error}</div>}
+        {run.status === "cancelled" && <div className="muted">■ 已停止。完成的步驟保留在執行過程與紀錄裡。</div>}
+        {finished && (
+          <div className="row answer-foot">
+            {lastReview && !lastReview.skipped && (
+              <span className={`tag ${lastReview.passed ? "ok" : "warn"}`} title={lastReview.reason}>
+                {lastReview.passed ? "🔍 審核通過" : "🔍 審核有疑慮"}
+              </span>
+            )}
+            <span style={{ flex: 1 }} />
+            <button className="link" onClick={onOpenTrace} title="查看每一步的輸入、輸出、耗時與 token">
+              📜 紀錄
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

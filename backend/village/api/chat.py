@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -48,7 +48,21 @@ async def chat(body: ChatBody, request: Request):
     """非同步執行：立即回傳 run_id，進度與結果透過 /ws 事件推送。"""
     ctx = request.app.state.ctx
     run_id = uuid.uuid4().hex[:12]
-    task = asyncio.create_task(ctx.runner.run(run_id, body.message.strip()))
+    message = body.message.strip()
+    await ctx.trace.start(run_id, message)  # 先建立紀錄：回傳 run_id 後馬上就查得到
+    task = asyncio.create_task(ctx.runner.run(run_id, message, traced=True))
     ctx.tasks.add(task)  # 保留參考，避免 task 被 GC
+    ctx.active[run_id] = task
     task.add_done_callback(ctx.tasks.discard)
+    task.add_done_callback(lambda _: ctx.active.pop(run_id, None))
     return {"run_id": run_id}
+
+
+@router.post("/chat/{run_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel(run_id: str, request: Request):
+    """停止執行中的問答：正在等的 LLM 呼叫會被中斷，已完成的步驟保留在執行紀錄。"""
+    task = request.app.state.ctx.active.get(run_id)
+    if task is None or task.done():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "這次問答已經結束或不存在")
+    task.cancel()
+    return {"ok": True}
