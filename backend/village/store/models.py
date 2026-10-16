@@ -92,12 +92,40 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class User(Base):
+    """帳號。第一個建立的帳號是管理員；之後註冊或由管理員新增的是一般成員。"""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(64), unique=True)  # 一律小寫
+    display_name: Mapped[str] = mapped_column(String(100))
+    password_hash: Mapped[str] = mapped_column(String(256))  # scrypt，格式見 security/auth.py
+    role: Mapped[str] = mapped_column(String(16), default="member")  # admin / member
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthSession(Base):
+    """登入 session：cookie 裡放隨機 token，DB 只存它的 SHA-256（DB 外洩也拿不到可用的 token）。"""
+
+    __tablename__ = "auth_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+
+
 class RunTrace(Base):
     """一次問答的執行紀錄：計畫、每一步的輸入輸出、審核結果、耗時與 token。steps 存 JSON（總是跟著 run 一起讀）。"""
 
     __tablename__ = "runs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     message: Mapped[str] = mapped_column(String(4000))
     status: Mapped[str] = mapped_column(String(16), default="running", index=True)  # running/done/error/cancelled/interrupted
     answer: Mapped[str | None] = mapped_column(String)

@@ -1,7 +1,11 @@
 """village CLI
 
-  village serve          啟動後端（預設 127.0.0.1:8000）
-  village rotate-key     產生新主金鑰版本並重新加密所有 API key
+  village serve                      啟動後端（預設 127.0.0.1:8000）
+  village rotate-key                 產生新主金鑰版本並重新加密所有 API key
+  village reset-password <帳號>      忘記密碼時重設（會登出該帳號所有裝置）
+  village create-admin <帳號>        直接建立管理員帳號（或把既有帳號升為管理員並重設密碼）
+
+容器內：docker-compose exec backend village reset-password <帳號>
 """
 
 import argparse
@@ -12,7 +16,7 @@ from sqlalchemy import select
 from village.config import Settings
 from village.security.crypto import SecretBox, keyring_from_env, keyring_path, load_keyring, save_keyring
 from village.store.db import init_db, make_engine, make_sessionmaker
-from village.store.models import LlmProvider
+from village.store.models import AuthSession, LlmProvider, User
 
 
 async def rotate_key(settings: Settings) -> None:
@@ -39,11 +43,59 @@ async def rotate_key(settings: Settings) -> None:
     print(f"已輪替到 v{new_version}，重新加密 {count} 筆 API key。舊金鑰版本仍保留在 keyring 中。")
 
 
+def _ask_password() -> str:
+    import getpass
+
+    from village.security.auth import MIN_PASSWORD
+
+    while True:
+        pw = getpass.getpass("新密碼：")
+        if len(pw) < MIN_PASSWORD:
+            print(f"至少 {MIN_PASSWORD} 個字元")
+        elif pw != getpass.getpass("再輸入一次："):
+            print("兩次輸入不一樣")
+        else:
+            return pw
+
+
+async def set_password(settings: Settings, username: str, make_admin: bool) -> None:
+    from sqlalchemy import delete
+
+    from village.security.auth import USERNAME, hash_password
+
+    username = username.strip().lower()
+    if not USERNAME.match(username):
+        raise SystemExit("帳號格式不對：3～32 個字元，小寫英文、數字、底線、點或減號")
+    engine = make_engine(settings.database_url)
+    await init_db(engine)
+    sm = make_sessionmaker(engine)
+    async with sm() as s:
+        user = await s.scalar(select(User).where(User.username == username))
+        if user is None and not make_admin:
+            raise SystemExit(f"找不到帳號「{username}」")
+        pw = _ask_password()
+        if user is None:
+            s.add(User(username=username, display_name=username, password_hash=hash_password(pw), role="admin"))
+            msg = f"已建立管理員「{username}」"
+        else:
+            user.password_hash = hash_password(pw)
+            user.enabled = True
+            if make_admin:
+                user.role = "admin"
+            await s.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+            msg = f"已重設「{username}」的密碼" + ("並設為管理員" if make_admin else "") + "，所有裝置都需要重新登入"
+        await s.commit()
+    await engine.dispose()
+    print(msg)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="village")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve")
     sub.add_parser("rotate-key")
+    sub.add_parser("reset-password").add_argument("username")
+    sub.add_parser("create-admin").add_argument("username")
     args = parser.parse_args()
     settings = Settings.from_env()
 
@@ -53,3 +105,5 @@ def main() -> None:
         run()
     elif args.cmd == "rotate-key":
         asyncio.run(rotate_key(settings))
+    elif args.cmd in ("reset-password", "create-admin"):
+        asyncio.run(set_password(settings, args.username, make_admin=args.cmd == "create-admin"))

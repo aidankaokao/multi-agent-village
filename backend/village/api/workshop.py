@@ -9,7 +9,7 @@ from sqlalchemy import select
 from village.core import workshop
 from village.core.workshop import CRAFTSMAN_ID, Neighbor, SpriteOption
 from village.llm.base import ChatMessage
-from village.security.admin import require_admin
+from village.security.auth import require_admin
 from village.store.models import AgentDef
 
 router = APIRouter(prefix="/api/workshop", tags=["workshop"], dependencies=[Depends(require_admin)])

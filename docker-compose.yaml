@@ -10,7 +10,6 @@ services:
     environment:
       TZ: ${TZ:-Asia/Taipei}
       VILLAGE_OLLAMA_URL: ${VILLAGE_OLLAMA_URL:-http://host.docker.internal:11434/v1}
-      VILLAGE_ADMIN_TOKEN: ${VILLAGE_ADMIN_TOKEN:-}   # 留空 = LLM 設定不需驗證
       VILLAGE_MASTER_KEY: ${VILLAGE_MASTER_KEY:-}     # 留空 = 自動產生並存到 village-secrets volume
     volumes:
       - ./agents:/app/agents:ro   # 內建範例村民，只在第一次啟動時匯入 DB；之後在介面「村民」分頁管理

@@ -155,6 +155,7 @@ async def app_env(tmp_path, monkeypatch):
     app = create_app(settings, client_factory=FakeClient, handoff_delay=0)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})  # 第一位 = 管理員
             yield c, app
 
 
@@ -192,7 +193,7 @@ async def test_cancel_and_interrupted(app_env, monkeypatch):
     c, app = app_env
     ctx = app.state.ctx
 
-    async def slow_run(run_id, message, traced=False):
+    async def slow_run(run_id, message, traced=False, user_id=None):
         try:
             await asyncio.sleep(10)
         except asyncio.CancelledError:

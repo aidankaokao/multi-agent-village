@@ -40,6 +40,7 @@ async def env(tmp_path, monkeypatch):
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})  # 第一位 = 管理員
             yield c, db
 
 
@@ -49,21 +50,6 @@ async def _provider(c, name="cloud", base_url="http://cloud/v1", api_key=SECRET)
     )
     assert r.status_code == 201, r.text
     return r.json()
-
-
-async def test_no_admin_token_by_default(env):
-    c, _ = env
-    r = await c.get("/api/llm/providers", headers={"Authorization": ""})
-    assert r.status_code == 200
-
-
-async def test_admin_token_enforced_when_set(env):
-    c, _ = env
-    c._transport.app.state.ctx.admin_token = "s3cret-token"
-    r = await c.get("/api/llm/providers", headers={"Authorization": "Bearer wrong"})
-    assert r.status_code == 401
-    r = await c.get("/api/llm/providers", headers={"Authorization": "Bearer s3cret-token"})
-    assert r.status_code == 200
 
 
 async def test_api_key_never_returned_and_encrypted_at_rest(env):

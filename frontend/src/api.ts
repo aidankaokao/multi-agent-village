@@ -1,21 +1,5 @@
-// admin token 存在瀏覽器 localStorage（僅限本機開發）；Phase 5 帳號系統上線後改為登入 session
-const TOKEN_KEY = "village.adminToken";
-
-export function getAdminToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function setAdminToken(token: string) {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* 無痕模式等情況忽略 */
-  }
-}
+/** 登入用 httpOnly cookie（瀏覽器自動帶上，前端拿不到 token）。任何 API 回 401 就通知 App 回到登入頁。 */
+export const UNAUTHORIZED = "village:unauthorized";
 
 export class ApiError extends Error {
   constructor(
@@ -32,7 +16,6 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     ...rest,
     headers: {
       ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
-      Authorization: `Bearer ${getAdminToken()}`,
       ...rest.headers,
     },
     body: json !== undefined ? JSON.stringify(json) : rest.body,
@@ -45,6 +28,7 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     } catch {
       /* 非 JSON 回應 */
     }
+    if (res.status === 401 && !path.startsWith("/api/auth/")) window.dispatchEvent(new Event(UNAUTHORIZED));
     throw new ApiError(res.status, detail);
   }
   return res.status === 204 ? (undefined as T) : res.json();
@@ -136,6 +120,7 @@ export type RunStatus = "running" | "done" | "error" | "cancelled" | "interrupte
 
 export interface RunSummary {
   id: string;
+  user: string | null; // 提問者（管理員看全部紀錄時用）
   message: string;
   status: RunStatus;
   agents: string[];
@@ -188,6 +173,7 @@ export interface RunDetail extends RunSummary {
 }
 
 export interface VillageRules {
+  allow_registration: boolean;
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -325,4 +311,46 @@ export const workshop = {
       method: "POST",
       json: body,
     }),
+};
+
+// ---------------------------------------------------------------- 帳號
+
+export type Role = "admin" | "member";
+
+export interface Me {
+  id: string;
+  username: string;
+  display_name: string;
+  role: Role;
+}
+
+export interface AuthStatus {
+  setup_required: boolean; // 還沒有任何帳號：第一位註冊的人成為管理員
+  allow_registration: boolean;
+  user: Me | null;
+}
+
+export interface UserRow extends Me {
+  enabled: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export const auth = {
+  status: () => api<AuthStatus>("/api/auth/status"),
+  login: (username: string, password: string) => api<{ user: Me }>("/api/auth/login", { method: "POST", json: { username, password } }),
+  register: (username: string, password: string, display_name: string) =>
+    api<{ user: Me; first: boolean }>("/api/auth/register", { method: "POST", json: { username, password, display_name } }),
+  logout: () => api<void>("/api/auth/logout", { method: "POST" }),
+  changePassword: (old_password: string, new_password: string) =>
+    api<void>("/api/auth/password", { method: "POST", json: { old_password, new_password } }),
+};
+
+export const users = {
+  list: () => api<UserRow[]>("/api/users"),
+  create: (body: { username: string; password: string; display_name: string; role: Role }) =>
+    api<UserRow>("/api/users", { method: "POST", json: body }),
+  update: (id: string, body: Partial<{ display_name: string; role: Role; enabled: boolean; password: string }>) =>
+    api<UserRow>(`/api/users/${id}`, { method: "PATCH", json: body }),
+  remove: (id: string) => api<void>(`/api/users/${id}`, { method: "DELETE" }),
 };

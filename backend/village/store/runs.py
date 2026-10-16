@@ -16,9 +16,9 @@ class TraceStore:
         self._sm = sessionmaker
         self.keep = keep
 
-    async def start(self, run_id: str, message: str) -> None:
+    async def start(self, run_id: str, message: str, user_id: str | None = None) -> None:
         async with self._sm() as s:
-            s.add(RunTrace(id=run_id, message=message[:4000], status="running"))
+            s.add(RunTrace(id=run_id, user_id=user_id, message=message[:4000], status="running"))
             await s.commit()
 
     async def finish(self, run_id: str, **fields) -> None:

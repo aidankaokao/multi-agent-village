@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Attachments } from "../ui/Attachments";
-import { ApiError, traces, type AgentInfo, type RunDetail, type RunStatus, type RunSummary, type TraceStep } from "../api";
+import { traces, type AgentInfo, type RunDetail, type RunStatus, type RunSummary, type TraceStep } from "../api";
 
 const STATUS: Record<RunStatus, [string, string]> = {
   running: ["⏳", "執行中"],
@@ -50,7 +50,7 @@ export function TracePanel({
       setMore(rows.length === 30);
       setError("");
     } catch (e) {
-      setError(e instanceof ApiError && e.status === 401 ? "需要管理員驗證（到「村民」或「LLM 設定」輸入 admin token）" : (e as Error).message);
+      setError((e as Error).message);
     }
   }, []);
 
@@ -110,6 +110,7 @@ export function TracePanel({
           <div className="list-main">
             <div className="clamp">{r.message}</div>
             <div className="muted">
+              {r.user && <>👤 {r.user}・</>}
               {r.agents.length ? r.agents.map((a) => names[a] ?? a).join(" → ") : "村長直接回覆"}
               {r.review !== null && (r.review ? "・🔍 通過" : "・🔍 有疑慮")}
             </div>

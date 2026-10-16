@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, LLMError, ProviderKind, ReasoningEffort
 from village.llm.service import TIERS, LLMService
-from village.security.admin import require_admin
+from village.security.auth import require_admin
 from village.security.crypto import SecretBox, secret_hint
 from village.store.models import LlmModel, LlmProvider, ModelTier, new_id
 

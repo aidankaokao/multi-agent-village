@@ -304,6 +304,8 @@ async def test_agents_and_chat_api(tmp_path, monkeypatch):
     app = create_app(settings, handoff_delay=0)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            assert (await c.get("/api/agents")).status_code == 401  # 沒登入
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})
             r = await c.get("/api/agents")
             ids = {a["id"]: a for a in r.json()["agents"]}
             assert ids["poet"]["sprite"] == "poet" and ids["poet"]["home"] == [7, 6]

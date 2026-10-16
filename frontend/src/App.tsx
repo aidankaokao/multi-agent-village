@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { village, type AgentInfo } from "./api";
+import { AccountsPanel, PasswordModal } from "./accounts/AccountsPanel";
+import { auth, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type Me } from "./api";
+import { LoginPage } from "./auth/LoginPage";
 import { ChatPanel } from "./chat/ChatPanel";
 import { initialRuns, runsReducer } from "./chat/runs";
 import { useVillageEvents } from "./events";
@@ -10,20 +12,54 @@ import { VillagerManager } from "./villagers/VillagerManager";
 import { VillageCanvas, type VillageHandle } from "./village/VillageCanvas";
 import type { VillagerInfo } from "./village/VillageScene";
 
-type Page = "villagers" | "traces" | "rules" | "llm";
+type Page = "villagers" | "traces" | "rules" | "accounts" | "llm";
 
-const PAGES: { id: Page; icon: string; label: string }[] = [
-  { id: "villagers", icon: "🧑‍🌾", label: "村民" },
+const PAGES: { id: Page; icon: string; label: string; admin?: boolean }[] = [
+  { id: "villagers", icon: "🧑‍🌾", label: "村民", admin: true },
   { id: "traces", icon: "📜", label: "紀錄" },
-  { id: "rules", icon: "⚖️", label: "村規" },
-  { id: "llm", icon: "🧠", label: "LLM 設定" },
+  { id: "rules", icon: "⚖️", label: "村規", admin: true },
+  { id: "accounts", icon: "👥", label: "帳號", admin: true },
+  { id: "llm", icon: "🧠", label: "LLM 設定", admin: true },
 ];
+
+/** 最外層：還沒登入就顯示登入頁（示範村落 + 登入 / 註冊），登入後進入村子 */
+export function App() {
+  const [status, setStatus] = useState<AuthStatus | null>(null);
+  const load = useCallback(() => {
+    auth
+      .status()
+      .then(setStatus)
+      .catch(() => setStatus({ setup_required: false, allow_registration: false, user: null }));
+  }, []);
+
+  useEffect(() => {
+    load();
+    window.addEventListener(UNAUTHORIZED, load); // session 過期或被管理員停用 → 回登入頁
+    return () => window.removeEventListener(UNAUTHORIZED, load);
+  }, [load]);
+
+  if (!status) return null;
+  if (!status.user) return <LoginPage status={status} onDone={(me) => setStatus({ ...status, user: me, setup_required: false })} />;
+  return (
+    <VillageApp
+      key={status.user.id}
+      me={status.user}
+      onLogout={async () => {
+        await auth.logout().catch(() => {});
+        load();
+      }}
+    />
+  );
+}
 
 /**
  * 版面：像素地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
  * 右下 💬 打開問答視窗。抽屜與問答視窗同時只開一個（進行中的問答不受影響）。
  */
-export function App() {
+function VillageApp({ me, onLogout }: { me: Me; onLogout: () => void }) {
+  const pages = PAGES.filter((p) => !p.admin || me.role === "admin");
+  const [userMenu, setUserMenu] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const villageRef = useRef<VillageHandle>(null);
   const [page, setPage] = useState<Page | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -77,6 +113,14 @@ export function App() {
     }
   };
 
+  // 帳號選單：點其他地方就收起
+  useEffect(() => {
+    if (!userMenu) return;
+    const close = (e: MouseEvent) => !(e.target as Element).closest(".user-chip") && setUserMenu(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [userMenu]);
+
   // Esc：先關選單，再關抽屜 / 問答視窗；抽屜裡還有彈窗時交給彈窗處理
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -96,7 +140,7 @@ export function App() {
     dispatch({ type: "local", run_id, message });
   };
 
-  const current = PAGES.find((p) => p.id === page);
+  const current = pages.find((p) => p.id === page);
 
   return (
     <div className={`stage ${page ? "with-drawer" : ""}`}>
@@ -104,6 +148,20 @@ export function App() {
         <VillageCanvas ref={villageRef} villagers={villagers} />
       </div>
       <div className="village-name">Multi-Agent Village</div>
+      <div className="user-chip">
+        <button onClick={() => setUserMenu(!userMenu)} title="帳號">
+          👤 {me.display_name}
+          {me.role === "admin" && <span className="muted">（管理員）</span>} ▾
+        </button>
+        {userMenu && (
+          <div className="user-menu">
+            <span className="muted">@{me.username}</span>
+            <button onClick={() => (setChangingPassword(true), setUserMenu(false))}>🔑 修改密碼</button>
+            <button onClick={onLogout}>🚪 登出</button>
+          </div>
+        )}
+      </div>
+      {changingPassword && <PasswordModal onClose={() => setChangingPassword(false)} />}
 
       {/* 右上：頁面選單（抽屜打開時改用抽屜上方的切換列） */}
       {!page && (
@@ -124,7 +182,7 @@ export function App() {
             {menuOpen ? "✕" : "⚙️"}
           </button>
           {menuOpen &&
-            PAGES.map((p, i) => (
+            pages.map((p, i) => (
               <button key={p.id} className="fab-item" style={{ animationDelay: `${i * 40}ms` }} onClick={() => openPage(p.id)}>
                 <span className="fab-label">{p.label}</span>
                 <span className="fab-icon">{p.icon}</span>
@@ -138,7 +196,7 @@ export function App() {
         <aside className="drawer" key="drawer">
           <div className="drawer-head">
             <nav className="drawer-tabs">
-              {PAGES.map((p) => (
+              {pages.map((p) => (
                 <button key={p.id} className={p.id === page ? "active" : ""} onClick={() => openPage(p.id)} title={p.label}>
                   <span>{p.icon}</span> {p.label}
                 </button>
@@ -152,6 +210,7 @@ export function App() {
             {page === "villagers" && <VillagerManager />}
             {page === "traces" && <TracePanel agents={agents} openId={traceId} onOpened={clearTraceId} refreshKey={traceTick} />}
             {page === "rules" && <RulesPanel />}
+            {page === "accounts" && <AccountsPanel me={me} />}
             {page === "llm" && <LlmSettings />}
           </div>
         </aside>

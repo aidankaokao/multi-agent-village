@@ -276,7 +276,15 @@ api_key_ct + api_key_nonce  ──存 SQLite/Postgres──
 | 有人連到 API | 拿不到明文，只看得到 hint |
 | 攻擊者同時拿到 DB **和** 主金鑰（整台主機被控制） | 擋不住——這是所有應用層加密的極限，要靠主機安全與把主金鑰交給 Secret Manager / KMS 管理來降低風險 |
 
-### 3.8 記憶與帳號（後期）
+### 3.8 帳號、記憶與資料庫
+
+**帳號（已完成，`security/auth.py`、`api/auth.py`）**：`users`、`auth_sessions`。第一位註冊者是管理員；
+session token 放 httpOnly + SameSite=Lax cookie，DB 只存 SHA-256；密碼 scrypt；登入失敗 5 次鎖 60 秒。
+`runs.user_id` 記錄提問者；EventBus 以 `claim(run_id, user_id)` 標記事件擁有者，WebSocket 依 `for_viewer` 對其他人只送動畫欄位。
+
+**資料庫遷移（已完成，`store/migrate.py`、`store/migrations/`）**：Alembic，由程式呼叫（不需 alembic.ini），啟動時 upgrade head。
+
+**記憶與對話（規劃中）**：
 
 - `users`、`conversations`、`messages`：對話紀錄（短期記憶）
 - `memories`：長期記憶（使用者偏好、事實），由一個 `memory` 背景 agent 從對話中萃取，問答前檢索相關記憶塞進 context

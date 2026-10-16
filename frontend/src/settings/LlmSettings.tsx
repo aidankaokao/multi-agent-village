@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
-import { ApiError, getAdminToken, llm, setAdminToken, type Model, type Provider, type ProviderKind, type ReasoningEffort, type RemoteModel, type Tiers } from "../api";
+import { llm, type Model, type Provider, type ProviderKind, type ReasoningEffort, type RemoteModel, type Tiers } from "../api";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
   ollama: "Ollama（本地）",
@@ -15,9 +15,6 @@ const FALLBACK_URL: Record<ProviderKind, string> = {
 };
 
 export function LlmSettings() {
-  const [token, setToken] = useState(getAdminToken());
-  // 只有後端設定了 VILLAGE_ADMIN_TOKEN 並回 401 時才要求輸入
-  const [needToken, setNeedToken] = useState(false);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [tiers, setTiers] = useState<Tiers>({ large: [], small: [] });
@@ -31,17 +28,15 @@ export function LlmSettings() {
       setModels(m);
       setTiers(t);
       setSub((s) => s ?? (p.length === 0 ? "providers" : "tiers")); // 第一次使用直接到供應商
-      setNeedToken(false);
       setError("");
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setNeedToken(true);
       setError(String((e as Error).message));
     }
   }, []);
 
   useEffect(() => {
     reload();
-  }, [token, reload]);
+  }, [reload]);
 
   const run: Run = async (fn) => {
     try {
@@ -53,29 +48,6 @@ export function LlmSettings() {
       return false;
     }
   };
-
-  if (needToken) {
-    return (
-      <div className="panel-body">
-        <h3>管理員驗證</h3>
-        <p className="hint">
-          後端設定了 <code>VILLAGE_ADMIN_TOKEN</code>，請輸入 .env 裡的同一個值。
-        </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const v = new FormData(e.currentTarget).get("token") as string;
-            setAdminToken(v.trim());
-            setToken(v.trim());
-          }}
-        >
-          <input name="token" type="password" autoComplete="off" placeholder="admin token" defaultValue={token} />
-          <button type="submit">確認</button>
-        </form>
-        {error && <p className="error">{error}</p>}
-      </div>
-    );
-  }
 
   return (
     <div className="panel-body">

@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from village.api.auth import router as auth_router
+from village.api.auth import users_router
 from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
@@ -14,9 +16,9 @@ from village.api.workshop import router as workshop_router
 from village.config import Settings
 from village.core.executor import Runner
 from village.core.registry import AgentRegistry
-from village.events import EventBus
+from village.events import EventBus, for_viewer
 from village.llm.service import ClientFactory, LLMService
-from village.security.admin import load_admin_token
+from village.security.auth import websocket_user
 from village.security.crypto import SecretBox, load_keyring
 from village.security.redact import install_log_redaction
 from village.store.agents import load_registry, seed_builtin
@@ -35,13 +37,13 @@ class AppContext:
     box: SecretBox
     llm: LLMService
     bus: EventBus
-    admin_token: str | None
     registry: AgentRegistry
     runner: Runner
     rules: RulesStore
     trace: TraceStore
     tasks: set[asyncio.Task] = field(default_factory=set)
     active: dict[str, asyncio.Task] = field(default_factory=dict)  # run_id → 執行中的問答（取消用）
+    owners: dict[str, str] = field(default_factory=dict)  # run_id → 提問者 user_id
 
 
 def create_app(
@@ -75,20 +77,19 @@ def create_app(
             box=box,
             llm=llm,
             bus=bus,
-            admin_token=load_admin_token(),
             registry=registry,
             runner=Runner(registry, llm, bus, handoff_delay=handoff_delay, rules=rules, trace=trace),
             rules=rules,
             trace=trace,
         )
-        if app.state.ctx.admin_token is None:
-            log.warning("未設定 VILLAGE_ADMIN_TOKEN：LLM 設定 API 不需驗證")
         yield
         for t in list(app.state.ctx.tasks):
             t.cancel()
         await engine.dispose()
 
     app = FastAPI(title="Multi-Agent Village", lifespan=lifespan)
+    app.include_router(auth_router)
+    app.include_router(users_router)
     app.include_router(llm_router)
     app.include_router(chat_router)
     app.include_router(villagers_router)
@@ -101,12 +102,16 @@ def create_app(
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
+        user = await websocket_user(socket)
+        if user is None:
+            await socket.close(code=4401)  # 沒登入
+            return
         await socket.accept()
         bus: EventBus = socket.app.state.ctx.bus
         q = bus.subscribe()
         try:
             while True:
-                await socket.send_json(await q.get())
+                await socket.send_json(for_viewer(await q.get(), user.id))
         except WebSocketDisconnect:
             pass
         finally:

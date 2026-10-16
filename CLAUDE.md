@@ -3,7 +3,7 @@
 像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者在問答框的任務。
 
 - 架構：`docs/ARCHITECTURE.md`
-- 階段規劃：`docs/ROADMAP.md`（目前：Phase 4 工具型村民完成，下一步 Phase 5 帳號與長期記憶）
+- 階段規劃：`docs/ROADMAP.md`（目前：Phase 5 進行中——5A 帳號與資料庫遷移完成，接著 5B 對話與多輪上下文、5C 長期記憶）
 - 素材規格：`docs/SPRITES.md`
 
 ## 原則
@@ -28,9 +28,12 @@
 
 - 後端：`cd backend && uv run village serve`（127.0.0.1:8000）；測試 `uv run pytest`
 - 前端：`cd frontend && npm run dev`（5173，/api 與 /ws 代理到後端）；型別檢查 `npx tsc -b`
-- admin token 為選用：只有設定 `VILLAGE_ADMIN_TOKEN` 時設定 API 才驗證（使用者覺得麻煩，預設關閉）
-- 主金鑰輪替：`cd backend && uv run village rotate-key`
+- 帳號：第一個註冊的帳號是管理員；之後註冊是一般成員（管理員可在「帳號」頁關閉註冊）。session 是 httpOnly cookie（30 天，DB 只存 token 的 SHA-256）。
+  權限：`require_user`（問答、自己的紀錄）、`require_admin`（村民、村規、LLM 設定、帳號）。忘記密碼：`village reset-password <帳號>`；直接建管理員：`village create-admin <帳號>`
+- 別人的問答事件經 WebSocket 只送動畫需要的欄位（`events.for_viewer`），內容只給提問者
+- 主金鑰輪替：`cd backend && uv run village rotate-key`（容器內：`docker-compose exec backend village rotate-key`）
 - 重新產生佔位 sprites：`python3 scripts/gen_placeholder_sprites.py`
 - 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh`（只 build image）→ 使用者自己執行 `docker-compose up -d`；前端綁 0.0.0.0。本機只有 docker-compose（無 docker compose plugin）
 - `cryptography` 釘在 `<47`：47+ 的 aarch64 wheel 在本機 Docker VM 會 SIGILL（exit 132）
-- DB schema 目前用 `create_all`，改欄位時要刪掉 `data/village.db` 重建（Phase 5 前導入 Alembic）
+- DB 結構用 Alembic（`backend/village/store/migrations/`），啟動時自動 upgrade head；Phase 5 前用 create_all 建的舊 DB 會先標記為 0001 再升級，資料保留。
+  改 models 後產生 migration：`cd backend && uv run python -m village.store.migrate revision -m "說明"`（外鍵記得命名，SQLite batch 模式需要）。已加 asyncpg，切 Postgres 只改 `DATABASE_URL=postgresql+asyncpg://…`

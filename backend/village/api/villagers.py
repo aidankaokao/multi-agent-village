@@ -17,7 +17,7 @@ from village.core.executor import StepResult, run_agent
 from village.core.harness import check_expect
 from village.core.registry import RESERVED_IDS
 from village.llm.base import LLMError
-from village.security.admin import require_admin
+from village.security.auth import require_admin
 from village.store.agents import load_registry, seed_builtin
 from village.store.models import AgentDef
 from village.tools import TOOLS

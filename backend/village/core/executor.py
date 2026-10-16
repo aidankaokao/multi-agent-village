@@ -127,8 +127,15 @@ class Runner:
         self.rules = rules
         self.trace = trace
 
-    async def run(self, run_id: str, message: str, traced: bool = False) -> dict:
-        """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）。"""
+    async def run(self, run_id: str, message: str, traced: bool = False, user_id: str | None = None) -> dict:
+        """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。"""
+        self.bus.claim(run_id, user_id)
+        try:
+            return await self._run(run_id, message, traced, user_id)
+        finally:
+            self.bus.release(run_id)
+
+    async def _run(self, run_id: str, message: str, traced: bool, user_id: str | None) -> dict:
         emit = self.bus.publish
         rules = self.rules.current if self.rules else DEFAULT_RULES
         agents = self.registry.all()
@@ -139,7 +146,7 @@ class Runner:
         if self.trace:
             self.trace.keep = rules.keep_runs
             if not traced:
-                await self.trace.start(run_id, message)
+                await self.trace.start(run_id, message, user_id)
 
         async def record(status: str, **fields) -> None:
             if self.trace:

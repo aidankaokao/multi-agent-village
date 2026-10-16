@@ -29,8 +29,8 @@ def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
 
 
 async def init_db(engine: AsyncEngine) -> None:
-    # Phase 0 先用 create_all；Phase 5 切 Postgres 前改用 Alembic migration
-    from village.store import models  # noqa: F401  註冊 models
+    """用 Alembic 升級到最新結構（全新 DB 會建立所有資料表；舊 DB 保留資料往上升級）。"""
+    from village.store import migrate
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(migrate.upgrade)

@@ -58,6 +58,7 @@ async def env(tmp_path, monkeypatch):
     app = create_app(settings, client_factory=FakeClient, handoff_delay=0)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})  # 第一位 = 管理員
             yield c, app, tmp_path / "v.db"
 
 

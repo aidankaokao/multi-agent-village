@@ -16,6 +16,7 @@ class VillageRules(BaseModel):
     parallel: bool = True  # 互不依賴的步驟同時執行
     max_parallel: int = Field(default=3, ge=1, le=8)
     keep_runs: int = Field(default=500, ge=10, le=10_000)  # 執行紀錄保留筆數
+    allow_registration: bool = True  # 登入頁可以自己註冊（一般成員）
 
 
 class RulesStore:

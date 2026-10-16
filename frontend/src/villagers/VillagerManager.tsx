@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAdminToken, llm, setAdminToken, villagers, type AgentSpec, type AgentTest, type Model, type ToolInfo, type Villager } from "../api";
+import { llm, villagers, type AgentSpec, type AgentTest, type Model, type ToolInfo, type Villager } from "../api";
 import { SpriteThumb, useManifest } from "./fields";
 import { TestsPanel, TryPanel } from "./Lab";
 import { SpecForm } from "./SpecForm";
@@ -28,7 +28,6 @@ export function VillagerManager() {
   const [models, setModels] = useState<Model[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [editing, setEditing] = useState<Editing | null>(null);
-  const [needToken, setNeedToken] = useState(false);
   const [error, setError] = useState("");
   const [importing, setImporting] = useState(false);
   const [inWorkshop, setInWorkshop] = useState(false);
@@ -40,18 +39,14 @@ export function VillagerManager() {
       setList(v);
       setModels(m);
       setTools(t);
-      setNeedToken(false);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setNeedToken(true);
-      else setError((e as Error).message);
+      setError((e as Error).message);
     }
   }, []);
 
   useEffect(() => {
     reload();
   }, [reload]);
-
-  if (needToken) return <TokenGate onDone={reload} />;
 
   if (editing) {
     return (
@@ -376,29 +371,6 @@ function Editor({
           </>
         )}
       </section>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- admin token
-
-function TokenGate({ onDone }: { onDone: () => void }) {
-  return (
-    <div className="panel-body">
-      <h3>管理員驗證</h3>
-      <p className="hint">
-        後端設定了 <code>VILLAGE_ADMIN_TOKEN</code>，請輸入 .env 裡的同一個值。
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setAdminToken((new FormData(e.currentTarget).get("token") as string).trim());
-          onDone();
-        }}
-      >
-        <input name="token" type="password" autoComplete="off" placeholder="admin token" defaultValue={getAdminToken()} />
-        <button type="submit">確認</button>
-      </form>
     </div>
   );
 }
