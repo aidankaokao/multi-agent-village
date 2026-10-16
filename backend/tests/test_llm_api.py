@@ -280,6 +280,21 @@ async def test_openai_compat_adapts_unsupported_params():
     await client.chat("gpt-5", [ChatMessage("user", "hi")], **kw)
     assert len(calls) == 1
 
+    # gpt-4o-mini：param 是 null，只在訊息裡說不認得 reasoning_effort → 直接拿掉
+    def handler_4o(request: httpx.Request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if "reasoning_effort" in body:
+            msg = "Unrecognized request argument supplied: reasoning_effort"
+            return httpx.Response(400, json={"error": {"message": msg, "type": "invalid_request_error", "param": None, "code": None}})
+        return httpx.Response(200, json={"model": "gpt-4o-mini", "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]})
+
+    calls.clear()
+    client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler_4o))
+    r = await client.chat("gpt-4o-mini", [ChatMessage("user", "hi")], max_tokens=10, temperature=0.2, reasoning_effort="none")
+    assert r.text == "ok" and len(calls) == 2
+    assert "reasoning_effort" not in calls[-1] and calls[-1]["temperature"] == 0.2 and calls[-1]["max_tokens"] == 10
+
     # 其他 400（不是參數問題）照常失敗，不會無限重試
     def handler2(request):
         return httpx.Response(400, json={"error": {"message": "bad key", "code": "invalid_api_key"}})

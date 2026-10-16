@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 
 import httpx
 
@@ -20,9 +21,13 @@ MAX_PARAM_RETRIES = 4
 class ParamError(LLMError):
     """HTTP 400 且明確指出某個參數不支援。"""
 
-    def __init__(self, msg: str, param: str):
+    def __init__(self, msg: str, param: str, code: str):
         super().__init__(msg)
         self.param = param
+        self.code = code
+
+
+_UNRECOGNIZED = re.compile(r"Unrecognized request arguments? supplied:\s*([A-Za-z_]+)")
 
 
 def _http_error(status: int, text: str) -> LLMError:
@@ -32,20 +37,27 @@ def _http_error(status: int, text: str) -> LLMError:
             err = json.loads(text).get("error") or {}
         except (json.JSONDecodeError, AttributeError):
             err = {}
-        if isinstance(err, dict) and err.get("param") and err.get("code") in ("unsupported_parameter", "unsupported_value"):
-            return ParamError(msg, err["param"])
+        if not isinstance(err, dict):
+            err = {}
+        if err.get("param") and err.get("code") in ("unsupported_parameter", "unsupported_value"):
+            return ParamError(msg, err["param"], err["code"])
+        # 舊模型（如 gpt-4o-mini）param 是 null，參數名只寫在訊息裡
+        if m := _UNRECOGNIZED.search(str(err.get("message") or "")):
+            return ParamError(msg, m.group(1), "unsupported_parameter")
     return LLMError(msg)
 
 
-def _quirk_for(param: str, body: dict) -> str | None:
+def _quirk_for(param: str, code: str, body: dict) -> str | None:
     """依出錯的參數決定要怎麼調整；回傳 None 代表沒辦法自動處理。"""
     if param == "max_tokens" and "max_tokens" in body:
         return "max_completion_tokens"
     if param == "temperature" and "temperature" in body:
         return "no_temperature"
     if param == "reasoning_effort" and "reasoning_effort" in body:
-        # gpt-5 沒有 none，最省的是 minimal；minimal 也不收就整個拿掉
-        return "minimal_effort" if body["reasoning_effort"] == "none" else "no_reasoning_effort"
+        # gpt-5 有這個參數但沒有 none 這個值 → 改 minimal；非思考型模型（gpt-4o-mini）根本不認得 → 拿掉
+        if code == "unsupported_value" and body["reasoning_effort"] == "none":
+            return "minimal_effort"
+        return "no_reasoning_effort"
     if param == "stream" and body.get("stream"):
         return "no_stream"  # 例如 OpenAI 組織未驗證時不能串流 gpt-5
     return None
@@ -105,7 +117,7 @@ class OpenAICompatClient(LLMClient):
                 text, finish, model_name, usage = await self._send(_apply(body, quirks), on_delta)
                 break
             except ParamError as e:
-                fix = _quirk_for(e.param, _apply(body, quirks))
+                fix = _quirk_for(e.param, e.code, _apply(body, quirks))
                 if fix is None or fix in quirks or attempt == MAX_PARAM_RETRIES:
                     raise
                 log.info("%s 不支援參數 %s，改用 %s 重試", model, e.param, fix)
