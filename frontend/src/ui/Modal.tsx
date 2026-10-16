@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 
-/** 彈窗：點背景或按 Esc 關閉 */
+/** 彈窗：點背景或按 Esc 關閉；打開時有淡入 + 彈出動畫（styles.css 的 modal-in） */
 export function Modal({ title, onClose, children }: { title: ReactNode; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
