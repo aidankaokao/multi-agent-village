@@ -33,6 +33,7 @@ export function App() {
   const [runs, dispatch] = useReducer(runsReducer, initialRuns);
   const [traceId, setTraceId] = useState<string | null>(null); // 從問答跳到某筆紀錄
   const [traceTick, setTraceTick] = useState(0); // 問答結束 → 紀錄列表重新整理
+  const closeTimer = useRef<number | undefined>(undefined);
   const chatOpenRef = useRef(chatOpen);
   chatOpenRef.current = chatOpen;
 
@@ -106,7 +107,19 @@ export function App() {
 
       {/* 右上：頁面選單（抽屜打開時改用抽屜上方的切換列） */}
       {!page && (
-        <nav className={`fab-menu ${menuOpen ? "open" : ""}`}>
+        <nav
+          className={`fab-menu ${menuOpen ? "open" : ""}`}
+          // 滑鼠移過去就展開；移開後稍等再收，移到選項的途中不會先收掉（觸控螢幕仍可用點的）
+          onPointerEnter={(e) => {
+            if (e.pointerType !== "mouse") return; // 觸控點一下也會觸發 enter，交給 onClick
+            window.clearTimeout(closeTimer.current);
+            setMenuOpen(true);
+          }}
+          onPointerLeave={(e) => {
+            if (e.pointerType !== "mouse") return;
+            closeTimer.current = window.setTimeout(() => setMenuOpen(false), 300);
+          }}
+        >
           <button className="fab" onClick={() => setMenuOpen(!menuOpen)} title="選單" aria-expanded={menuOpen}>
             {menuOpen ? "✕" : "⚙️"}
           </button>
