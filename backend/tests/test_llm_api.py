@@ -232,3 +232,59 @@ async def test_openai_compat_sse_parsing():
     with pytest.raises(LLMError, match="HTTP 500"):
         await client.chat("down", [ChatMessage("user", "hi")], on_delta=on_delta)
     await client.aclose()
+
+
+async def test_openai_compat_adapts_unsupported_params():
+    """模擬 gpt-5：不收 max_tokens / temperature / reasoning_effort=none，組織未驗證不能串流。"""
+    import json
+
+    from village.llm import openai_compat
+    from village.llm.base import ChatMessage
+    from village.llm.openai_compat import OpenAICompatClient
+
+    calls: list[dict] = []
+
+    def bad(param: str, code: str = "unsupported_parameter"):
+        err = {"error": {"message": f"{param} bad", "type": "invalid_request_error", "param": param, "code": code}}
+        return httpx.Response(400, json=err)
+
+    def handler(request: httpx.Request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if "max_tokens" in body:
+            return bad("max_tokens")
+        if "temperature" in body:
+            return bad("temperature", "unsupported_value")
+        if body.get("reasoning_effort") == "none":
+            return bad("reasoning_effort", "unsupported_value")
+        if body.get("stream"):
+            return bad("stream", "unsupported_value")
+        return httpx.Response(200, json={"model": "gpt-5", "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}]})
+
+    openai_compat._QUIRKS.clear()
+    client = OpenAICompatClient("http://x/v1", None)
+    client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler))
+    pieces: list[str] = []
+
+    async def on_delta(p):
+        pieces.append(p)
+
+    kw = dict(max_tokens=100, temperature=0.2, reasoning_effort="none", on_delta=on_delta)
+    r = await client.chat("gpt-5", [ChatMessage("user", "hi")], **kw)
+    assert r.text == "hi" and pieces == ["hi"]  # 不能串流時一次給完
+    final = calls[-1]
+    assert final["max_completion_tokens"] == 100 and final["reasoning_effort"] == "minimal"
+    assert "temperature" not in final and "stream" not in final and len(calls) == 5
+
+    calls.clear()  # 記住了：第二次直接成功
+    await client.chat("gpt-5", [ChatMessage("user", "hi")], **kw)
+    assert len(calls) == 1
+
+    # 其他 400（不是參數問題）照常失敗，不會無限重試
+    def handler2(request):
+        return httpx.Response(400, json={"error": {"message": "bad key", "code": "invalid_api_key"}})
+
+    client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler2))
+    with pytest.raises(LLMError, match="HTTP 400"):
+        await client.chat("other", [ChatMessage("user", "hi")], max_tokens=10)
+    await client.aclose()

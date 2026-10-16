@@ -257,7 +257,7 @@ function TierSection({ models, tiers, run }: { models: Model[]; tiers: Tiers; ru
                 </td>
                 <td>
                   <select
-                    title="思考強度：思考型模型（如 qwen3.5）設 none 可大幅加速，也避免 token 全花在思考上"
+                    title="思考強度：思考型模型（如 qwen3.5、gpt-5）設 none 可大幅加速，也避免 token 全花在思考上；gpt-5 沒有 none，會自動改用 minimal"
                     value={m.reasoning_effort ?? ""}
                     onChange={(e) => run(() => llm.updateModel(m.id, { reasoning_effort: (e.target.value || null) as ReasoningEffort | null }))}
                   >
