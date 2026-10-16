@@ -7,6 +7,7 @@ export interface SpriteManifest {
   rows: string[]; // ["down","left","right","up"]
   walkCycle: number[];
   characters: Record<string, { name: string; path: string; desc?: string; system?: boolean }>; // system：村長、工匠專用
+  decor?: Record<string, { path: string; width: number; height: number }>;
   ui: { status_bubbles: { path: string; frameWidth: number; frameHeight: number } };
 }
 
@@ -25,6 +26,94 @@ export interface VillagerInfo {
   name: string;
   sprite: string | null;
   home: [number, number] | null;
+}
+
+// ---------------------------------------------------------------- 地圖裝飾與障礙物
+
+const DECOR_SCALE = 2; // 和角色一樣放大 2 倍
+
+/** 每種裝飾擋住的範圍（格數，以底部中央為基準）；0 = 可以踩過去（花） */
+const DECOR_BLOCK: Record<string, [number, number]> = {
+  tree: [1, 1], // 只擋樹幹，從樹冠後面走過會被遮住
+  pine: [1, 1],
+  bush: [2, 1],
+  rock: [1, 1],
+  well: [2, 1],
+  house_red: [4, 3],
+  house_blue: [4, 3],
+  sign: [1, 1],
+  workbench: [2, 1],
+  flowers: [0, 0],
+};
+
+/** x = 中心（格，可以是 .5），y = 底邊（格）。地圖上緣（第 0～2 列）村民不會走到，大型裝飾集中在那裡。 */
+export const DECOR: { kind: string; x: number; y: number }[] = [
+  { kind: "tree", x: 1.5, y: 3 },
+  { kind: "house_red", x: 6, y: 4 },
+  { kind: "tree", x: 10.5, y: 3 },
+  { kind: "pine", x: 12.5, y: 3 },
+  { kind: "tree", x: 17.5, y: 3 },
+  { kind: "house_blue", x: 21, y: 4 },
+  { kind: "tree", x: 25.5, y: 3 },
+  { kind: "pine", x: 28.5, y: 3 },
+  { kind: "pine", x: 0.5, y: 14 },
+  { kind: "tree", x: 29.5, y: 13 },
+  { kind: "tree", x: 7.5, y: 20 },
+  { kind: "well", x: 18, y: 13 },
+  { kind: "sign", x: 12.5, y: 12 },
+  { kind: "workbench", x: 28, y: 16 },
+  { kind: "bush", x: 11, y: 18 },
+  { kind: "bush", x: 22, y: 19 },
+  { kind: "rock", x: 19.5, y: 15 },
+  { kind: "flowers", x: 4.5, y: 12 },
+  { kind: "flowers", x: 9.5, y: 15 },
+  { kind: "flowers", x: 24.5, y: 12 },
+  { kind: "flowers", x: 17.5, y: 18 },
+  { kind: "flowers", x: 11.5, y: 6 },
+];
+
+/** 左下角的池塘（格子範圍，含頭尾） */
+export const POND = { x0: 2, y0: 15, x1: 5, y1: 17 };
+
+const key = (x: number, y: number) => `${x},${y}`;
+
+export const BLOCKED: Set<string> = (() => {
+  const b = new Set<string>();
+  for (const d of DECOR) {
+    const [w, h] = DECOR_BLOCK[d.kind] ?? [1, 1];
+    const left = Math.round(d.x - w / 2);
+    for (let x = left; x < left + w; x++) for (let y = d.y - h; y < d.y; y++) b.add(key(x, y));
+  }
+  for (let x = POND.x0; x <= POND.x1; x++) for (let y = POND.y0; y <= POND.y1; y++) b.add(key(x, y));
+  return b;
+})();
+
+export const isBlocked = (x: number, y: number) => BLOCKED.has(key(x, y));
+
+/** 住處剛好在障礙物上時，挪到最近的空地 */
+export function nearestFree([hx, hy]: [number, number]): [number, number] {
+  if (!isBlocked(hx, hy)) return [hx, hy];
+  for (let r = 1; r < Math.max(MAP_W, MAP_H); r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = hx + dx;
+        const y = hy + dy;
+        if (x >= 1 && x <= MAP_W - 2 && y >= 3 && y <= MAP_H - 2 && !isBlocked(x, y)) return [x, y];
+      }
+    }
+  }
+  return [hx, hy];
+}
+
+/** 像素座標的一段直線會不會穿過障礙物（村民腳的位置） */
+function pathBlocked(ax: number, ay: number, bx: number, by: number): boolean {
+  const steps = Math.ceil(Math.hypot(bx - ax, by - ay) / 12);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    if (isBlocked(Math.floor((ax + (bx - ax) * t) / TILE), Math.floor((ay + (by - ay) * t) / TILE))) return true;
+  }
+  return false;
 }
 
 export const MAYOR: VillagerInfo = { id: "mayor", name: "村長", sprite: "mayor", home: [15, 9] };
@@ -97,11 +186,16 @@ class Villager {
     this.timer = this.scene.time.delayedCall(delay, () => {
       if (this.busy) return;
       const r = 4 * TILE;
-      const t = new Phaser.Math.Vector2(
-        Phaser.Math.Clamp(this.home.x + Phaser.Math.Between(-r, r), TILE, (MAP_W - 1) * TILE),
-        Phaser.Math.Clamp(this.home.y + Phaser.Math.Between(-r, r), TILE * 3, (MAP_H - 1) * TILE),
-      );
-      this.walkTo(t, () => this.scheduleWander(Phaser.Math.Between(1500, 4500)));
+      const { x, y } = this.sprite;
+      // 挑一個不在障礙物上、路線也不會穿過障礙物的點；挑不到就原地休息一下
+      for (let i = 0; i < 12; i++) {
+        const t = new Phaser.Math.Vector2(
+          Phaser.Math.Clamp(this.home.x + Phaser.Math.Between(-r, r), TILE, (MAP_W - 1) * TILE),
+          Phaser.Math.Clamp(this.home.y + Phaser.Math.Between(-r, r), TILE * 3, (MAP_H - 1) * TILE),
+        );
+        if (!pathBlocked(x, y, t.x, t.y)) return this.walkTo(t, () => this.scheduleWander(Phaser.Math.Between(1500, 4500)));
+      }
+      this.scheduleWander(Phaser.Math.Between(1500, 4500));
     });
   }
 
@@ -179,12 +273,14 @@ export class VillageScene extends Phaser.Scene {
     for (const [id, c] of Object.entries(this.manifest.characters)) {
       this.load.spritesheet(id, BASE + c.path, { frameWidth, frameHeight });
     }
+    for (const [id, d] of Object.entries(this.manifest.decor ?? {})) this.load.image(`deco-${id}`, BASE + d.path);
     const b = this.manifest.ui.status_bubbles;
     this.load.spritesheet("bubbles", BASE + b.path, { frameWidth: b.frameWidth, frameHeight: b.frameHeight });
   }
 
   create() {
     this.drawGround();
+    this.drawDecor();
     this.anims.create({
       key: "bubble-working",
       frames: this.anims.generateFrameNumbers("bubbles", { frames: [0, 1, 2, 3] }),
@@ -224,7 +320,7 @@ export class VillageScene extends Phaser.Scene {
       if (this.villagers.has(info.id)) continue;
       this.looks.set(info.id, look(info));
       const skin = info.sprite && this.manifest.characters[info.sprite] ? info.sprite : "poet";
-      const [hx, hy] = info.home ?? this.freeSpot(info.id);
+      const [hx, hy] = nearestFree(info.home ?? this.freeSpot(info.id));
       const v = new Villager(this, info.id, skin, info.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE));
       this.villagers.set(info.id, v);
       if (animate) v.appear();
@@ -275,6 +371,15 @@ export class VillageScene extends Phaser.Scene {
     }
   }
 
+  /** 裝飾：底部中央對齊，依底邊 y 排景深，村民走到後面會被擋住 */
+  private drawDecor() {
+    for (const d of DECOR) {
+      if (!this.textures.exists(`deco-${d.kind}`)) continue; // 舊版 manifest 沒有裝飾
+      const y = d.y * TILE;
+      this.add.image(d.x * TILE, y, `deco-${d.kind}`).setOrigin(0.5, 1).setScale(DECOR_SCALE).setDepth(d.kind === "flowers" ? 0 : y);
+    }
+  }
+
   /** 程式產生的草地與小路；之後換成 Tiled 地圖 + CC0 tileset */
   private drawGround() {
     const g = this.add.graphics();
@@ -298,5 +403,17 @@ export class VillageScene extends Phaser.Scene {
     g.fillCircle(15 * TILE, 9 * TILE + 20, 70);
     g.fillStyle(0xb48d55);
     for (let i = 0; i < 160; i++) g.fillRect(rnd.between(0, MAP_W * TILE), 9 * TILE + rnd.between(10, 30), 2, 2);
+    // 池塘：岸邊 → 水 → 反光 → 荷葉
+    const cx = ((POND.x0 + POND.x1 + 1) / 2) * TILE;
+    const cy = ((POND.y0 + POND.y1 + 1) / 2) * TILE;
+    const w = (POND.x1 - POND.x0 + 1) * TILE;
+    const h = (POND.y1 - POND.y0 + 1) * TILE;
+    g.fillStyle(0x8a7a52).fillEllipse(cx, cy, w + 8, h + 8);
+    g.fillStyle(0x3a6fc4).fillEllipse(cx, cy, w, h);
+    g.fillStyle(0x4f86d8).fillEllipse(cx - 10, cy - 8, w - 40, h - 36);
+    g.fillStyle(0xcfe3ff);
+    g.fillRect(cx - 30, cy - 14, 10, 2).fillRect(cx + 12, cy + 6, 14, 2);
+    g.fillStyle(0x3f9a48).fillCircle(cx + 30, cy - 14, 6).fillCircle(cx - 36, cy + 14, 5);
+    g.fillStyle(0xe86a92).fillRect(cx + 29, cy - 16, 3, 3);
   }
 }

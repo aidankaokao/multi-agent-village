@@ -209,6 +209,7 @@ export interface WorkshopBody {
   sprites: { id: string; name: string; desc: string }[];
   draft: AgentSpec | null;
   target: string | null;
+  blocked: [number, number][]; // 地圖上有樹、房子的格子，工匠挑住處時避開
 }
 
 export const workshop = {

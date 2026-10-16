@@ -52,6 +52,9 @@ def test_helpers():
     assert unique_id("craftsman", set()) == "craftsman-villager"
     h = pick_home([(7, 6), (22, 6)])
     assert h not in [(7, 6), (22, 6), (15, 9), (26, 16)] and h[1] not in (9, 10) and h[0] != 15
+    blocked = {(h[0] + 1, h[1])}  # 原本的最佳位置旁邊有棵樹 → 換地方
+    h2 = pick_home([(7, 6), (22, 6)], blocked)
+    assert h2 != h and all(abs(h2[0] - bx) > 1 or abs(h2[1] - by) > 1 for bx, by in blocked)
 
 
 def test_build_spec_maps_choices():
@@ -120,15 +123,19 @@ async def test_workshop_api(env, monkeypatch):  # noqa: F811
     seen = []
 
     async def fake_generate(llm, messages, sprites, neighbors, **kw):
-        seen.append(([n.id for n in neighbors], [s.id for s in sprites]))
+        seen.append(([n.id for n in neighbors], [s.id for s in sprites], kw["blocked"]))
         return workshop.Draft(spec=build_spec(BLUEPRINT, sprites, neighbors).to_doc(), notes=["ok"])
 
     monkeypatch.setattr(workshop, "generate", fake_generate)
-    body = {"messages": [{"role": "user", "content": "做一個食譜師"}], "sprites": [{"id": "chef", "name": "廚師"}]}
+    body = {
+        "messages": [{"role": "user", "content": "做一個食譜師"}],
+        "sprites": [{"id": "chef", "name": "廚師"}],
+        "blocked": [[1, 2], [3, 4]],
+    }
     r = await c.post("/api/workshop/generate", json=body)
     assert r.status_code == 200, r.text
     assert r.json()["spec"]["card"]["id"] == "recipe-maker"
-    assert set(seen[0][0]) >= {"poet", "jester"} and seen[0][1] == ["chef"]
+    assert set(seen[0][0]) >= {"poet", "jester"} and seen[0][1] == ["chef"] and seen[0][2] == {(1, 2), (3, 4)}
     # 產生的草稿可以直接建立
     assert (await c.post("/api/villagers", json={"spec": r.json()["spec"]})).status_code == 201
     # 工匠是保留名稱

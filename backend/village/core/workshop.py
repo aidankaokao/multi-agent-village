@@ -298,13 +298,18 @@ def unique_id(base: str, taken: set[str]) -> str:
     return cand
 
 
-def pick_home(taken: list[tuple[int, int]]) -> tuple[int, int]:
-    """挑離其他人最遠的空地（不在道路與廣場上）；結果固定，方便測試。"""
+def pick_home(taken: list[tuple[int, int]], blocked: set[tuple[int, int]] = frozenset()) -> tuple[int, int]:
+    """挑離其他人最遠的空地（不在道路、廣場與樹 / 房子上）；結果固定，方便測試。
+
+    blocked 由前端傳入（地圖裝飾定義在前端）；住處周圍一格也要空著，村民才有地方站。
+    """
     others = taken + SYSTEM_HOMES
     best, best_d = (3, 4), -1.0
-    for y in range(3, MAP_H - 2):
+    for y in range(4, MAP_H - 2):
         for x in range(2, MAP_W - 2):
             if y in (ROAD_ROW, ROAD_ROW + 1) or x == ROAD_COL or math.dist((x, y), SYSTEM_HOMES[0]) < 4:
+                continue
+            if any((x + dx, y + dy) in blocked for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
                 continue
             d = min(math.dist((x, y), o) for o in others)
             if d > best_d:
@@ -313,7 +318,11 @@ def pick_home(taken: list[tuple[int, int]]) -> tuple[int, int]:
 
 
 def build_spec(
-    data: dict, sprites: list[SpriteOption], neighbors: list[Neighbor], draft: dict | None = None
+    data: dict,
+    sprites: list[SpriteOption],
+    neighbors: list[Neighbor],
+    draft: dict | None = None,
+    blocked: set[tuple[int, int]] = frozenset(),
 ) -> AgentSpec:
     """藍圖 → AgentSpec。藍圖有問題時 raise BlueprintError（訊息會帶回給工匠重做）。"""
     name = _text(data, "name")
@@ -341,7 +350,7 @@ def build_spec(
         model = {**draft.get("model", {}), "temperature": CREATIVITY[creativity], "max_tokens": max_tokens}
     else:
         vid = unique_id(str(data.get("id") or name), {n.id for n in neighbors})
-        home = list(pick_home([n.home for n in others if n.home]))
+        home = list(pick_home([n.home for n in others if n.home], blocked))
         model = {"tier": "small", "model_id": None, "temperature": CREATIVITY[creativity], "max_tokens": max_tokens}
 
     tests = []
@@ -396,7 +405,11 @@ def build_spec(
 
 
 def fallback_spec(
-    messages: list[ChatMessage], sprites: list[SpriteOption], neighbors: list[Neighbor], draft: dict | None
+    messages: list[ChatMessage],
+    sprites: list[SpriteOption],
+    neighbors: list[Neighbor],
+    draft: dict | None,
+    blocked: set[tuple[int, int]] = frozenset(),
 ) -> AgentSpec:
     """LLM 不能用時：用使用者說過的話拼出基本草稿，讓使用者在編輯器裡補完。"""
     if draft:
@@ -416,7 +429,7 @@ def fallback_spec(
         },
         "x-village": {
             "sprite": sprites[0].id if sprites else None,
-            "home": list(pick_home([n.home for n in neighbors if n.home])),
+            "home": list(pick_home([n.home for n in neighbors if n.home], blocked)),
             "keywords": [],  # 寧可空白讓使用者填，也不要亂猜
         },
         "model": {"tier": "small", "temperature": 0.6, "max_tokens": 2048},
@@ -437,6 +450,7 @@ async def generate(
     *,
     draft: dict | None = None,
     target: str = "tier:large",
+    blocked: set[tuple[int, int]] = frozenset(),
 ) -> Draft:
     notes: list[str] = []
     convo = "\n".join(f"{'使用者' if m.role == 'user' else '工匠'}：{m.content}" for m in messages)
@@ -451,7 +465,7 @@ async def generate(
             break
         try:
             data = _extract_json(r.text)
-            spec = build_spec(data, sprites, neighbors, draft)
+            spec = build_spec(data, sprites, neighbors, draft, blocked)
             summary = str(data.get("summary") or "").strip() or f"做好了！這是「{spec.name}」的草稿。"
             return Draft(spec=spec.to_doc(), notes=notes, summary=summary, model=r.model)
         except (PlanError, BlueprintError) as e:
@@ -460,7 +474,7 @@ async def generate(
                 ChatMessage("assistant", r.text or "（空白）"),
                 ChatMessage("user", f"這份藍圖有問題：{e}。請修正後重新輸出完整 JSON。"),
             ]
-    spec = fallback_spec(messages, sprites, neighbors, draft)
+    spec = fallback_spec(messages, sprites, neighbors, draft, blocked)
     summary = (
         "抱歉，我現在沒辦法動手改，先保留原本的草稿。"
         if draft

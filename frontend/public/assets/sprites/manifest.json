@@ -83,5 +83,57 @@
       "thinking": 6,
       "idle": 7
     }
+  },
+  "decor": {
+    "tree": {
+      "path": "deco/tree.png",
+      "width": 32,
+      "height": 48
+    },
+    "pine": {
+      "path": "deco/pine.png",
+      "width": 32,
+      "height": 48
+    },
+    "bush": {
+      "path": "deco/bush.png",
+      "width": 32,
+      "height": 24
+    },
+    "flowers": {
+      "path": "deco/flowers.png",
+      "width": 32,
+      "height": 20
+    },
+    "rock": {
+      "path": "deco/rock.png",
+      "width": 24,
+      "height": 16
+    },
+    "well": {
+      "path": "deco/well.png",
+      "width": 32,
+      "height": 44
+    },
+    "house_red": {
+      "path": "deco/house_red.png",
+      "width": 64,
+      "height": 64
+    },
+    "house_blue": {
+      "path": "deco/house_blue.png",
+      "width": 64,
+      "height": 64
+    },
+    "sign": {
+      "path": "deco/sign.png",
+      "width": 24,
+      "height": 32
+    },
+    "workbench": {
+      "path": "deco/workbench.png",
+      "width": 32,
+      "height": 28
+    }
   }
 }

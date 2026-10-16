@@ -15,6 +15,7 @@ frontend/public/assets/sprites/
 │   ├── scholar.png / merchant.png / farmer.png / chef.png  # 學者、商人、農夫、廚師：給新村民挑的外觀
 │   ├── mayor.png               # 村長 = orchestrator（system，不給村民用）
 │   └── craftsman.png           # 工匠 = 村民工坊（system，不給村民用）
+├── deco/                       # 地圖裝飾：tree、pine、bush、flowers、rock、well、house_red、house_blue、sign、workbench
 └── ui/status_bubbles.png       # 頭頂狀態泡泡
 ```
 
@@ -84,3 +85,12 @@ includes grass, dirt path, stone path, water edges, trees, flowers, fences,
 small houses (roof and walls), a market stall, a well, a notice board.
 Limited palette, no anti-aliasing, Stardew Valley style.
 ```
+
+### 地圖裝飾
+
+`deco/*.png` 由 `scripts/gen_placeholder_sprites.py` 產生，和角色一樣在地圖上放大 2 倍。擺放位置與擋路範圍寫在
+`frontend/src/village/VillageScene.ts` 的 `DECOR` / `DECOR_BLOCK`（另有程式畫的池塘 `POND`）：
+
+- 大型裝飾（房子、大部分的樹）放在第 0～2 列，村民不會走到那裡
+- 擋路的格子村民閒晃時會避開（目的地與路線都檢查）；花可以踩過去
+- 住處落在障礙物上會挪到最近的空地；住處小地圖會標出障礙物；工匠挑住處時也會避開（前端把障礙物傳給 `/api/workshop/generate`）

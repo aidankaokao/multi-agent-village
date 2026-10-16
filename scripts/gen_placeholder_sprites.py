@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageOps
 ROOT = Path(__file__).resolve().parent.parent
 OUT_CHAR = ROOT / "frontend/public/assets/sprites/characters"
 OUT_UI = ROOT / "frontend/public/assets/sprites/ui"
+OUT_DECO = ROOT / "frontend/public/assets/sprites/deco"
 OUT_PREVIEW = ROOT / "docs/images/sprites_preview.png"
 
 FW = FH = 32
@@ -47,12 +48,13 @@ def add_outline(img: Image.Image) -> Image.Image:
     src = img.load()
     out = img.copy()
     dst = out.load()
-    for y in range(FH):
-        for x in range(FW):
+    W, H = img.size
+    for y in range(H):
+        for x in range(W):
             if src[x, y][3] != 0:
                 continue
             for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
-                if 0 <= nx < FW and 0 <= ny < FH and src[nx, ny][3] != 0:
+                if 0 <= nx < W and 0 <= ny < H and src[nx, ny][3] != 0:
                     dst[x, y] = OUTLINE
                     break
     return out
@@ -294,6 +296,156 @@ CHARACTERS = {
 }
 
 
+# ---------------------------------------------------------------- 地圖裝飾
+
+
+def _canvas(w, h):
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    return img, ImageDraw.Draw(img)
+
+
+def _ground_shadow(img, cx, w):
+    """在底部加一個橢圓陰影（畫在物件後面）"""
+    W, H = img.size
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).ellipse([cx - w // 2, H - 5, cx + w // 2, H - 1], fill=(0, 0, 0, 70))
+    sh.alpha_composite(img)
+    return sh
+
+
+def deco_tree():
+    img, d = _canvas(32, 48)
+    trunk, trunk2 = hexc("#7a4e2a"), hexc("#5a3820")
+    g1, g2, g3 = hexc("#2f7a3a"), hexc("#3f9a48"), hexc("#6cc060")
+    r(d, 14, 32, 18, 45, trunk)
+    r(d, 17, 32, 18, 45, trunk2)
+    d.ellipse([3, 4, 29, 34], fill=g1)
+    d.ellipse([5, 3, 26, 28], fill=g2)
+    d.ellipse([8, 6, 18, 15], fill=g3)
+    px(d, [(22, 12), (24, 18), (10, 22), (19, 25)], g1)
+    return _ground_shadow(add_outline(img), 16, 18)
+
+
+def deco_pine():
+    img, d = _canvas(32, 48)
+    trunk, g1, g2 = hexc("#6a4224"), hexc("#1f5e3a"), hexc("#2f7f4a")
+    r(d, 14, 38, 17, 45, trunk)
+    for i, (top, half) in enumerate([(2, 6), (10, 10), (19, 13)]):
+        for y in range(top, top + 14):
+            w = min(half, (y - top) * half // 9 + 1)
+            r(d, 16 - w, y, 15 + w, y, g1 if i % 2 else g2)
+            px(d, [(16 - w + 1, y)], hexc("#4f9f5a"))
+    return _ground_shadow(add_outline(img), 16, 16)
+
+
+def deco_bush():
+    img, d = _canvas(32, 24)
+    g1, g2, berry = hexc("#2f7a3a"), hexc("#4aa850"), hexc("#d8343c")
+    d.ellipse([3, 6, 29, 22], fill=g1)
+    d.ellipse([6, 4, 22, 17], fill=g2)
+    px(d, [(10, 12), (19, 9), (23, 15), (14, 17)], berry)
+    return _ground_shadow(add_outline(img), 16, 24)
+
+
+def deco_flowers():
+    img, d = _canvas(32, 20)
+    stem = hexc("#2f7a3a")
+    for x, y, c in [(5, 10, "#f2c230"), (12, 6, "#e86a92"), (19, 11, "#ffffff"), (26, 7, "#e86a92"), (14, 14, "#9a7af2"), (24, 15, "#f2c230")]:
+        r(d, x, y + 2, x, y + 4, stem)
+        col = hexc(c)
+        px(d, [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)], col)
+        px(d, [(x, y)], hexc("#f9e07a") if c != "#f2c230" else hexc("#d8843c"))
+    return img
+
+
+def deco_rock():
+    img, d = _canvas(24, 16)
+    d.ellipse([2, 3, 22, 15], fill=hexc("#8a8f9e"))
+    d.ellipse([5, 3, 15, 10], fill=hexc("#aeb3c0"))
+    px(d, [(16, 11), (9, 12)], hexc("#6c7080"))
+    return _ground_shadow(add_outline(img), 12, 20)
+
+
+def deco_well():
+    img, d = _canvas(32, 44)
+    stone, stone2, wood, roof, water = hexc("#9aa0ae"), hexc("#7a8090"), hexc("#7a4e2a"), hexc("#a8323e"), hexc("#3a6fc4")
+    r(d, 6, 28, 25, 41, stone)
+    for y in (31, 35, 39):
+        for x in range(6 if y % 8 else 9, 25, 6):
+            r(d, x, y, x + 3, y + 1, stone2)
+    r(d, 8, 27, 23, 29, water)
+    r(d, 7, 12, 8, 28, wood)
+    r(d, 23, 12, 24, 28, wood)
+    for i in range(6):
+        r(d, 4 + i, 11 - i, 27 - i, 11 - i, roof)
+    r(d, 8, 16, 23, 16, wood)  # 橫桿
+    r(d, 15, 17, 16, 22, hexc("#c8a060"))  # 繩子
+    return _ground_shadow(add_outline(img), 16, 26)
+
+
+def _house(roof_hex, roof2_hex):
+    img, d = _canvas(64, 64)
+    wall, wall2, wood, glass, roof, roof2 = hexc("#e8d6b0"), hexc("#d0bc94"), hexc("#7a4e2a"), hexc("#9fd0f0"), hexc(roof_hex), hexc(roof2_hex)
+    r(d, 8, 30, 55, 60, wall)
+    r(d, 8, 30, 10, 60, wall2)
+    for i in range(18):  # 階梯狀屋頂
+        r(d, 4 + i, 30 - i, 59 - i, 30 - i, roof if (i // 3) % 2 else roof2)
+    r(d, 44, 6, 49, 18, hexc("#8a5a42"))  # 煙囪
+    r(d, 27, 44, 36, 60, wood)
+    px(d, [(34, 52)], hexc("#f2c230"))
+    for x0 in (14, 42):
+        r(d, x0, 38, x0 + 8, 46, glass)
+        r(d, x0 + 4, 38, x0 + 4, 46, wood)
+        r(d, x0, 42, x0 + 8, 42, wood)
+    return _ground_shadow(add_outline(img), 32, 54)
+
+
+def deco_house_red():
+    return _house("#b8423e", "#d8564e")
+
+
+def deco_house_blue():
+    return _house("#3a5f9c", "#4f78b8")
+
+
+def deco_sign():
+    img, d = _canvas(24, 32)
+    wood, wood2 = hexc("#8a5a32"), hexc("#a8763e")
+    r(d, 11, 12, 13, 30, wood)
+    r(d, 2, 4, 21, 13, wood2)
+    r(d, 5, 7, 18, 7, hexc("#5a3820"))
+    r(d, 5, 10, 14, 10, hexc("#5a3820"))
+    return _ground_shadow(add_outline(img), 12, 10)
+
+
+def deco_workbench():
+    img, d = _canvas(32, 28)
+    wood, wood2, metal = hexc("#a8763e"), hexc("#7a4e2a"), hexc("#b8c0cc")
+    r(d, 2, 10, 29, 14, wood)
+    r(d, 4, 15, 6, 26, wood2)
+    r(d, 25, 15, 27, 26, wood2)
+    r(d, 8, 20, 23, 21, wood2)
+    r(d, 6, 6, 12, 9, metal)  # 槌頭
+    r(d, 9, 9, 9, 9, wood2)
+    r(d, 17, 7, 26, 9, metal)  # 鋸子
+    r(d, 24, 5, 27, 9, wood2)
+    return _ground_shadow(add_outline(img), 16, 30)
+
+
+DECOR = {
+    "tree": deco_tree,
+    "pine": deco_pine,
+    "bush": deco_bush,
+    "flowers": deco_flowers,
+    "rock": deco_rock,
+    "well": deco_well,
+    "house_red": deco_house_red,
+    "house_blue": deco_house_blue,
+    "sign": deco_sign,
+    "workbench": deco_workbench,
+}
+
+
 def render_frame(pal, acc, view, frame) -> Image.Image:
     img = Image.new("RGBA", (FW, FH), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -394,6 +546,15 @@ def main():
             manifest["characters"][cid]["system"] = True
         sheets.append(sheet)
 
+    OUT_DECO.mkdir(parents=True, exist_ok=True)
+    manifest["decor"] = {}
+    decos = []
+    for did, fn in DECOR.items():
+        im = fn()
+        im.save(OUT_DECO / f"{did}.png")
+        manifest["decor"][did] = {"path": f"deco/{did}.png", "width": im.width, "height": im.height}
+        decos.append(im)
+
     bubbles = build_status_bubbles()
     bubbles.save(OUT_UI / "status_bubbles.png")
     (OUT_CHAR.parent / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
@@ -401,13 +562,19 @@ def main():
     # 預覽：所有角色並排 + 泡泡，放大 4 倍
     gap = 8
     w = sum(s.width for s in sheets) + gap * (len(sheets) + 1)
-    h = FH * 4 + gap * 3 + bubbles.height
+    deco_w = sum(im.width for im in decos) + gap * (len(decos) + 1)
+    w = max(w, deco_w)
+    h = FH * 4 + gap * 4 + bubbles.height + 64
     prev = Image.new("RGBA", (w, h), (120, 170, 110, 255))
     x = gap
     for s in sheets:
         prev.alpha_composite(s, (x, gap))
         x += s.width + gap
     prev.alpha_composite(bubbles, (gap, FH * 4 + gap * 2))
+    x = bubbles.width + gap * 3
+    for im in decos:
+        prev.alpha_composite(im, (x, h - gap - im.height))
+        x += im.width + gap
     prev.resize((w * 4, h * 4), Image.NEAREST).save(OUT_PREVIEW)
     print(f"wrote {len(sheets)} character sheets, status bubbles, manifest, preview -> {OUT_PREVIEW}")
 

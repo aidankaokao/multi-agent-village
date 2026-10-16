@@ -1,5 +1,5 @@
 import type { AgentSpec, Model } from "../api";
-import { CRAFTSMAN, MAP_H, MAP_W, MAYOR, type SpriteManifest } from "../village/VillageScene";
+import { BLOCKED, CRAFTSMAN, MAP_H, MAP_W, MAYOR, nearestFree, type SpriteManifest } from "../village/VillageScene";
 import { Field, ListInput, NumInput, SpriteThumb } from "./fields";
 
 interface Props {
@@ -204,9 +204,13 @@ function HomePicker({
           const r = e.currentTarget.getBoundingClientRect();
           const x = Math.floor(((e.clientX - r.left) / r.width) * MAP_W);
           const y = Math.floor(((e.clientY - r.top) / r.height) * MAP_H);
-          onPick([Math.min(MAP_W - 2, Math.max(1, x)), Math.min(MAP_H - 2, Math.max(3, y))]);
+          onPick(nearestFree([Math.min(MAP_W - 2, Math.max(1, x)), Math.min(MAP_H - 2, Math.max(3, y))])); // 點到樹或房子就挪到旁邊
         }}
       >
+        {[...BLOCKED].map((k) => {
+          const [x, y] = k.split(",").map(Number) as [number, number];
+          return <span key={k} className="home-block" style={{ ...dot([x, y]), width: `${100 / MAP_W}%`, height: `${100 / MAP_H}%` }} />;
+        })}
         {others.map((o) => (
           <span key={o.id} className="home-dot other" title={o.name} style={dot(o.home)} />
         ))}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { villagers, workshop, type AgentSpec, type Model, type TryResult, type WorkshopBody } from "../api";
-import type { SpriteManifest } from "../village/VillageScene";
+import { BLOCKED, type SpriteManifest } from "../village/VillageScene";
 import { SpriteThumb } from "./fields";
 import { TargetSelect } from "./Lab";
 
@@ -61,6 +61,7 @@ export function Workshop({
       .map(([id, c]) => ({ id, name: c.name, desc: c.desc ?? "" })),
     draft: d,
     target: session.target || null,
+    blocked: [...BLOCKED].map((k) => k.split(",").map(Number) as [number, number]),
   });
 
   const send = async (text = input.trim()) => {

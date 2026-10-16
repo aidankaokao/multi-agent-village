@@ -31,6 +31,7 @@ class WorkshopBody(BaseModel):
     sprites: list[SpriteIn] = []  # 前端 manifest 裡可給村民用的外觀
     draft: dict | None = None  # 修改既有草稿時帶上
     target: str | None = None  # 'tier:large' / 'tier:small' / 模型 id；預設 large
+    blocked: list[tuple[int, int]] = Field(default=[], max_length=600)  # 地圖上有裝飾的格子
 
 
 class InterviewOut(BaseModel):
@@ -91,6 +92,7 @@ async def generate(body: WorkshopBody, request: Request) -> GenerateOut:
             await _neighbors(request),
             draft=body.draft,
             target=body.target or "tier:large",
+            blocked={tuple(b) for b in body.blocked},
         )
         ok = d.source == "llm"
     finally:

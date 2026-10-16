@@ -834,3 +834,12 @@ details summary {
   cursor: pointer;
   box-shadow: 3px 3px 0 var(--line);
 }
+
+/* 住處小地圖上的障礙物（樹、房子、池塘） */
+.home-block {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: #2f5e2f;
+  opacity: 0.7;
+  pointer-events: none;
+}
