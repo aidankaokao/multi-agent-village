@@ -278,10 +278,14 @@ function DraftCard({
           </div>
         </div>
       </div>
-      <details>
-        <summary>工作守則（system prompt）</summary>
-        <pre className="output">{spec.prompt.system}</pre>
-      </details>
+      {spec.kind === "tool" ? (
+        <div className="muted">🔧 工具型村民：使用「{spec.tool?.id}」工具，結果由程式計算</div>
+      ) : (
+        <details>
+          <summary>工作守則（system prompt）</summary>
+          <pre className="output">{spec.prompt.system}</pre>
+        </details>
+      )}
 
       {spec.tests.length > 0 && (
         <div>

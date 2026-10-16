@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { villagers, type AgentSpec, type AgentTest, type Expect, type Model, type TryResult } from "../api";
+import { Attachments } from "../ui/Attachments";
 import { Field, ListInput, NumInput } from "./fields";
 
 export const EMPTY_EXPECT: Expect = { contains: [], not_contains: [], lang: null, min_chars: null, max_chars: null, regex: null };
@@ -55,7 +56,9 @@ export function ResultView({ r }: { r: TryResult }) {
         </div>
       ))}
       {r.error && <div className="step-error">{r.error}</div>}
+      {r.tool_args && <div className="muted">🔧 交給工具的參數：<code>{JSON.stringify(r.tool_args)}</code></div>}
       {r.output && <pre className="output">{r.output}</pre>}
+      <Attachments items={r.attachments} />
     </div>
   );
 }

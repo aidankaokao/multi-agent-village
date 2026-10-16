@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAdminToken, llm, setAdminToken, villagers, type AgentSpec, type AgentTest, type Model, type Villager } from "../api";
+import { ApiError, getAdminToken, llm, setAdminToken, villagers, type AgentSpec, type AgentTest, type Model, type ToolInfo, type Villager } from "../api";
 import { SpriteThumb, useManifest } from "./fields";
 import { TestsPanel, TryPanel } from "./Lab";
 import { SpecForm } from "./SpecForm";
@@ -9,6 +9,7 @@ const BLANK: AgentSpec = {
   card: { id: "", name: "", description: "", version: "0.1.0", skills: [{ id: "main", description: "", examples: [] }], tags: [] },
   "x-village": { sprite: null, home: null, keywords: [] },
   kind: "prompt",
+  tool: null,
   model: { tier: "small", model_id: null, temperature: 0.7, max_tokens: 1024 },
   prompt: { system: "", user_template: "任務：{instruction}\n{context}" },
   validate: { must_not_be_empty: true, max_chars: null },
@@ -25,6 +26,7 @@ export function VillagerManager() {
   const manifest = useManifest();
   const [list, setList] = useState<Villager[]>([]);
   const [models, setModels] = useState<Model[]>([]);
+  const [tools, setTools] = useState<ToolInfo[]>([]);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [needToken, setNeedToken] = useState(false);
   const [error, setError] = useState("");
@@ -34,9 +36,10 @@ export function VillagerManager() {
 
   const reload = useCallback(async () => {
     try {
-      const [v, m] = await Promise.all([villagers.list(), llm.models()]);
+      const [v, m, t] = await Promise.all([villagers.list(), llm.models(), villagers.tools()]);
       setList(v);
       setModels(m);
+      setTools(t);
       setNeedToken(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setNeedToken(true);
@@ -57,6 +60,7 @@ export function VillagerManager() {
         initial={editing}
         list={list}
         models={models}
+        tools={tools}
         manifest={manifest}
         onClose={() => {
           setEditing(null);
@@ -172,6 +176,7 @@ export function VillagerManager() {
                 <code className="muted">@{v.id}</code>
                 {v.builtin && <span className="tag">內建範例</span>}
                 {!v.enabled && <span className="tag warn">停用中</span>}
+                {s.kind === "tool" && <span className="tag">🔧 {tools.find((t) => t.id === s.tool?.id)?.name ?? s.tool?.id}</span>}
                 {s.tests.length > 0 && <span className="tag">{s.tests.length} 題測試</span>}
               </div>
               <div className="muted clamp">{s.card.description}</div>
@@ -211,6 +216,7 @@ function Editor({
   initial,
   list,
   models,
+  tools,
   manifest,
   onClose,
   onSaved,
@@ -220,6 +226,7 @@ function Editor({
   initial: Editing;
   list: Villager[];
   models: Model[];
+  tools: ToolInfo[];
   manifest: ReturnType<typeof useManifest>;
   onClose: () => void;
   onSaved: () => void;
@@ -325,7 +332,7 @@ function Editor({
         </button>
       </nav>
 
-      {sub === "spec" && <SpecForm spec={spec} isNew={isNew} models={models} manifest={manifest} homes={homes} update={update} />}
+      {sub === "spec" && <SpecForm spec={spec} isNew={isNew} models={models} tools={tools} manifest={manifest} homes={homes} update={update} />}
       {sub === "try" && <TryPanel spec={spec} models={models} onAddTest={addTest} />}
       {sub === "tests" && <TestsPanel spec={spec} models={models} update={update} />}
 

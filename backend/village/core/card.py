@@ -45,13 +45,28 @@ class ModelConfig(BaseModel):
 
 
 class PromptConfig(BaseModel):
-    system: str = Field(min_length=1)
+    system: str = ""  # prompt 型必填（見 AgentSpec 驗證）；工具型留空 = 用工具的預設說明
     user_template: str = "任務：{instruction}\n{context}"
 
     @model_validator(mode="after")
     def _has_instruction(self):
         if "{instruction}" not in self.user_template:
             raise ValueError("user_template 必須包含 {instruction}，否則村民收不到任務")
+        return self
+
+
+class ToolConfig(BaseModel):
+    """工具型村民：LLM 把請求整理成參數（prompt.system 沒填就用工具的預設說明），工具負責計算。"""
+
+    id: str
+    explain: bool = False  # 算完後請 LLM 用一句話說明結果（結果數字仍以工具為準）
+
+    @model_validator(mode="after")
+    def _known(self):
+        from village.tools import TOOLS  # 延後 import，避免循環
+
+        if self.id not in TOOLS:
+            raise ValueError(f"沒有「{self.id}」這個工具，可用：{', '.join(TOOLS)}")
         return self
 
 
@@ -91,16 +106,21 @@ class AgentSpec(BaseModel):
 
     card: CardInfo
     village: VillageInfo = Field(default_factory=VillageInfo, alias="x-village")
-    kind: Literal["prompt"] = "prompt"  # tool / remote 於 Phase 4 / 6 加入
+    kind: Literal["prompt", "tool"] = "prompt"  # remote 於 Phase 6 加入
     model: ModelConfig = Field(default_factory=ModelConfig)
     prompt: PromptConfig | None = None
+    tool: ToolConfig | None = None
     checks: Checks = Field(default_factory=Checks, alias="validate")
     tests: list[AgentTest] = []
 
     @model_validator(mode="after")
-    def _prompt_required(self):
-        if self.kind == "prompt" and self.prompt is None:
+    def _kind_fields(self):
+        if self.kind == "prompt" and (self.prompt is None or not self.prompt.system.strip()):
             raise ValueError("kind: prompt 需要 prompt.system")
+        if self.kind == "tool" and self.tool is None:
+            raise ValueError("kind: tool 需要選一個工具（tool.id）")
+        if self.prompt is None:  # 工具型可以不寫 prompt（用工具的預設說明）；補上空的，介面才有欄位可以填
+            self.prompt = PromptConfig()
         return self
 
     @property

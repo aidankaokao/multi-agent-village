@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Attachments } from "../ui/Attachments";
 import { ApiError, traces, type AgentInfo, type RunDetail, type RunStatus, type RunSummary, type TraceStep } from "../api";
 
 const STATUS: Record<RunStatus, [string, string]> = {
@@ -266,7 +267,14 @@ function StepCard({ s, name }: { s: TraceStep; name: string }) {
           {w}
         </span>
       ))}
+      {s.tool_args && (
+        <details>
+          <summary className="muted">🔧 交給工具的參數</summary>
+          <pre className="output">{JSON.stringify(s.tool_args, null, 2)}</pre>
+        </details>
+      )}
       {s.output && <pre className="output">{s.output}</pre>}
+      <Attachments items={s.attachments} />
       {s.error && <div className="step-error">{s.error}</div>}
     </div>
   );

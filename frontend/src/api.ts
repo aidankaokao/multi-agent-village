@@ -163,6 +163,8 @@ export interface TraceStep {
   tokens_in: number;
   tokens_out: number;
   rejected: { output: string; reason: string }[];
+  attachments: Attachment[];
+  tool_args: Record<string, unknown> | null;
 }
 
 export interface TraceReview {
@@ -238,7 +240,8 @@ export interface AgentSpec {
     tags: string[];
   };
   "x-village": { sprite: string | null; home: [number, number] | null; keywords: string[] };
-  kind: "prompt";
+  kind: "prompt" | "tool";
+  tool?: { id: string; explain: boolean } | null; // 工具型村民：用哪個工具
   model: { tier: "large" | "small"; model_id: string | null; temperature: number | null; max_tokens: number };
   prompt: { system: string; user_template: string };
   validate: { must_not_be_empty: boolean; max_chars: number | null };
@@ -263,9 +266,30 @@ export interface TryResult {
   retry_reasons: string[];
   error: string | null;
   failures: string[];
+  attachments: Attachment[];
+  tool_args: Record<string, unknown> | null;
+}
+
+/** 工具產生的附件（目前是 SVG 圖表） */
+export interface Attachment {
+  kind: "svg";
+  name: string;
+  data: string;
+  title: string;
+}
+
+/** 工具箱裡的工具 */
+export interface ToolInfo {
+  id: string;
+  name: string;
+  description: string;
+  default_prompt: string;
+  keywords: string[];
+  examples: string[];
 }
 
 export const villagers = {
+  tools: () => api<ToolInfo[]>("/api/villagers/tools"),
   list: () => api<Villager[]>("/api/villagers"),
   create: (spec: AgentSpec) => api<Villager>("/api/villagers", { method: "POST", json: { spec } }),
   update: (spec: AgentSpec) => api<Villager>(`/api/villagers/${spec.card.id}`, { method: "PUT", json: { spec } }),

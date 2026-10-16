@@ -1,3 +1,4 @@
+import type { Attachment } from "../api";
 import type { VillageEvent } from "../events";
 
 export type StepStatus = "pending" | "running" | "done" | "error";
@@ -17,6 +18,7 @@ export interface StepView {
   retries: number;
   retryReason?: string;
   warnings: string[];
+  attachments?: Attachment[];
 }
 
 export type PlanSource = "mention" | "llm" | "keyword" | "direct";
@@ -39,6 +41,7 @@ export interface RunView {
   steps: StepView[];
   liveAnswer?: string; // 村長直接回覆時的串流文字
   answer?: string;
+  attachments?: Attachment[]; // 最終步驟產生的圖片
   ok?: boolean;
   error?: string;
   startedAt: number;
@@ -118,13 +121,22 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
         model: e.model as string,
         elapsed_ms: e.elapsed_ms as number,
         warnings: (e.warnings as string[]) ?? [],
+        attachments: (e.attachments as Attachment[]) ?? [],
       }));
       break;
     case "agent.error":
       run = patchStep(run, e.step_id, (s) => ({ ...s, status: "error", live: undefined, error: e.error as string }));
       break;
     case "run.finished":
-      run = { ...run, status: "done", reviewing: false, ok: e.ok as boolean, answer: e.answer as string, finishedAt: Date.now() };
+      run = {
+        ...run,
+        status: "done",
+        reviewing: false,
+        ok: e.ok as boolean,
+        answer: e.answer as string,
+        attachments: (e.attachments as Attachment[]) ?? [],
+        finishedAt: Date.now(),
+      };
       break;
     case "run.failed":
       run = { ...run, status: "failed", ok: false, error: e.error as string, finishedAt: Date.now() };

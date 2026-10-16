@@ -13,13 +13,14 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 
 from village.core.card import AgentSpec, Expect
-from village.core.executor import StepResult, run_prompt_agent
+from village.core.executor import StepResult, run_agent
 from village.core.harness import check_expect
 from village.core.registry import RESERVED_IDS
 from village.llm.base import LLMError
 from village.security.admin import require_admin
 from village.store.agents import load_registry, seed_builtin
 from village.store.models import AgentDef
+from village.tools import TOOLS
 
 router = APIRouter(prefix="/api/villagers", tags=["villagers"], dependencies=[Depends(require_admin)])
 
@@ -66,6 +67,8 @@ class TryOut(BaseModel):
     retry_reasons: list[str]
     error: str | None = None
     failures: list[str] = []  # 測試題沒通過的條件
+    attachments: list[dict] = []  # 工具產生的圖片
+    tool_args: dict | None = None  # 工具型村民整理出的參數
 
 
 def _ctx(request: Request):
@@ -202,7 +205,7 @@ async def try_villager(body: TryBody, request: Request) -> TryOut:
     t0 = time.monotonic()
     error = None
     try:
-        await run_prompt_agent(
+        await run_agent(
             _ctx(request).llm, spec, body.instruction, body.context, r, on_retry=on_retry, target=body.target
         )
     except LLMError as e:
@@ -218,4 +221,12 @@ async def try_villager(body: TryBody, request: Request) -> TryOut:
         retry_reasons=reasons,
         error=error,
         failures=failures,
+        attachments=r.attachments,
+        tool_args=r.tool_args,
     )
+
+
+@router.get("/tools")
+async def list_tools() -> list[dict]:
+    """工具箱：工具型村民可以使用的工具（名稱、說明、預設的參數整理說明、建議關鍵字）。"""
+    return [t.info() for t in TOOLS.values()]

@@ -1,0 +1,40 @@
+# 計算機：工具型村民的範例。LLM 只把問題轉成算式，計算由程式（安全求值器）完成，弱模型也算得準。
+card:
+  id: calculator
+  name: 計算機
+  description: 精準計算。適合「算一下、多少錢、等於多少、打幾折、平均、百分比、次方、開根號」等需要數字答案的請求，結果由程式計算一定正確。
+  version: 0.1.0
+  skills:
+    - id: calculate
+      description: 把問題轉成算式並精準計算
+      examples:
+        - 123 乘以 456 是多少
+        - 一杯 65 元，買 7 杯打 9 折要多少錢
+        - 3、5、10 的平均是多少
+  tags: [tool, math]
+
+x-village:
+  sprite: merchant
+  home: [24, 13]
+  keywords: [計算, 算一下, 算算, 多少錢, 等於多少, 加起來, 平均, 打折, 乘以, 除以, 次方, 開根號, 百分之]
+
+kind: tool
+tool:
+  id: calculator
+  explain: true   # 算完後用一句話說明（數字以程式算的為準，不一致就只給算式結果）
+
+model:
+  tier: small
+  temperature: 0
+  max_tokens: 512
+
+validate:
+  max_chars: 800
+
+tests:
+  - input: 123 乘以 456 是多少
+    expect: {contains: ["56,088"]}
+  - input: 一杯 65 元，買 7 杯打 9 折要多少錢
+    expect: {contains: ["409.5"]}
+  - input: 2 的 20 次方
+    expect: {contains: ["1,048,576"]}

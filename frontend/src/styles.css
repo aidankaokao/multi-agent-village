@@ -1056,3 +1056,64 @@ details summary {
 .review-card.bad {
   border-left: 4px solid var(--accent);
 }
+
+/* ---------------------------------------------------------------- 工具產生的圖片 */
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachments figure {
+  margin: 0;
+  border: 2px solid var(--line);
+  background: #fffdf6;
+}
+
+.attachments img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.attachments figcaption {
+  padding: 4px 8px;
+  background: var(--card);
+  font-size: 12px;
+}
+
+a.link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.tool-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.tool-pick button,
+.kind-pick button {
+  text-align: left;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: normal;
+}
+
+.tool-pick button.picked,
+.kind-pick button.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.kind-pick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}

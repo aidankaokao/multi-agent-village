@@ -96,11 +96,16 @@ validate:                 # harness 會用到的輸出檢查
 
 | kind | 怎麼建立 | 例子 | 執行位置 |
 |---|---|---|---|
-| `prompt` | 只寫 `agent.yaml` | 詩人、笑話師、英文翻譯 | 後端同程序 |
-| `tool` | `agent.yaml` + `agent.py`（繼承 `BaseAgent`） | 計算機（不靠 LLM，用安全的運算式求值）、畫圖表（matplotlib / Vega-Lite） | 後端同程序 |
+| `prompt` | 介面上填工作守則（System prompt） | 詩人、笑話師、英文翻譯 | 後端同程序 |
+| `tool` | 介面上選「工具型」並挑工具箱裡的工具（`tool.id`），不用寫程式 | 計算機（安全求值）、圖表師（SVG）、報時員（日期） | 後端同程序 |
 | `remote` | `agent.yaml` 只填 `endpoint`，實際程式在另一個容器 | 台灣史專家（RAG / GraphRAG / agentic RAG） | 獨立容器，走 A2A |
 
-所有類型都實作同一個介面：
+**工具型**（`core/executor.py` 的 `run_tool_agent`，工具在 `backend/village/tools/`）：LLM 依工具的 JSON schema 整理參數
+（`prompt.system` 留空就用工具的 `default_prompt`）→ `tool.run(args)`；`ToolError` 會把原因回饋給 LLM 重來，
+LLM 不能用或一直失敗時改用 `tool.fallback()` 從文字抓參數。工具可回傳附件（SVG），隨 `agent.finished` / `run.finished`
+送到前端，也寫進執行紀錄。新增工具：在 `tools/` 寫一個 `Tool` 子類別並在 `tools/__init__.py` 註冊，介面上就能選。
+
+所有類型都實作同一個介面（規劃中）：
 
 ```python
 class BaseAgent(Protocol):

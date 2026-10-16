@@ -1,0 +1,37 @@
+# 圖表師：工具型村民的範例。LLM 只整理出標籤與數值，圖由程式畫成 SVG，顯示在回答裡。
+card:
+  id: chart
+  name: 圖表師
+  description: 把數字資料畫成長條圖、折線圖或圓餅圖。適合「畫成圖、做圖表、長條圖、折線圖、圓餅圖、看趨勢、看比例」等請求，也能把前一位村民整理的數字畫成圖。
+  version: 0.1.0
+  skills:
+    - id: draw_chart
+      description: 把數字資料畫成圖表
+      examples:
+        - 把一月 120、二月 98、三月 150 畫成長條圖
+        - 畫一個圓餅圖：房租 15000、餐費 8000、交通 2000
+        - 把前面的資料畫成折線圖
+  tags: [tool, chart]
+
+x-village:
+  sprite: scholar
+  home: [8, 13]
+  keywords: [圖表, 畫成圖, 畫圖, 長條圖, 折線圖, 圓餅圖, 趨勢圖, chart]
+
+kind: tool
+tool:
+  id: chart
+
+model:
+  tier: small
+  temperature: 0
+  max_tokens: 1024
+
+validate:
+  max_chars: 3000
+
+tests:
+  - input: 畫一個圓餅圖：房租 15000、餐費 8000、交通 2000
+    expect: {contains: ["圓餅圖", "房租"]}
+  - input: 把一月 120、二月 98、三月 150 畫成長條圖
+    expect: {contains: ["長條圖", "三月"]}

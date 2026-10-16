@@ -1,4 +1,4 @@
-import type { AgentSpec, Model } from "../api";
+import type { AgentSpec, Model, ToolInfo } from "../api";
 import { BLOCKED, CRAFTSMAN, MAP_H, MAP_W, MAYOR, nearestFree, REVIEWER, type SpriteManifest } from "../village/VillageScene";
 import { Field, ListInput, NumInput, SpriteThumb } from "./fields";
 
@@ -6,19 +6,82 @@ interface Props {
   spec: AgentSpec;
   isNew: boolean;
   models: Model[];
+  tools: ToolInfo[];
   manifest: SpriteManifest | null;
   homes: { id: string; name: string; home: [number, number] }[]; // 其他村民的住處，挑位置時參考
   update: (fn: (d: AgentSpec) => void) => void;
 }
 
 /** 村民設定表單：與 agent.yaml 一一對應，每個欄位附上「誰會用到它」的說明 */
-export function SpecForm({ spec, isNew, models, manifest, homes, update }: Props) {
+export function SpecForm({ spec, isNew, models, tools, manifest, homes, update }: Props) {
   const card = spec.card;
   const v = spec["x-village"];
   const sprites = Object.entries(manifest?.characters ?? {}).filter(([, c]) => !c.system);
+  const isTool = spec.kind === "tool";
+  const tool = tools.find((t) => t.id === spec.tool?.id);
+
+  const setKind = (kind: "prompt" | "tool") => {
+    if (kind === spec.kind) return;
+    if (kind === "tool" && spec.prompt.system.trim() && !confirm("改成工具型會清空目前的 System prompt（工具型改用「參數整理說明」），確定？")) return;
+    update((d) => {
+      d.kind = kind;
+      if (kind === "tool") {
+        d.tool = d.tool ?? { id: tools[0]?.id ?? "calculator", explain: false };
+        d.prompt.system = "";
+        d.model.temperature = 0;
+      } else {
+        d.tool = null;
+      }
+    });
+  };
+
+  /** 挑工具：名片、範例、關鍵字還空著的話，先幫忙填上工具的建議 */
+  const pickTool = (t: ToolInfo) =>
+    update((d) => {
+      d.tool = { id: t.id, explain: d.tool?.explain ?? false };
+      if (!d.card.description.trim()) d.card.description = t.description;
+      if (d.card.skills[0] && !d.card.skills[0].examples.length) d.card.skills[0].examples = [...t.examples];
+      if (!d["x-village"].keywords.length) d["x-village"].keywords = [...t.keywords];
+    });
 
   return (
     <div className="spec-form">
+      <section>
+        <h3>村民類型</h3>
+        <div className="kind-pick">
+          <button className={!isTool ? "picked" : ""} onClick={() => setKind("prompt")}>
+            <strong>💬 對話型</strong>
+            <span className="muted">用 LLM 寫作、翻譯、整理、聊天。你寫工作守則（System prompt）。</span>
+          </button>
+          <button className={isTool ? "picked" : ""} onClick={() => setKind("tool")}>
+            <strong>🔧 工具型</strong>
+            <span className="muted">用程式精準完成（計算、圖表、日期）。LLM 只負責把請求整理成參數，弱模型也不會算錯。</span>
+          </button>
+        </div>
+        {isTool && (
+          <>
+            <Field label="使用的工具">
+              <div className="tool-pick">
+                {tools.map((t) => (
+                  <button key={t.id} className={spec.tool?.id === t.id ? "picked" : ""} onClick={() => pickTool(t)}>
+                    <strong>{t.name}</strong>
+                    <span className="muted">{t.description}</span>
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={spec.tool?.explain ?? false}
+                onChange={(e) => update((d) => void (d.tool = { id: d.tool?.id ?? "calculator", explain: e.target.checked }))}
+              />
+              算完後請 LLM 用一句話說明結果（數字仍以工具算的為準，說錯數字就只顯示工具結果）
+            </label>
+          </>
+        )}
+      </section>
+
       <section>
         <h3>① 名片（給村長看）</h3>
         <p className="hint">村長規劃時只看得到這一段，用它決定「該不該派這位村民」。</p>
@@ -145,16 +208,39 @@ export function SpecForm({ spec, isNew, models, manifest, homes, update }: Props
       </section>
 
       <section>
-        <h3>④ Prompt（給村民自己的 LLM 看）</h3>
-        <Field label="System prompt" hint="村民的人格與工作規則。寫清楚：要做什麼、輸出格式、不要做什麼（例如不要解釋、不要前言）。">
-          <textarea
-            rows={9}
-            className="mono"
-            value={spec.prompt.system}
-            placeholder={"你是村子裡的翻譯官。\n規則：\n- 原文是中文就翻成英文，是英文就翻成繁體中文。\n- 只輸出譯文，不要解釋、不要前言。\n- 保留原文的換行與格式。"}
-            onChange={(e) => update((d) => void (d.prompt.system = e.target.value))}
-          />
-        </Field>
+        <h3>{isTool ? "④ 參數整理說明（給 LLM 看）" : "④ Prompt（給村民自己的 LLM 看）"}</h3>
+        {isTool ? (
+          <Field
+            label="怎麼把請求整理成工具參數"
+            hint={
+              <>
+                留空＝使用{tool ? `「${tool.name}」` : "工具"}的預設說明（灰字就是預設內容）。想加規則（例如「金額一律算到整數」）再
+                <button className="link" onClick={() => update((d) => void (d.prompt.system = tool?.default_prompt ?? ""))}>
+                  把預設說明填進來改
+                </button>
+                。
+              </>
+            }
+          >
+            <textarea
+              rows={9}
+              className="mono"
+              value={spec.prompt.system}
+              placeholder={tool?.default_prompt}
+              onChange={(e) => update((d) => void (d.prompt.system = e.target.value))}
+            />
+          </Field>
+        ) : (
+          <Field label="System prompt" hint="村民的人格與工作規則。寫清楚：要做什麼、輸出格式、不要做什麼（例如不要解釋、不要前言）。">
+            <textarea
+              rows={9}
+              className="mono"
+              value={spec.prompt.system}
+              placeholder={"你是村子裡的翻譯官。\n規則：\n- 原文是中文就翻成英文，是英文就翻成繁體中文。\n- 只輸出譯文，不要解釋、不要前言。\n- 保留原文的換行與格式。"}
+              onChange={(e) => update((d) => void (d.prompt.system = e.target.value))}
+            />
+          </Field>
+        )}
         <Field
           label="任務模板"
           hint={

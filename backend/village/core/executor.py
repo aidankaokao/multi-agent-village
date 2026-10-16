@@ -4,20 +4,23 @@
 """
 
 import asyncio
+import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 
 from village.core.card import AgentSpec
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
-from village.core.orchestrator import ChatLLM, Plan, Step, direct_reply, make_plan
+from village.core.orchestrator import ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan
 from village.core.registry import AgentRegistry
 from village.core.reviewer import REVIEWER_ID, Leaf, Review, review
 from village.events import EventBus
 from village.llm.base import ChatMessage, LLMError, TextCallback
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore, VillageRules
+from village.tools import TOOLS, ToolError, ToolResult
 
 log = logging.getLogger("village.executor")
 
@@ -67,6 +70,8 @@ class StepResult:
     tokens_in: int = 0
     tokens_out: int = 0
     rejected: list[dict] = field(default_factory=list)  # 被審核員退回的舊版本 {output, reason}
+    attachments: list[dict] = field(default_factory=list)  # 工具產生的圖片等（{kind, name, data, title}）
+    tool_args: dict | None = None  # 工具型村民：LLM（或退路）整理出的參數
 
 
 def render_context(step: Step, results: dict[str, StepResult], registry: AgentRegistry) -> str:
@@ -173,9 +178,10 @@ class Runner:
 
             steps = [asdict(r) for r in results.values()]
             rv = [x.to_dict() for x in reviews]
-            await emit("run.finished", run_id=run_id, ok=ok, answer=answer, steps=steps, reviews=rv)
+            files = [a for s in leaf_steps(plan) if results[s.id].status == "done" for a in results[s.id].attachments]
+            await emit("run.finished", run_id=run_id, ok=ok, answer=answer, steps=steps, reviews=rv, attachments=files)
             await record("done" if ok else "error", answer=answer)
-            return {"ok": ok, "answer": answer, "plan": plan.to_dict(), "steps": steps, "reviews": rv}
+            return {"ok": ok, "answer": answer, "plan": plan.to_dict(), "steps": steps, "reviews": rv, "attachments": files}
         except asyncio.CancelledError:
             # 使用者按「停止」：通知前端讓村民收工，紀錄標成 cancelled，再把取消往上傳
             await emit("run.cancelled", run_id=run_id, agent=MAYOR)
@@ -236,7 +242,7 @@ class Runner:
                 await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=reason)
 
             await asyncio.wait_for(
-                run_prompt_agent(
+                run_agent(
                     self.llm, spec, instruction, context, r,
                     on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
                     on_retry=on_retry,
@@ -253,6 +259,7 @@ class Runner:
             await emit(
                 "agent.finished", run_id=run_id, step_id=step.id, agent=step.agent,
                 output=r.output, model=r.model, elapsed_ms=r.elapsed_ms, warnings=r.warnings,
+                attachments=r.attachments,
             )
         else:
             await emit("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
@@ -291,6 +298,125 @@ class Runner:
     def _name(self, agent_id: str) -> str:
         spec = self.registry.get(agent_id)
         return spec.name if spec else agent_id
+
+
+async def run_agent(
+    llm: ChatLLM,
+    spec: AgentSpec,
+    instruction: str,
+    context: str,
+    r: StepResult,
+    *,
+    on_text: TextCallback | None = None,
+    on_retry: Callable[[str], Awaitable[None]] | None = None,
+    target: str | None = None,
+) -> None:
+    """依村民類型執行；問答、試打、測試題共用。"""
+    if spec.kind == "tool":
+        await run_tool_agent(llm, spec, instruction, context, r, on_text=on_text, on_retry=on_retry, target=target)
+    else:
+        await run_prompt_agent(llm, spec, instruction, context, r, on_text=on_text, on_retry=on_retry, target=target)
+
+
+TOOL_RETRIES = 2  # 參數不合法時帶錯誤訊息請 LLM 重新整理的次數
+_NUMBER = re.compile(r"-?[\d,]+(?:\.\d+)?")
+
+
+async def run_tool_agent(
+    llm: ChatLLM,
+    spec: AgentSpec,
+    instruction: str,
+    context: str,
+    r: StepResult,
+    *,
+    on_text: TextCallback | None = None,
+    on_retry: Callable[[str], Awaitable[None]] | None = None,
+    target: str | None = None,
+) -> None:
+    """工具型村民：LLM 整理參數（JSON schema）→ 工具計算 → 參數有錯帶回饋重來 → 仍不行就用工具的退路從文字抓參數。
+
+    LLM 完全不能用時也會直接走退路，所以弱模型或沒有模型時，簡單的計算 / 圖表 / 日期仍然做得到。
+    """
+    assert spec.tool is not None
+    tool = TOOLS[spec.tool.id]
+    system = spec.prompt.system.strip() if spec.prompt and spec.prompt.system.strip() else tool.default_prompt
+    template = spec.prompt.user_template if spec.prompt else "任務：{instruction}\n{context}"
+    r.input = render_user(template, instruction, context)
+    messages = [ChatMessage("user", r.input)]
+    result: ToolResult | None = None
+    problem = ""
+
+    async def say(text: str) -> None:
+        if on_text:
+            await on_text(text)
+
+    for _ in range(TOOL_RETRIES + 1):
+        r.attempts += 1
+        try:
+            res = await llm.chat(
+                target or spec.model.target, messages, system=system, json_schema=tool.schema(),
+                temperature=spec.model.temperature, max_tokens=spec.model.max_tokens,
+            )
+        except LLMError as e:
+            problem = f"LLM 無法使用：{e}"
+            break
+        r.model = res.model
+        r.tokens_in += res.usage.get("input_tokens", 0)
+        r.tokens_out += res.usage.get("output_tokens", 0)
+        try:
+            args = _extract_json(res.text)
+            await say(f"🔧 交給{tool.name}：{json.dumps(args, ensure_ascii=False)[:200]}")
+            result, r.tool_args = tool.run(args), args
+            break
+        except (PlanError, ToolError) as e:
+            problem = str(e)
+            r.retry_reasons.append(problem)
+            if on_retry:
+                await on_retry(f"參數有問題：{problem}")
+            messages += [
+                ChatMessage("assistant", res.text or "（空白）"),
+                ChatMessage("user", f"這組參數有問題：{problem}。請修正後重新輸出完整 JSON。"),
+            ]
+
+    if result is None:  # 退路：不靠 LLM，直接從文字抓參數
+        args = tool.fallback(instruction, context)
+        if args is not None:
+            try:
+                result, r.tool_args = tool.run(args), args
+                r.warnings.append("LLM 沒整理出可用的參數，改由程式直接從文字抓取")
+            except ToolError as e:
+                problem = f"{problem}；程式直接抓取也失敗：{e}" if problem else str(e)
+        if result is None:
+            raise LLMError(f"{tool.name}沒辦法完成：{problem or '看不出要處理的內容'}")
+
+    r.output = result.text
+    r.attachments = [a.to_dict() for a in result.attachments]
+    if spec.tool.explain:
+        await _explain(llm, spec, instruction, result, r, target, say)
+
+
+async def _explain(llm: ChatLLM, spec: AgentSpec, instruction: str, result: ToolResult, r: StepResult, target, say) -> None:
+    """請 LLM 用一兩句話說明工具結果；說明裡的數字必須和工具結果一致，不一致就只給工具結果。"""
+    fact = result.detail or result.text
+    try:
+        res = await llm.chat(
+            target or spec.model.target,
+            [ChatMessage("user", f"使用者的請求：{instruction}\n工具算出的結果：{fact}")],
+            system=f"你是村子裡的{spec.name}。用一兩句繁體中文回答使用者，數字必須和工具結果完全相同，不要重新計算、不要補充其他數字。",
+            temperature=0.2,
+            max_tokens=400,
+        )
+    except LLMError:
+        return
+    r.tokens_in += res.usage.get("input_tokens", 0)
+    r.tokens_out += res.usage.get("output_tokens", 0)
+    text = normalize(res.text)
+    nums = _NUMBER.findall(fact.split("=")[-1]) if "=" in fact else []
+    if not text or (nums and nums[-1].replace(",", "") not in text.replace(",", "")):
+        r.warnings.append("說明裡的數字和工具結果不一致，只顯示工具結果")
+        return
+    r.output = f"{text}\n\n{result.text}"
+    await say(r.output)
 
 
 async def run_prompt_agent(

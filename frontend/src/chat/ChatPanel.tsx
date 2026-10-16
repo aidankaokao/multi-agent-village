@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo } from "../api";
+import { Attachments } from "../ui/Attachments";
 import { leafIds, type RunsState, type RunView, type StepView } from "./runs";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -243,6 +244,7 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
             {writing && <span className="cursor">▌</span>}
           </div>
         )}
+        {run.status === "done" && <Attachments items={run.attachments} />}
         {run.status === "done" && !run.answer && <div className="step-error">沒有產生結果，請展開執行過程查看原因。</div>}
         {run.status === "failed" && <div className="step-error">執行失敗：{run.error}</div>}
         {run.status === "cancelled" && <div className="muted">■ 已停止。完成的步驟保留在執行過程與紀錄裡。</div>}
@@ -293,6 +295,7 @@ function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Reco
           {s.status === "running" && <span className="cursor">▌</span>}
         </pre>
       )}
+      {!isLast && <Attachments items={s.attachments} />}
       {isLast && s.status !== "pending" && s.status !== "error" && <div className="muted">→ 成果顯示在下方回答</div>}
       {s.error && <div className="step-error">{s.error}</div>}
     </div>

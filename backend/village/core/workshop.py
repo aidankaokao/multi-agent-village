@@ -19,6 +19,7 @@ from village.core.card import AgentSpec
 from village.core.orchestrator import ChatLLM, PlanError, _extract_json
 from village.core.registry import RESERVED_IDS
 from village.llm.base import ChatMessage, LLMError
+from village.tools import TOOLS
 
 log = logging.getLogger("village.workshop")
 
@@ -191,6 +192,7 @@ def blueprint_schema(sprite_ids: list[str]) -> dict:
         "sprite": {"type": "string", "enum": sprite_ids} if sprite_ids else s,
         "creativity": {"type": "string", "enum": list(CREATIVITY)},
         "max_chars": {"type": "integer"},
+        "tool": {"type": "string", "enum": ["none", *TOOLS]},
         "system_prompt": s,
         "tests": {"type": "array", "items": test},
         "summary": s,
@@ -199,6 +201,7 @@ def blueprint_schema(sprite_ids: list[str]) -> dict:
 
 
 def generate_system_prompt(sprites: list[SpriteOption], neighbors: list[Neighbor], draft: dict | None) -> str:
+    tools = "\n".join(f"  - {t.id}：{t.name}。{t.description}" for t in TOOLS.values())
     looks = "\n".join(f"- {s.id}：{s.name}（{s.desc}）" for s in sprites) or "（無）"
     base = (
         f"\n目前的草稿（請在這個基礎上依對話修改，沒提到的部分保持原樣）：\n{json.dumps(_draft_digest(draft), ensure_ascii=False)}\n"
@@ -224,6 +227,9 @@ def generate_system_prompt(sprites: list[SpriteOption], neighbors: list[Neighbor
 - keywords：4～8 個詞，請求裡出現它們就代表需要這位村民。要是使用者實際會打的字，而且不要和現有村民重疊。
 - tags：1～3 個英文小寫標籤。
 - sprite：從可選外觀挑最符合的 id。
+- tool：村民的主要工作如果是下面這些，就選對應的工具（由程式計算，結果一定正確），否則填 none：
+{tools}
+  選了工具時，system_prompt 填空字串即可（程式會用工具的預設說明），creativity 填 stable。
 - creativity：stable（答案要正確一致，例如翻譯、計算、整理）/ balanced / creative（創作、點子）。
 - max_chars：整份回答的字數上限（整數）。使用者有說就照他說的；沒說就依內容：短答 300、一般 1000、長文 3000。
 - 使用者抱怨「太長」時：除了守住 max_chars，還要在 system_prompt 用「結構」限制長度（例如最多 4 點、每點 40 字內），
@@ -255,6 +261,7 @@ def _draft_digest(spec: dict | None) -> dict:
         "keywords": v.get("keywords"),
         "sprite": v.get("sprite"),
         "system_prompt": (spec.get("prompt") or {}).get("system"),
+        "tool": (spec.get("tool") or {}).get("id", "none"),
         "max_chars": (spec.get("validate") or {}).get("max_chars"),
         "temperature": (spec.get("model") or {}).get("temperature"),
     }
@@ -329,7 +336,9 @@ def build_spec(
     if any(n.name == name for n in neighbors if not draft or n.id != draft["card"]["id"]):
         raise BlueprintError(f"name「{name}」和現有村民重複，請換一個")
     description = _text(data, "description", 10)
-    system = _text(data, "system_prompt", 20)
+    tool_id = data.get("tool") if data.get("tool") in TOOLS else None
+    # 工具型：參數整理說明用工具預設（使用者之後可在編輯器改）；修改草稿時保留已經自訂的說明
+    system = ((draft or {}).get("prompt") or {}).get("system", "") if tool_id else _text(data, "system_prompt", 20)
     examples = _strs(data, "examples", 2)
     keywords = _strs(data, "keywords", 2)
     creativity = data.get("creativity") if data.get("creativity") in CREATIVITY else "balanced"
@@ -338,7 +347,10 @@ def build_spec(
     except (TypeError, ValueError):
         max_chars = 1000
     max_tokens = max_tokens_for(max_chars)
-    system = with_length_rule(system, max_chars)
+    if tool_id:
+        creativity = "stable"
+    else:
+        system = with_length_rule(system, max_chars)
 
     sprite_ids = [s.id for s in sprites]
     sprite = data.get("sprite") if data.get("sprite") in sprite_ids else (sprite_ids[0] if sprite_ids else None)
@@ -392,9 +404,10 @@ def build_spec(
             "tags": _strs(data, "tags")[:5],
         },
         "x-village": {"sprite": sprite, "home": home, "keywords": keywords},
-        "kind": "prompt",
-        "model": model,
+        "kind": "tool" if tool_id else "prompt",
+        "model": {**model, "temperature": 0.0} if tool_id else model,
         "prompt": {"system": system, "user_template": DEFAULT_TEMPLATE},
+        "tool": {"id": tool_id, "explain": tool_id == "calculator"} if tool_id else None,
         "validate": {"must_not_be_empty": True, "max_chars": max_chars},
         "tests": tests,
     }

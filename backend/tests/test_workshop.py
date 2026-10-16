@@ -142,3 +142,12 @@ async def test_workshop_api(env, monkeypatch):  # noqa: F811
     spec = r.json()["spec"]
     spec["card"]["id"] = "craftsman"
     assert (await c.post("/api/villagers", json={"spec": spec})).status_code == 422
+
+
+def test_build_spec_tool_villager():
+    bp = {**BLUEPRINT, "name": "記帳員", "tool": "calculator", "system_prompt": "", "creativity": "creative"}
+    spec = build_spec(bp, SPRITES, NEIGHBORS)
+    assert spec.kind == "tool" and spec.tool.id == "calculator" and spec.tool.explain
+    assert spec.model.temperature == 0 and spec.prompt.system == ""  # 用工具預設的參數整理說明
+    assert build_spec({**BLUEPRINT, "tool": "none"}, SPRITES, NEIGHBORS).kind == "prompt"
+    assert "calculator：計算機" in workshop.generate_system_prompt(SPRITES, NEIGHBORS, None)
