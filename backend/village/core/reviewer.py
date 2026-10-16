@@ -87,7 +87,7 @@ async def review(llm: ChatLLM, message: str, leaves: list[Leaf], target: str = "
     try:
         r = await llm.chat(
             target, [ChatMessage("user", render(message, leaves))], system=SYSTEM,
-            json_schema=review_schema(ids), max_tokens=1024,
+            json_schema=review_schema(ids), max_tokens=1024, fallback="tier:large",
         )
         data = _extract_json(r.text)
     except (LLMError, PlanError) as e:

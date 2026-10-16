@@ -147,7 +147,7 @@ async def interview(
     try:
         r = await llm.chat(
             target, messages, system=interview_system_prompt(neighbors, has_draft),
-            json_schema=INTERVIEW_SCHEMA, max_tokens=1024,
+            json_schema=INTERVIEW_SCHEMA, max_tokens=1024, fallback="tier:large",
         )
         data = _extract_json(r.text)
         reply = str(data.get("reply") or "").strip()
@@ -472,7 +472,7 @@ async def generate(
     system = generate_system_prompt(sprites, neighbors, draft)
     for attempt in range(GEN_RETRIES + 1):
         try:
-            r = await llm.chat(target, msgs, system=system, json_schema=schema, max_tokens=4096)
+            r = await llm.chat(target, msgs, system=system, json_schema=schema, max_tokens=4096, fallback="tier:large")
         except LLMError as e:
             notes.append(f"工匠的 LLM 無法使用：{e}")
             break

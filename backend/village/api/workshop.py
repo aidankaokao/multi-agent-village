@@ -9,7 +9,8 @@ from sqlalchemy import select
 from village.core import workshop
 from village.core.workshop import CRAFTSMAN_ID, Neighbor, SpriteOption
 from village.llm.base import ChatMessage
-from village.security.auth import require_admin
+from village.llm.service import llm_user
+from village.security.auth import CurrentUser, require_admin
 from village.store.models import AgentDef
 
 router = APIRouter(prefix="/api/workshop", tags=["workshop"], dependencies=[Depends(require_admin)])
@@ -68,32 +69,34 @@ def _msgs(body: WorkshopBody) -> list[ChatMessage]:
 
 
 @router.post("/interview")
-async def interview(body: WorkshopBody, request: Request) -> InterviewOut:
+async def interview(body: WorkshopBody, request: Request, me: CurrentUser = Depends(require_admin)) -> InterviewOut:
     await _busy(request, "workshop.started", stage="interview")
     try:
-        r = await workshop.interview(
-            request.app.state.ctx.llm, _msgs(body), await _neighbors(request),
-            has_draft=body.draft is not None, target=body.target or "tier:large",
-        )
+        with llm_user(me.id):  # 工匠用自己的 LLM 設定
+            r = await workshop.interview(
+                request.app.state.ctx.llm, _msgs(body), await _neighbors(request),
+                has_draft=body.draft is not None, target=body.target or "tier:large",
+            )
     finally:
         await _busy(request, "workshop.finished", stage="interview")
     return InterviewOut(reply=r.reply, ready=r.ready, source=r.source)
 
 
 @router.post("/generate")
-async def generate(body: WorkshopBody, request: Request) -> GenerateOut:
+async def generate(body: WorkshopBody, request: Request, me: CurrentUser = Depends(require_admin)) -> GenerateOut:
     await _busy(request, "workshop.started", stage="generate")
     ok = False
     try:
-        d = await workshop.generate(
-            request.app.state.ctx.llm,
-            _msgs(body),
-            [SpriteOption(s.id, s.name, s.desc) for s in body.sprites],
-            await _neighbors(request),
-            draft=body.draft,
-            target=body.target or "tier:large",
-            blocked={tuple(b) for b in body.blocked},
-        )
+        with llm_user(me.id):
+            d = await workshop.generate(
+                request.app.state.ctx.llm,
+                _msgs(body),
+                [SpriteOption(s.id, s.name, s.desc) for s in body.sprites],
+                await _neighbors(request),
+                draft=body.draft,
+                target=body.target or "tier:large",
+                blocked={tuple(b) for b in body.blocked},
+            )
         ok = d.source == "llm"
     finally:
         await _busy(request, "workshop.finished" if ok else "workshop.error", stage="generate")

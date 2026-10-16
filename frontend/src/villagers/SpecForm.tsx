@@ -176,7 +176,7 @@ export function SpecForm({ spec, isNew, models, tools, manifest, homes, update }
       <section>
         <h3>③ 模型</h3>
         <div className="grid2">
-          <Field label="使用模型" hint="分級在「LLM 設定」排序；指定模型時優先使用它">
+          <Field label="使用模型" hint="每個人用自己 LLM 設定裡的分級。「指定模型」只對你自己有效，其他人問答時會改用這裡的分級">
             <select
               value={spec.model.model_id ?? `tier:${spec.model.tier}`}
               onChange={(e) =>

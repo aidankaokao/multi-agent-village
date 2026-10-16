@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { AccountsPanel, PasswordModal } from "./accounts/AccountsPanel";
+import { AccountsPanel, DeleteAccountModal, PasswordModal } from "./accounts/AccountsPanel";
 import { auth, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type Me } from "./api";
 import { LoginPage } from "./auth/LoginPage";
 import { ChatPanel } from "./chat/ChatPanel";
@@ -19,7 +19,7 @@ const PAGES: { id: Page; icon: string; label: string; admin?: boolean }[] = [
   { id: "traces", icon: "📜", label: "紀錄" },
   { id: "rules", icon: "⚖️", label: "村規", admin: true },
   { id: "accounts", icon: "👥", label: "帳號", admin: true },
-  { id: "llm", icon: "🧠", label: "LLM 設定", admin: true },
+  { id: "llm", icon: "🧠", label: "LLM 設定" }, // 每個人管理自己的 LLM（自己的 API key 與額度）
 ];
 
 /** 最外層：還沒登入就顯示登入頁（示範村落 + 登入 / 註冊），登入後進入村子 */
@@ -29,7 +29,7 @@ export function App() {
     auth
       .status()
       .then(setStatus)
-      .catch(() => setStatus({ setup_required: false, allow_registration: false, user: null }));
+      .catch(() => setStatus({ setup_required: false, allow_registration: false, user: null, llm_ready: false }));
   }, []);
 
   useEffect(() => {
@@ -39,11 +39,13 @@ export function App() {
   }, [load]);
 
   if (!status) return null;
-  if (!status.user) return <LoginPage status={status} onDone={(me) => setStatus({ ...status, user: me, setup_required: false })} />;
+  if (!status.user) return <LoginPage status={status} onDone={() => load()} />;
   return (
     <VillageApp
       key={status.user.id}
       me={status.user}
+      llmReady={status.llm_ready}
+      onRecheck={load}
       onLogout={async () => {
         await auth.logout().catch(() => {});
         load();
@@ -56,7 +58,8 @@ export function App() {
  * 版面：像素地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
  * 右下 💬 打開問答視窗。抽屜與問答視窗同時只開一個（進行中的問答不受影響）。
  */
-function VillageApp({ me, onLogout }: { me: Me; onLogout: () => void }) {
+function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: boolean; onRecheck: () => void; onLogout: () => void }) {
+  const [deleting, setDeleting] = useState(false);
   const pages = PAGES.filter((p) => !p.admin || me.role === "admin");
   const [userMenu, setUserMenu] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -99,6 +102,7 @@ function VillageApp({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));
 
   const openPage = (p: Page | null) => {
+    if (page === "llm" && p !== "llm") onRecheck(); // 離開 LLM 設定時重新確認設定好了沒
     setPage(p);
     setMenuOpen(false);
     if (p) setChatOpen(false);
@@ -156,12 +160,23 @@ function VillageApp({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {userMenu && (
           <div className="user-menu">
             <span className="muted">@{me.username}</span>
+            <button onClick={() => (openPage("llm"), setUserMenu(false))}>🧠 我的 LLM 設定</button>
             <button onClick={() => (setChangingPassword(true), setUserMenu(false))}>🔑 修改密碼</button>
             <button onClick={onLogout}>🚪 登出</button>
+            <button className="danger-text" onClick={() => (setDeleting(true), setUserMenu(false))}>
+              🗑 刪除我的帳號
+            </button>
           </div>
         )}
       </div>
       {changingPassword && <PasswordModal onClose={() => setChangingPassword(false)} />}
+      {deleting && <DeleteAccountModal me={me} onClose={() => setDeleting(false)} onDeleted={onLogout} />}
+      {!llmReady && page !== "llm" && (
+        <div className="llm-banner">
+          ⚠️ 你還沒有設定 LLM。每個帳號用自己的模型與額度，設定好才能問答。
+          <button onClick={() => openPage("llm")}>去設定 →</button>
+        </div>
+      )}
 
       {/* 右上：頁面選單（抽屜打開時改用抽屜上方的切換列） */}
       {!page && (
@@ -235,6 +250,7 @@ function VillageApp({ me, onLogout }: { me: Me; onLogout: () => void }) {
             setTraceId(id);
             openPage("traces");
           }}
+          onOpenLlm={() => openPage("llm")}
         />
       </div>
       <button className={`fab chat-fab ${busy ? "busy" : ""}`} onClick={toggleChat} title={chatOpen ? "收起問答" : "打開問答"}>

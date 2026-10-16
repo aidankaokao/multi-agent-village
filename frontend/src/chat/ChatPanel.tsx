@@ -31,9 +31,10 @@ interface Props {
   onReset: () => void;
   onCancel: (runId: string) => Promise<void>;
   onOpenTrace: (runId: string) => void;
+  onOpenLlm: () => void;
 }
 
-export function ChatPanel({ runs, agents, onSend, onReset, onCancel, onOpenTrace }: Props) {
+export function ChatPanel({ runs, agents, onSend, onReset, onCancel, onOpenTrace, onOpenLlm }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -122,7 +123,16 @@ export function ChatPanel({ runs, agents, onSend, onReset, onCancel, onOpenTrace
           send(text);
         }}
       >
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="error">
+            {error}
+            {error.includes("LLM 設定") && (
+              <button type="button" className="link" onClick={onOpenLlm} style={{ marginLeft: 8, color: "#fff" }}>
+                去設定 →
+              </button>
+            )}
+          </p>
+        )}
         <textarea
           rows={3}
           value={text}

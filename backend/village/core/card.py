@@ -43,6 +43,11 @@ class ModelConfig(BaseModel):
     def target(self) -> str:
         return self.model_id or f"tier:{self.tier}"
 
+    @property
+    def fallback(self) -> str:
+        """指定的模型屬於設定這位村民的人；別人問答時找不到那個模型，就改用分級。"""
+        return f"tier:{self.tier}"
+
 
 class PromptConfig(BaseModel):
     system: str = ""  # prompt 型必填（見 AgentSpec 驗證）；工具型留空 = 用工具的預設說明

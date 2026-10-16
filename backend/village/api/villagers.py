@@ -17,7 +17,8 @@ from village.core.executor import StepResult, run_agent
 from village.core.harness import check_expect
 from village.core.registry import RESERVED_IDS
 from village.llm.base import LLMError
-from village.security.auth import require_admin
+from village.llm.service import llm_user
+from village.security.auth import CurrentUser, require_admin
 from village.store.agents import load_registry, seed_builtin
 from village.store.models import AgentDef
 from village.tools import TOOLS
@@ -193,7 +194,7 @@ async def from_yaml(body: YamlBody) -> dict:
 
 
 @router.post("/try")
-async def try_villager(body: TryBody, request: Request) -> TryOut:
+async def try_villager(body: TryBody, request: Request, me: CurrentUser = Depends(require_admin)) -> TryOut:
     """用（可能還沒儲存的）設定跑一次，流程與問答時相同：LLM → harness 檢查 → 不合格重做。"""
     spec = parse_spec(body.spec)
     r = StepResult(id="try", agent=spec.id, instruction=body.instruction, use=[])
@@ -205,9 +206,10 @@ async def try_villager(body: TryBody, request: Request) -> TryOut:
     t0 = time.monotonic()
     error = None
     try:
-        await run_agent(
-            _ctx(request).llm, spec, body.instruction, body.context, r, on_retry=on_retry, target=body.target
-        )
+        with llm_user(me.id):  # 試打用自己的 LLM 設定
+            await run_agent(
+                _ctx(request).llm, spec, body.instruction, body.context, r, on_retry=on_retry, target=body.target
+            )
     except LLMError as e:
         error = str(e)
     failures = check_expect(r.output, body.expect) if body.expect and error is None else []

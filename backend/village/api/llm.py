@@ -1,5 +1,7 @@
-"""LLM 設定 API：provider / 模型註冊、模型分級、試打。全部需要 admin token。
+"""LLM 設定 API：provider / 模型註冊、模型分級、試打。
 
+每個帳號各自管理自己的 LLM（自己的 API key 與額度），只看得到、改得到自己的；
+用別人的 id 一律當作不存在（404），不透露是否存在。
 API key 只寫不讀：回應只有 has_api_key 與 api_key_hint。
 """
 
@@ -12,12 +14,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, LLMError, ProviderKind, ReasoningEffort
-from village.llm.service import TIERS, LLMService
-from village.security.auth import require_admin
+from village.llm.service import TIERS, LLMService, llm_user
+from village.security.auth import CurrentUser, require_user
 from village.security.crypto import SecretBox, secret_hint
 from village.store.models import LlmModel, LlmProvider, ModelTier, new_id
 
-router = APIRouter(prefix="/api/llm", tags=["llm"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/llm", tags=["llm"])
+Me = Depends(require_user)
 
 
 # ---------------------------------------------------------------- schemas
@@ -140,6 +143,20 @@ def _clear_api_key(p: LlmProvider) -> None:
     p.api_key_ct = p.api_key_nonce = p.key_version = p.api_key_hint = None
 
 
+async def _own_provider(s, provider_id: str, me: CurrentUser) -> LlmProvider:
+    p = await s.get(LlmProvider, provider_id)
+    if p is None or p.user_id != me.id:
+        raise HTTPException(404, "provider not found")
+    return p
+
+
+async def _own_model(s, model_id: str, me: CurrentUser) -> LlmModel:
+    m = await s.get(LlmModel, model_id, options=[selectinload(LlmModel.provider)])
+    if m is None or m.provider.user_id != me.id:
+        raise HTTPException(404, "model not found")
+    return m
+
+
 def _model_out(m: LlmModel) -> ModelOut:
     return ModelOut(
         id=m.id,
@@ -157,25 +174,25 @@ def _model_out(m: LlmModel) -> ModelOut:
 # ---------------------------------------------------------------- providers
 
 
-@router.get("/defaults")
+@router.get("/defaults", dependencies=[Me])
 async def defaults():
     """新增 provider 表單的預設值（依部署環境而不同，例如容器內的 Ollama 位址）。"""
     return {"base_urls": DEFAULT_BASE_URLS}
 
 
 @router.get("/providers", response_model=list[ProviderOut])
-async def list_providers(request: Request):
+async def list_providers(request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        rows = await s.execute(select(LlmProvider).order_by(LlmProvider.created_at))
+        rows = await s.execute(select(LlmProvider).where(LlmProvider.user_id == me.id).order_by(LlmProvider.created_at))
         return [ProviderOut.of(p) for p in rows.scalars()]
 
 
 @router.post("/providers", response_model=ProviderOut, status_code=status.HTTP_201_CREATED)
-async def create_provider(body: ProviderCreate, request: Request):
+async def create_provider(body: ProviderCreate, request: Request, me: CurrentUser = Me):
     if body.kind == "openai_compat" and not body.base_url:
         raise HTTPException(422, "openai_compat 需要 base_url")
-    # 先產生 id：加密時 AAD 需要它
-    p = LlmProvider(id=new_id(), name=body.name, kind=body.kind, base_url=body.base_url or None)
+    # 先產生 id 並設定擁有者：加密時 AAD 需要它們
+    p = LlmProvider(id=new_id(), user_id=me.id, name=body.name, kind=body.kind, base_url=body.base_url or None)
     if body.api_key and body.api_key.get_secret_value():
         _set_api_key(p, _box(request), body.api_key.get_secret_value())
     async with _sm(request)() as s:
@@ -188,11 +205,9 @@ async def create_provider(body: ProviderCreate, request: Request):
 
 
 @router.patch("/providers/{provider_id}", response_model=ProviderOut)
-async def update_provider(provider_id: str, body: ProviderUpdate, request: Request):
+async def update_provider(provider_id: str, body: ProviderUpdate, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        p = await s.get(LlmProvider, provider_id)
-        if p is None:
-            raise HTTPException(404, "provider not found")
+        p = await _own_provider(s, provider_id, me)
         if body.name is not None:
             p.name = body.name
         if body.base_url is not None:
@@ -211,22 +226,18 @@ async def update_provider(provider_id: str, body: ProviderUpdate, request: Reque
 
 
 @router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_provider(provider_id: str, request: Request):
+async def delete_provider(provider_id: str, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        p = await s.get(LlmProvider, provider_id)
-        if p is None:
-            raise HTTPException(404, "provider not found")
+        p = await _own_provider(s, provider_id, me)
         await s.delete(p)
         await s.commit()
 
 
 @router.get("/providers/{provider_id}/remote-models", response_model=list[RemoteModelOut])
-async def remote_models(provider_id: str, request: Request):
+async def remote_models(provider_id: str, request: Request, me: CurrentUser = Me):
     """測試連線：向 provider 查詢可用模型，並標示哪些已註冊。"""
     async with _sm(request)() as s:
-        p = await s.get(LlmProvider, provider_id)
-        if p is None:
-            raise HTTPException(404, "provider not found")
+        p = await _own_provider(s, provider_id, me)
         registered = set(
             (await s.execute(select(LlmModel.model).where(LlmModel.provider_id == p.id))).scalars()
         )
@@ -247,18 +258,19 @@ async def remote_models(provider_id: str, request: Request):
 
 
 @router.get("/models", response_model=list[ModelOut])
-async def list_models(request: Request):
+async def list_models(request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        rows = await s.execute(select(LlmModel).options(selectinload(LlmModel.provider)).order_by(LlmModel.created_at))
+        rows = await s.execute(
+            select(LlmModel).join(LlmProvider).where(LlmProvider.user_id == me.id)
+            .options(selectinload(LlmModel.provider)).order_by(LlmModel.created_at)
+        )
         return [_model_out(m) for m in rows.scalars()]
 
 
 @router.post("/models", response_model=ModelOut, status_code=status.HTTP_201_CREATED)
-async def create_model(body: ModelCreate, request: Request):
+async def create_model(body: ModelCreate, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        p = await s.get(LlmProvider, body.provider_id)
-        if p is None:
-            raise HTTPException(404, "provider not found")
+        p = await _own_provider(s, body.provider_id, me)
         m = LlmModel(**body.model_dump())
         m.provider = p
         s.add(m)
@@ -270,11 +282,9 @@ async def create_model(body: ModelCreate, request: Request):
 
 
 @router.patch("/models/{model_id}", response_model=ModelOut)
-async def update_model(model_id: str, body: ModelUpdate, request: Request):
+async def update_model(model_id: str, body: ModelUpdate, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        m = await s.get(LlmModel, model_id, options=[selectinload(LlmModel.provider)])
-        if m is None:
-            raise HTTPException(404, "model not found")
+        m = await _own_model(s, model_id, me)
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(m, k, v)
         await s.commit()
@@ -282,11 +292,9 @@ async def update_model(model_id: str, body: ModelUpdate, request: Request):
 
 
 @router.delete("/models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_model(model_id: str, request: Request):
+async def delete_model(model_id: str, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        m = await s.get(LlmModel, model_id)
-        if m is None:
-            raise HTTPException(404, "model not found")
+        m = await _own_model(s, model_id, me)
         await s.delete(m)
         await s.commit()
 
@@ -295,9 +303,11 @@ async def delete_model(model_id: str, request: Request):
 
 
 @router.get("/tiers", response_model=TiersBody)
-async def get_tiers(request: Request):
+async def get_tiers(request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        rows = await s.execute(select(ModelTier).order_by(ModelTier.tier, ModelTier.position))
+        rows = await s.execute(
+            select(ModelTier).where(ModelTier.user_id == me.id).order_by(ModelTier.tier, ModelTier.position)
+        )
         out: dict[str, list[str]] = {t: [] for t in TIERS}
         for t in rows.scalars():
             out.setdefault(t.tier, []).append(t.model_id)
@@ -305,27 +315,30 @@ async def get_tiers(request: Request):
 
 
 @router.put("/tiers", response_model=TiersBody)
-async def put_tiers(body: TiersBody, request: Request):
+async def put_tiers(body: TiersBody, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
         ids = set(body.large) | set(body.small)
-        found = set((await s.execute(select(LlmModel.id).where(LlmModel.id.in_(ids)))).scalars())
+        found = set((await s.execute(
+            select(LlmModel.id).join(LlmProvider).where(LlmModel.id.in_(ids), LlmProvider.user_id == me.id)
+        )).scalars())
         if missing := ids - found:
             raise HTTPException(422, f"unknown model ids: {sorted(missing)}")
-        await s.execute(delete(ModelTier))
+        await s.execute(delete(ModelTier).where(ModelTier.user_id == me.id))
         for tier in TIERS:
             for i, mid in enumerate(dict.fromkeys(getattr(body, tier))):
-                s.add(ModelTier(tier=tier, position=i, model_id=mid))
+                s.add(ModelTier(user_id=me.id, tier=tier, position=i, model_id=mid))
         await s.commit()
-    return await get_tiers(request)
+    return await get_tiers(request, me)
 
 
 # ---------------------------------------------------------------- try
 
 
 @router.post("/try", response_model=TryOut)
-async def try_model(body: TryBody, request: Request):
+async def try_model(body: TryBody, request: Request, me: CurrentUser = Me):
     try:
-        r = await _llm(request).chat(body.target, [ChatMessage("user", body.prompt)], max_tokens=512)
+        with llm_user(me.id):
+            r = await _llm(request).chat(body.target, [ChatMessage("user", body.prompt)], max_tokens=512)
     except LLMError as e:
         raise HTTPException(502, str(e)) from None
     return TryOut(text=r.text, model=r.model)

@@ -75,6 +75,17 @@ export function AccountsPanel({ me }: { me: Me }) {
             <div className="muted">最近登入：{when(u.last_login_at)}</div>
           </div>
           <button onClick={() => setEditing(u)}>管理</button>
+          {u.id !== me.id && (
+            <button
+              className="danger"
+              onClick={() =>
+                confirm(`刪除「${u.display_name}」（@${u.username}）？\n他的 LLM 設定會一起刪除，執行紀錄保留但不再標示是誰。這個動作無法復原。`) &&
+                run(() => users.remove(u.id))
+              }
+            >
+              刪除
+            </button>
+          )}
         </div>
       ))}
       {editing && <UserModal user={editing === "new" ? null : editing} me={me} run={run} onClose={() => setEditing(null)} />}
@@ -214,6 +225,49 @@ export function PasswordModal({ onClose }: { onClose: () => void }) {
           <button type="submit">更新密碼</button>
         </form>
       )}
+    </Modal>
+  );
+}
+
+/** 刪除自己的帳號（輸入密碼確認） */
+export function DeleteAccountModal({ me, onClose, onDeleted }: { me: Me; onClose: () => void; onDeleted: () => void }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState("");
+  return (
+    <Modal title="刪除我的帳號" onClose={onClose}>
+      <p>
+        確定要刪除 <strong>{me.display_name}</strong>（@{me.username}）？
+      </p>
+      <ul className="muted">
+        <li>你的 LLM 設定（含加密的 API key）會一起刪除</li>
+        <li>執行紀錄保留，但不再標示是誰問的</li>
+        <li>刪除後無法復原</li>
+      </ul>
+      <label className="field">
+        <span className="field-label">輸入密碼確認</span>
+        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" autoFocus />
+      </label>
+      {error && <p className="error">{error}</p>}
+      <div className="row modal-foot">
+        <span style={{ flex: 1 }} />
+        <button className="link" onClick={onClose}>
+          取消
+        </button>
+        <button
+          className="danger"
+          disabled={!pw}
+          onClick={async () => {
+            try {
+              await auth.deleteAccount(pw);
+              onDeleted();
+            } catch (e) {
+              setError((e as Error).message);
+            }
+          }}
+        >
+          永久刪除
+        </button>
+      </div>
     </Modal>
   );
 }

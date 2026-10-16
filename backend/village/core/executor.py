@@ -18,6 +18,7 @@ from village.core.registry import AgentRegistry
 from village.core.reviewer import REVIEWER_ID, Leaf, Review, review
 from village.events import EventBus
 from village.llm.base import ChatMessage, LLMError, TextCallback
+from village.llm.service import llm_user
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore, VillageRules
 from village.tools import TOOLS, ToolError, ToolResult
@@ -131,7 +132,8 @@ class Runner:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。"""
         self.bus.claim(run_id, user_id)
         try:
-            return await self._run(run_id, message, traced, user_id)
+            with llm_user(user_id):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
+                return await self._run(run_id, message, traced, user_id)
         finally:
             self.bus.release(run_id)
 
@@ -364,7 +366,7 @@ async def run_tool_agent(
         try:
             res = await llm.chat(
                 target or spec.model.target, messages, system=system, json_schema=tool.schema(),
-                temperature=spec.model.temperature, max_tokens=spec.model.max_tokens,
+                temperature=spec.model.temperature, max_tokens=spec.model.max_tokens, fallback=spec.model.fallback,
             )
         except LLMError as e:
             problem = f"LLM 無法使用：{e}"
@@ -411,6 +413,7 @@ async def _explain(llm: ChatLLM, spec: AgentSpec, instruction: str, result: Tool
         res = await llm.chat(
             target or spec.model.target,
             [ChatMessage("user", f"使用者的請求：{instruction}\n工具算出的結果：{fact}")],
+            fallback=spec.model.fallback,
             system=f"你是村子裡的{spec.name}。用一兩句繁體中文回答使用者，數字必須和工具結果完全相同，不要重新計算、不要補充其他數字。",
             temperature=0.2,
             max_tokens=400,
@@ -452,6 +455,7 @@ async def run_prompt_agent(
         result = await llm.chat(
             target or spec.model.target,
             messages,
+            fallback=spec.model.fallback,
             system=spec.prompt.system,
             temperature=spec.model.temperature,
             max_tokens=spec.model.max_tokens,

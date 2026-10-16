@@ -282,6 +282,10 @@ api_key_ct + api_key_nonce  ──存 SQLite/Postgres──
 session token 放 httpOnly + SameSite=Lax cookie，DB 只存 SHA-256；密碼 scrypt；登入失敗 5 次鎖 60 秒。
 `runs.user_id` 記錄提問者；EventBus 以 `claim(run_id, user_id)` 標記事件擁有者，WebSocket 依 `for_viewer` 對其他人只送動畫欄位。
 
+**LLM 設定屬於各帳號（已完成）**：`llm_providers.user_id`、`model_tiers.user_id`（帳號刪除時 CASCADE）。
+`LLMService.chat` 用 context variable `LLM_USER` 決定是誰的模型：Runner 在問答開始時以 `llm_user(user_id)` 設定，
+`asyncio.gather` 會複製 context，平行步驟也沿用。村民「指定模型」是某個人的模型 id，別人用不到時以 `fallback`（村民設定的分級）代替。
+
 **資料庫遷移（已完成，`store/migrate.py`、`store/migrations/`）**：Alembic，由程式呼叫（不需 alembic.ini），啟動時 upgrade head。
 
 **記憶與對話（規劃中）**：

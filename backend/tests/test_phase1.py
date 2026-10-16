@@ -311,6 +311,11 @@ async def test_agents_and_chat_api(tmp_path, monkeypatch):
             assert ids["poet"]["sprite"] == "poet" and ids["poet"]["home"] == [7, 6]
 
             r = await c.post("/api/chat", json={"message": "講個笑話"})
+            assert r.status_code == 409  # 還沒設定自己的 LLM
+            p = (await c.post("/api/llm/providers", json={"name": "o", "kind": "ollama"})).json()
+            m = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "x"})).json()
+            await c.put("/api/llm/tiers", json={"small": [m["id"]]})
+            r = await c.post("/api/chat", json={"message": "講個笑話"})
             assert r.status_code == 202 and r.json()["run_id"]
             assert (await c.post("/api/chat", json={"message": ""})).status_code == 422
 

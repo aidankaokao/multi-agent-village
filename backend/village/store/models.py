@@ -16,10 +16,14 @@ def _now() -> datetime:
 
 
 class LlmProvider(Base):
+    """LLM 供應商。每個帳號各自註冊、各自的 API key 與額度（帳號刪除時一併刪除）。"""
+
     __tablename__ = "llm_providers"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_llm_providers_user_name"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
     kind: Mapped[str] = mapped_column(String(32))  # openai_compat | ollama | anthropic
     base_url: Mapped[str | None] = mapped_column(String(500))
     # API key 只以密文存放；明文永遠不落地
@@ -37,7 +41,8 @@ class LlmProvider(Base):
 
     @property
     def api_key_aad(self) -> str:
-        return f"llm_provider:{self.id}:api_key"
+        # 密文綁定擁有者與這筆 provider：搬到別人名下或別的 provider 都解不開
+        return f"llm_provider:{self.user_id}:{self.id}:api_key"
 
 
 class LlmModel(Base):
@@ -59,10 +64,11 @@ class LlmModel(Base):
 
 
 class ModelTier(Base):
-    """模型分級：tier（large / small）內依 position 排序，前面失敗就退到下一個。"""
+    """模型分級（每個帳號各自一份）：tier（large / small）內依 position 排序，前面失敗就退到下一個。"""
 
     __tablename__ = "model_tiers"
 
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     tier: Mapped[str] = mapped_column(String(16), primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     model_id: Mapped[str] = mapped_column(ForeignKey("llm_models.id", ondelete="CASCADE"))

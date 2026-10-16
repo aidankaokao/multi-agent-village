@@ -44,6 +44,7 @@ async def auth_status(request: Request, response: Response) -> dict:
         "setup_required": n == 0,
         "allow_registration": n == 0 or ctx.rules.current.allow_registration,
         "user": user.to_dict() if user else None,
+        "llm_ready": bool(user) and await ctx.llm.has_models(user.id),  # 還沒設定自己的 LLM → 前端提醒
     }
 
 
@@ -99,6 +100,28 @@ async def change_password(body: PasswordBody, request: Request, me: CurrentUser 
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "目前的密碼不正確")
         user.password_hash = auth.hash_password(body.new_password)
         await s.commit()
+
+
+class DeleteMeBody(BaseModel):
+    password: str = Field(max_length=200)
+
+
+@router.post("/delete-account", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_my_account(
+    body: DeleteMeBody, request: Request, response: Response, me: CurrentUser = Depends(require_user)
+) -> None:
+    """刪除自己的帳號（要輸入密碼確認）。自己的 LLM 設定一併刪除；執行紀錄保留但不再標示是誰。"""
+    async with request.app.state.ctx.sessionmaker() as s:
+        user = await s.get(User, me.id)
+        if not auth.verify_password(body.password, user.password_hash):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "密碼不正確")
+        if user.role == "admin" and await _other_admins(s, user.id) == 0:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, "你是唯一的管理員：請先把另一個帳號設為管理員，再刪除自己的帳號"
+            )
+        await s.delete(user)
+        await s.commit()
+    response.delete_cookie(auth.COOKIE, path="/")
 
 
 # ---------------------------------------------------------------- 帳號管理（管理員）

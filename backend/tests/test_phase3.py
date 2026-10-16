@@ -177,10 +177,17 @@ async def test_rules_api_and_trace(app_env):
     assert (await c.put("/api/rules", json={**rules, "step_timeout_s": 1})).status_code == 422
     assert app.state.ctx.rules.current.reviewer_enabled is False
 
-    # 沒有註冊模型：村長退回關鍵字規劃，詩人呼叫 LLM 失敗 → 紀錄為 error，但整個流程有留下來
+    # 還沒設定自己的 LLM：問答先被擋下來提醒
+    r = await c.post("/api/chat", json={"message": "寫一首詩"})
+    assert r.status_code == 409 and "LLM 設定" in r.json()["detail"]
+
+    # 模型會壞掉（broken）：村長退回關鍵字規劃，詩人呼叫 LLM 失敗 → 紀錄為 error，但整個流程有留下來
+    from test_villagers import _register_model
+
+    await _register_model(c, base_url="http://broken/v1")
     run_id = (await c.post("/api/chat", json={"message": "寫一首詩"})).json()["run_id"]
     detail = await _wait_done(c, run_id)
-    assert detail["status"] == "error" and detail["agents"] == ["poet"]
+    assert detail["status"] == "error" and detail["agents"] == ["poet"] and detail["user"] == "admin"
     assert detail["plan"]["source"] == "keyword" and detail["steps"][0]["error"]
     lst = (await c.get("/api/runs", params={"q": "寫一首"})).json()
     assert [r["id"] for r in lst] == [run_id]
@@ -201,6 +208,9 @@ async def test_cancel_and_interrupted(app_env, monkeypatch):
             raise
 
     monkeypatch.setattr(ctx.runner, "run", slow_run)
+    from test_villagers import _register_model
+
+    await _register_model(c)
     run_id = (await c.post("/api/chat", json={"message": "慢慢來"})).json()["run_id"]
     await asyncio.sleep(0.05)
     assert (await c.post(f"/api/chat/{run_id}/cancel")).status_code == 202

@@ -31,7 +31,7 @@ async def test_first_user_is_admin_then_members(app):
     a, db = app
     async with client(a) as admin, client(a) as bob, client(a) as anon:
         st = (await anon.get("/api/auth/status")).json()
-        assert st == {"setup_required": True, "allow_registration": True, "user": None}
+        assert st == {"setup_required": True, "allow_registration": True, "user": None, "llm_ready": False}
 
         r = await admin.post("/api/auth/register", json={"username": "Aidan", "password": "password123", "display_name": "艾登"})
         assert r.status_code == 200 and r.json()["first"] and r.json()["user"]["role"] == "admin"
@@ -45,10 +45,12 @@ async def test_first_user_is_admin_then_members(app):
         assert r.json()["user"]["role"] == "member" and not r.json()["first"]
         assert (await bob.post("/api/auth/register", json={"username": "bob", "password": "password123"})).status_code == 409
 
-        # 一般成員：可以問答、看自己的紀錄；不能碰設定
+        # 一般成員：可以問答、看自己的紀錄、管理自己的 LLM；不能碰全村的設定
         assert (await bob.get("/api/agents")).status_code == 200
         assert (await bob.get("/api/runs")).status_code == 200
-        for path in ("/api/llm/providers", "/api/villagers", "/api/rules", "/api/users"):
+        assert (await bob.get("/api/llm/providers")).json() == []
+        assert (await anon.get("/api/llm/providers")).status_code == 401
+        for path in ("/api/villagers", "/api/rules", "/api/users"):
             assert (await bob.get(path)).status_code == 403, path
             assert (await anon.get(path)).status_code == 401, path
         assert (await admin.get("/api/users")).status_code == 200
@@ -115,6 +117,9 @@ async def test_runs_are_private(app):
         await admin.post("/api/auth/register", json={"username": "admin", "password": "password123"})
         await bob.post("/api/auth/register", json={"username": "bob", "password": "password123"})
         await eve.post("/api/auth/register", json={"username": "eve", "password": "password123"})
+        from test_villagers import _register_model
+
+        await _register_model(bob)
         run_id = (await bob.post("/api/chat", json={"message": "bob 的秘密問題"})).json()["run_id"]
         assert [r["id"] for r in (await bob.get("/api/runs")).json()] == [run_id]
         assert (await eve.get("/api/runs")).json() == []

@@ -328,6 +328,7 @@ export interface AuthStatus {
   setup_required: boolean; // 還沒有任何帳號：第一位註冊的人成為管理員
   allow_registration: boolean;
   user: Me | null;
+  llm_ready: boolean; // 自己的 LLM 設定好了沒（每個帳號用自己的 LLM 與額度）
 }
 
 export interface UserRow extends Me {
@@ -344,6 +345,7 @@ export const auth = {
   logout: () => api<void>("/api/auth/logout", { method: "POST" }),
   changePassword: (old_password: string, new_password: string) =>
     api<void>("/api/auth/password", { method: "POST", json: { old_password, new_password } }),
+  deleteAccount: (password: string) => api<void>("/api/auth/delete-account", { method: "POST", json: { password } }),
 };
 
 export const users = {

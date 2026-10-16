@@ -17,7 +17,9 @@
 - 全域行為（審核員、逾時、平行、紀錄保留）是「村規」，存 `settings` 表、在前端「村規」分頁調整，不寫進設定檔。
 - 驗證 / 審核 / 重試放在 harness 層，不寫進個別 agent。
 - 後端每個 agent 動作都要發事件，前端村落動畫只靠事件驅動。
-- LLM provider / 模型只在 UI 註冊並存 DB，不寫進設定檔。API key 一律以 AES-256-GCM 加密後存 DB，API 不回傳明文，log 要遮罩。
+- LLM provider / 模型只在 UI 註冊並存 DB，不寫進設定檔，而且**屬於各個帳號**（`llm_providers.user_id`、`model_tiers.user_id`）：每個人用自己的 API key 與額度。
+  LLM 呼叫用 context variable `llm_user` 決定是誰的設定（問答由 Runner 設定，試打 / 工匠 / LLM 試打由 API 端點設定）；沒設定時問答回 409 提醒。
+  API key 一律以 AES-256-GCM 加密後存 DB（AAD 綁定擁有者與 provider），API 不回傳明文，log 要遮罩。
 - 不可 commit：`*.db`、`data/`、`.env`、`*.key` 或任何 key。主金鑰放專案外（`~/.config/multi-agent-village/master.key`）或環境變數 `VILLAGE_MASTER_KEY`。
 
 ## Git

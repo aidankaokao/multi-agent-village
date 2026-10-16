@@ -1263,3 +1263,27 @@ a.link {
 .user-menu button:hover {
   color: var(--accent);
 }
+
+/* 還沒設定自己的 LLM */
+.llm-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(640px, calc(100vw - 160px));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: #3a2f1a;
+  color: var(--accent);
+  border: 3px solid var(--accent);
+  box-shadow: 4px 4px 0 var(--line);
+  z-index: 22;
+  animation: caption-in 300ms ease-out;
+}
+
+.user-menu button.danger-text {
+  color: var(--danger);
+}

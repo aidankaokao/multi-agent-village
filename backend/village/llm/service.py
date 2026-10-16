@@ -1,7 +1,14 @@
-"""從 DB 讀取 provider / 模型設定，解密 API key，建立 client，並依模型分級做備援。"""
+"""從 DB 讀取 provider / 模型設定，解密 API key，建立 client，並依模型分級做備援。
+
+LLM 設定屬於各個帳號：每次呼叫用「目前使用者」的模型與 API key（自己的額度）。
+目前使用者放在 context variable（llm_user），問答開始時設定一次，之後村長、村民、審核員的呼叫都沿用；
+asyncio.gather / create_task 會複製 context，平行步驟也拿得到。
+"""
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -15,6 +22,23 @@ from village.security.redact import register_secret
 from village.store.models import LlmModel, LlmProvider, ModelTier
 
 log = logging.getLogger("village.llm")
+
+LLM_USER: ContextVar[str | None] = ContextVar("llm_user", default=None)
+NOT_CONFIGURED = "你還沒有設定 LLM：請到「LLM 設定」註冊模型，並加入 large / small 分級"
+
+
+class NoModelError(LLMError):
+    """這個帳號沒有可用的模型（還沒設定，或都停用了）。"""
+
+
+@contextmanager
+def llm_user(user_id: str | None) -> Iterator[None]:
+    """在這個區塊裡的 LLM 呼叫都用 user_id 的設定。"""
+    token = LLM_USER.set(user_id)
+    try:
+        yield
+    finally:
+        LLM_USER.reset(token)
 
 TIERS = ("large", "small")
 
@@ -46,18 +70,18 @@ class LLMService:
     def client_for(self, p: LlmProvider) -> LLMClient:
         return self._factory(p.kind, p.base_url, self.decrypt_api_key(p))
 
-    async def tier_models(self, tier: str) -> list[LlmModel]:
+    async def tier_models(self, tier: str, user_id: str) -> list[LlmModel]:
         async with self._sm() as s:
             rows = await s.execute(
                 select(LlmModel)
                 .join(ModelTier, ModelTier.model_id == LlmModel.id)
-                .where(ModelTier.tier == tier)
+                .where(ModelTier.tier == tier, ModelTier.user_id == user_id)
                 .order_by(ModelTier.position)
                 .options(selectinload(LlmModel.provider))
             )
             return list(rows.scalars())
 
-    async def candidates(self, target: str) -> list[LlmModel]:
+    async def candidates(self, target: str, user_id: str) -> list[LlmModel]:
         """target：'tier:large' / 'tier:small' / 模型 id。
 
         兩級互為備援：large 失敗退到 small（弱模型總比沒有好）；small 沒設定或失敗則用 large。
@@ -65,21 +89,38 @@ class LLMService:
         if target.startswith("tier:"):
             tier = target.removeprefix("tier:")
             other = "small" if tier == "large" else "large"
-            models = await self.tier_models(tier)
-            models += [m for m in await self.tier_models(other) if m not in models]
+            models = await self.tier_models(tier, user_id)
+            models += [m for m in await self.tier_models(other, user_id) if m not in models]
         else:
             async with self._sm() as s:
                 m = await s.get(LlmModel, target, options=[selectinload(LlmModel.provider)])
-                models = [m] if m else []
+                models = [m] if m and m.provider.user_id == user_id else []  # 指定模型只能用自己的
         return [m for m in models if m.enabled and m.provider.enabled]
 
+    async def has_models(self, user_id: str) -> bool:
+        return bool(await self.candidates("tier:large", user_id))
+
     async def chat(
-        self, target: str, messages: list[ChatMessage], *, on_text: TextCallback | None = None, **kw
+        self,
+        target: str,
+        messages: list[ChatMessage],
+        *,
+        on_text: TextCallback | None = None,
+        fallback: str | None = None,
+        **kw,
     ) -> ChatResult:
-        """on_text 有值時用串流，傳入「目前為止的完整文字」；換備援模型時會從頭重新累積。"""
-        models = await self.candidates(target)
+        """on_text 有值時用串流，傳入「目前為止的完整文字」；換備援模型時會從頭重新累積。
+
+        fallback：target 找不到模型時改用（例如村民指定的模型是別人的 → 用村民設定的分級）。
+        """
+        user_id = LLM_USER.get()
+        if user_id is None:
+            raise LLMError("沒有指定要用哪個帳號的 LLM")
+        models = await self.candidates(target, user_id)
+        if not models and fallback:
+            models = await self.candidates(fallback, user_id)
         if not models:
-            raise LLMError(f"no enabled model for {target}; register one in LLM 設定")
+            raise NoModelError(NOT_CONFIGURED)
         errors: list[str] = []
         for m in models:
             call_kw = dict(kw)

@@ -175,7 +175,11 @@ async def test_streaming_restarts_on_fallback(env):
     async def on_text(text):
         seen.append(text)
 
-    r = await ctx.llm.chat("tier:large", [], on_text=on_text)
+    from village.llm.service import llm_user
+
+    me = (await c.get("/api/auth/status")).json()["user"]["id"]
+    with llm_user(me):
+        r = await ctx.llm.chat("tier:large", [], on_text=on_text)
     assert r.model == "small"
     assert seen == ["半", "半途", "半", "半途"]  # 換模型後從頭累積，不會接在失敗的半成品後面
 
@@ -340,5 +344,62 @@ async def test_model_without_schema_support_is_used_without_schema(env):
     p = await _provider(c, name="or", base_url="http://or/v1", api_key=None)
     m = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "glm", "supports_json_schema": False})).json()
     await c.put("/api/llm/tiers", json={"large": [m["id"]]})
-    await ctx.llm.chat("tier:large", [], json_schema={"type": "object"})
+    from village.llm.service import llm_user
+
+    with llm_user((await c.get("/api/auth/status")).json()["user"]["id"]):
+        await ctx.llm.chat("tier:large", [], json_schema={"type": "object"})
     assert got == [("glm", None)]  # 照樣使用，只是不送 schema 約束
+
+
+async def test_llm_settings_are_per_user(env):
+    """每個帳號只看得到、用得到自己的 LLM；別人的 id 一律 404；帳號刪除時一併刪除。"""
+    c, db = env
+    app = c._transport.app
+    p = await _provider(c)
+    m = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "mine"})).json()
+    await c.put("/api/llm/tiers", json={"large": [m["id"]]})
+    assert (await c.get("/api/auth/status")).json()["llm_ready"] is True
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as bob:
+        await bob.post("/api/auth/register", json={"username": "bob", "password": "password123"})
+        assert (await bob.get("/api/auth/status")).json()["llm_ready"] is False
+        assert (await bob.get("/api/llm/providers")).json() == [] and (await bob.get("/api/llm/models")).json() == []
+        assert (await bob.get("/api/llm/tiers")).json() == {"large": [], "small": []}
+        # 拿別人的 id 什麼都做不了
+        assert (await bob.patch(f"/api/llm/providers/{p['id']}", json={"enabled": False})).status_code == 404
+        assert (await bob.delete(f"/api/llm/models/{m['id']}")).status_code == 404
+        assert (await bob.get(f"/api/llm/providers/{p['id']}/remote-models")).status_code == 404
+        assert (await bob.post("/api/llm/models", json={"provider_id": p["id"], "model": "steal"})).status_code == 404
+        assert (await bob.put("/api/llm/tiers", json={"large": [m["id"]]})).status_code == 422
+        r = await bob.post("/api/llm/try", json={"target": m["id"], "prompt": "hi"})
+        assert r.status_code == 502 and "還沒有設定 LLM" in r.json()["detail"]
+        assert (await bob.post("/api/chat", json={"message": "hi"})).status_code == 409
+        # 同名 provider 各自可以有
+        assert (await bob.post("/api/llm/providers", json={"name": "cloud", "kind": "ollama"})).status_code == 201
+
+        # 刪除自己的帳號：密碼錯不行；刪除後自己的 LLM 設定一併消失
+        assert (await bob.post("/api/auth/delete-account", json={"password": "nope"})).status_code == 422
+        assert (await bob.post("/api/auth/delete-account", json={"password": "password123"})).status_code == 204
+        assert (await bob.get("/api/auth/status")).json()["user"] is None
+    rows = sqlite3.connect(db).execute("select count(*) from llm_providers").fetchone()[0]
+    assert rows == 1  # 只剩 admin 的
+    # 唯一的管理員不能刪除自己
+    r = await c.post("/api/auth/delete-account", json={"password": "password123"})
+    assert r.status_code == 422 and "唯一的管理員" in r.json()["detail"]
+
+
+async def test_api_key_ciphertext_bound_to_owner(env):
+    """把密文搬到別人名下（改 user_id）就解不開。"""
+    c, db = env
+    p = await _provider(c)
+    conn = sqlite3.connect(db)
+    conn.execute("insert into users (id, username, display_name, password_hash, role, enabled, created_at) values ('x','x','x','x','member',1,'2026-01-01')")
+    conn.execute("update llm_providers set user_id='x' where id=?", (p["id"],))
+    conn.commit()
+    from village.store.models import LlmProvider
+
+    ctx = c._transport.app.state.ctx
+    async with ctx.sessionmaker() as s:
+        row = await s.get(LlmProvider, p["id"])
+        with pytest.raises(Exception):
+            ctx.llm.decrypt_api_key(row)

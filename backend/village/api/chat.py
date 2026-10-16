@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from village.llm.service import NOT_CONFIGURED
 from village.security.auth import CurrentUser, require_user
 
 router = APIRouter(prefix="/api", tags=["chat"], dependencies=[Depends(require_user)])
@@ -49,6 +50,8 @@ async def list_agents(request: Request):
 async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(require_user)):
     """非同步執行：立即回傳 run_id，進度與結果透過 /ws 事件推送。"""
     ctx = request.app.state.ctx
+    if not await ctx.llm.has_models(me.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, NOT_CONFIGURED)  # 用自己的 LLM：還沒設定就先提醒
     run_id = uuid.uuid4().hex[:12]
     message = body.message.strip()
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
