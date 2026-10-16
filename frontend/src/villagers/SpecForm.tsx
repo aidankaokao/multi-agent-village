@@ -1,5 +1,5 @@
 import type { AgentSpec, Model } from "../api";
-import { MAP_H, MAP_W, MAYOR, type SpriteManifest } from "../village/VillageScene";
+import { CRAFTSMAN, MAP_H, MAP_W, MAYOR, type SpriteManifest } from "../village/VillageScene";
 import { Field, ListInput, NumInput, SpriteThumb } from "./fields";
 
 interface Props {
@@ -15,7 +15,7 @@ interface Props {
 export function SpecForm({ spec, isNew, models, manifest, homes, update }: Props) {
   const card = spec.card;
   const v = spec["x-village"];
-  const sprites = Object.entries(manifest?.characters ?? {}).filter(([id]) => id !== "mayor");
+  const sprites = Object.entries(manifest?.characters ?? {}).filter(([, c]) => !c.system);
 
   return (
     <div className="spec-form">
@@ -90,7 +90,7 @@ export function SpecForm({ spec, isNew, models, manifest, homes, update }: Props
               <button
                 key={id}
                 className={v.sprite === id ? "picked" : ""}
-                title={c.name}
+                title={c.desc ? `${c.name}：${c.desc}` : c.name}
                 onClick={() => update((d) => void (d["x-village"].sprite = id))}
               >
                 <SpriteThumb sprite={id} manifest={manifest} />
@@ -194,7 +194,7 @@ function HomePicker({
   homes: { id: string; name: string; home: [number, number] }[];
   onPick: (h: [number, number] | null) => void;
 }) {
-  const others = [{ id: "mayor", name: MAYOR.name, home: MAYOR.home! }, ...homes];
+  const others = [MAYOR, CRAFTSMAN].map((s) => ({ id: s.id, name: s.name, home: s.home! })).concat(homes);
   return (
     <div className="row" style={{ alignItems: "flex-start" }}>
       <div

@@ -196,3 +196,27 @@ export const villagers = {
   try: (body: { spec: AgentSpec; instruction: string; context?: string; target?: string | null; expect?: Expect }) =>
     api<TryResult>("/api/villagers/try", { method: "POST", json: body }),
 };
+
+// ---------------------------------------------------------------- 村民工坊（工匠）
+
+export interface WorkshopMsg {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface WorkshopBody {
+  messages: WorkshopMsg[];
+  sprites: { id: string; name: string; desc: string }[];
+  draft: AgentSpec | null;
+  target: string | null;
+}
+
+export const workshop = {
+  interview: (body: WorkshopBody) =>
+    api<{ reply: string; ready: boolean; source: string }>("/api/workshop/interview", { method: "POST", json: body }),
+  generate: (body: WorkshopBody) =>
+    api<{ spec: AgentSpec; notes: string[]; summary: string; source: "llm" | "fallback"; model: string | null }>("/api/workshop/generate", {
+      method: "POST",
+      json: body,
+    }),
+};

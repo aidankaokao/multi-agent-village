@@ -3,6 +3,7 @@ import { ApiError, getAdminToken, llm, setAdminToken, villagers, type AgentSpec,
 import { SpriteThumb, useManifest } from "./fields";
 import { TestsPanel, TryPanel } from "./Lab";
 import { SpecForm } from "./SpecForm";
+import { NEW_SESSION, Workshop, type WorkshopSession } from "./Workshop";
 
 const BLANK: AgentSpec = {
   card: { id: "", name: "", description: "", version: "0.1.0", skills: [{ id: "main", description: "", examples: [] }], tags: [] },
@@ -14,10 +15,11 @@ const BLANK: AgentSpec = {
   tests: [],
 };
 
-type Editing = { spec: AgentSpec; saved: AgentSpec | null; nonce: number }; // saved = null 代表新村民
+// saved = null 代表新村民；fromWorkshop：工匠做的草稿，建立前可以回工坊繼續聊
+type Editing = { spec: AgentSpec; saved: AgentSpec | null; nonce: number; fromWorkshop?: boolean };
 
 let nonce = 0;
-const open = (spec: AgentSpec, saved: AgentSpec | null): Editing => ({ spec, saved, nonce: ++nonce });
+const open = (spec: AgentSpec, saved: AgentSpec | null, fromWorkshop = false): Editing => ({ spec, saved, nonce: ++nonce, fromWorkshop });
 
 export function VillagerManager() {
   const manifest = useManifest();
@@ -27,6 +29,8 @@ export function VillagerManager() {
   const [needToken, setNeedToken] = useState(false);
   const [error, setError] = useState("");
   const [importing, setImporting] = useState(false);
+  const [inWorkshop, setInWorkshop] = useState(false);
+  const [session, setSession] = useState<WorkshopSession>(NEW_SESSION);
 
   const reload = useCallback(async () => {
     try {
@@ -58,7 +62,35 @@ export function VillagerManager() {
           setEditing(null);
           reload();
         }}
-        onSaved={reload}
+        onSaved={() => {
+          if (editing.fromWorkshop) setSession(NEW_SESSION); // 建立完成，工坊這一輪結束
+          reload();
+        }}
+        onBackToWorkshop={
+          editing.fromWorkshop
+            ? (spec) => {
+                setSession((s) => ({ ...s, draft: spec, results: s.draft === spec ? s.results : [] }));
+                setEditing(null);
+                setInWorkshop(true);
+              }
+            : undefined
+        }
+      />
+    );
+  }
+
+  if (inWorkshop) {
+    return (
+      <Workshop
+        session={session}
+        setSession={setSession}
+        models={models}
+        manifest={manifest}
+        onClose={() => setInWorkshop(false)}
+        onOpenEditor={(spec) => {
+          setInWorkshop(false);
+          setEditing(open(spec, null, true));
+        }}
       />
     );
   }
@@ -79,7 +111,10 @@ export function VillagerManager() {
         </p>
       )}
       <div className="row">
-        <button onClick={() => setEditing(open(structuredClone(BLANK), null))}>＋ 新增村民</button>
+        <button onClick={() => setInWorkshop(true)}>✨ 跟工匠聊聊，打造村民{session.log.length ? "（繼續）" : ""}</button>
+        <button className="link" onClick={() => setEditing(open(structuredClone(BLANK), null))}>
+          ＋ 從空白開始
+        </button>
         <button className="link" onClick={() => setImporting(!importing)}>
           匯入 YAML
         </button>
@@ -157,7 +192,7 @@ export function VillagerManager() {
           </div>
         );
       })}
-      {list.length === 0 && <p className="hint">村裡還沒有村民，按「＋ 新增村民」開始。</p>}
+      {list.length === 0 && <p className="hint">村裡還沒有村民，按「✨ 跟工匠聊聊」開始。</p>}
     </div>
   );
 }
@@ -173,6 +208,7 @@ function Editor({
   manifest,
   onClose,
   onSaved,
+  onBackToWorkshop,
 }: {
   initial: Editing;
   list: Villager[];
@@ -180,6 +216,7 @@ function Editor({
   manifest: ReturnType<typeof useManifest>;
   onClose: () => void;
   onSaved: () => void;
+  onBackToWorkshop?: (spec: AgentSpec) => void;
 }) {
   const [spec, setSpec] = useState<AgentSpec>(() => structuredClone(initial.spec));
   const [saved, setSaved] = useState<AgentSpec | null>(initial.saved);
@@ -232,9 +269,15 @@ function Editor({
   return (
     <div className="panel-body editor">
       <div className="editor-head">
-        <button className="link" onClick={close}>
-          ← 村民列表
-        </button>
+        {onBackToWorkshop && isNew ? (
+          <button className="link" onClick={() => onBackToWorkshop(spec)} title="編輯的內容會一起帶回去">
+            ← 回工坊
+          </button>
+        ) : (
+          <button className="link" onClick={close}>
+            ← 村民列表
+          </button>
+        )}
         <SpriteThumb sprite={spec["x-village"].sprite} manifest={manifest} />
         <div>
           <strong>{spec.card.name || "（未命名）"}</strong> <code className="muted">@{spec.card.id || "?"}</code>

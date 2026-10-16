@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
+from village.api.workshop import router as workshop_router
 from village.config import Settings
 from village.core.executor import Runner
 from village.core.registry import AgentRegistry
@@ -78,6 +79,7 @@ def create_app(
     app.include_router(llm_router)
     app.include_router(chat_router)
     app.include_router(villagers_router)
+    app.include_router(workshop_router)
 
     @app.get("/api/health")
     async def health():

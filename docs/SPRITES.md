@@ -6,13 +6,15 @@
 
 ```
 frontend/public/assets/sprites/
-├── manifest.json               # 規格與角色清單，前端讀這個
+├── manifest.json               # 規格與角色清單，前端讀這個；desc 給工匠挑外觀參考，system 代表系統角色
 ├── characters/
 │   ├── poet.png                # 詩人
 │   ├── jester.png              # 笑話師
 │   ├── translator.png          # 翻譯官（Phase 2）
-│   ├── mayor.png               # 村長 = orchestrator
-│   └── reviewer.png            # 審核員
+│   ├── reviewer.png            # 審核員
+│   ├── scholar.png / merchant.png / farmer.png / chef.png  # 學者、商人、農夫、廚師：給新村民挑的外觀
+│   ├── mayor.png               # 村長 = orchestrator（system，不給村民用）
+│   └── craftsman.png           # 工匠 = 村民工坊（system，不給村民用）
 └── ui/status_bubbles.png       # 頭頂狀態泡泡
 ```
 
@@ -62,6 +64,11 @@ No text, no shadows outside the character, no background scenery.
 | translator | a scholar with black hair, round glasses, blue coat, holding a brown book |
 | mayor | an old village chief with white beard, small golden crown, dark red robe with gold trim, holding a wooden staff with a cyan gem |
 | reviewer | a strict inspector in a navy blue uniform and cap with a gold badge, red armband |
+| scholar | a scholar in a purple robe and black graduation cap with a gold tassel, holding a scroll |
+| merchant | a merchant with a wide brown hat with a red band, teal coat, holding a coin pouch |
+| farmer | a farmer in a wide straw hat and green overalls, holding a rice stalk |
+| chef | a chef in a tall white toque and white apron, holding a ladle |
+| craftsman | a craftsman in an orange hard hat, blue work clothes, tool belt, holding a hammer |
 | calculator | a small merchant with an abacus, green apron, round cheeks (Phase 4) |
 | chart | a cartographer with a rolled map and colored pencils, yellow scarf (Phase 4) |
 | taiwan-history | an elderly storyteller in traditional Taiwanese clothing, holding an old scroll, wise expression (Phase 6) |

@@ -113,6 +113,15 @@ class BaseAgent(Protocol):
 存檔後後端重新載入名冊並發 `agents.changed`，村子裡的角色即時登場 / 換裝 / 離開。
 `agents/*/agent.yaml` 是內建範例：啟動時只匯入 DB 還沒有的 id；刪掉的內建範例留有紀錄，不會在重啟時回來，可用「還原內建範例」救回。
 
+**村民工坊（工匠）**（`core/workshop.py`、API `/api/workshop`）：使用者跟工匠聊天，工匠產生村民設定草稿。
+`mayor`、`craftsman` 是系統角色（保留名稱），不會被派去做問答任務。
+
+- `POST /interview`：工匠回 `{reply, ready}`——資訊不夠就用日常問題追問，夠了就複述理解並請使用者按「打造」
+- `POST /generate`：LLM 只填扁平的「藍圖」，程式組成 AgentSpec（ID、外觀、住處、模板、temperature / 字數換算、過濾測試題條件）；
+  不合格帶錯誤重做，仍失敗則用對話內容拼基本草稿。帶 `draft` 時是在既有草稿上修改（id、住處、指定模型沿用）
+- 草稿不會自動儲存，交給前端編輯器確認後走 `POST /api/villagers` 建立
+- 可選外觀由前端從 `manifest.json` 傳入（`system: true` 的角色排除），`desc` 給工匠挑外觀參考
+
 ### 3.3 Orchestrator（村長）
 
 村長本身也是一個 agent，但特殊：它的輸入是使用者訊息，輸出是 **Plan**。
@@ -186,6 +195,7 @@ class BaseAgent(Protocol):
 | `agent.handoff` (from→to) | 角色走向下一位（帶著卷軸） |
 | `agent.finished` / `agent.error` | 泡泡變 ✓ / ❗，幾秒後恢復閒晃 |
 | `review.started/finished` | 審核員出動 |
+| `workshop.started` / `workshop.finished` / `workshop.error` | 工匠（`agent: craftsman`）追問或打造村民時的動態 |
 | `run.finished` | 聊天框出現最終答案 |
 
 ```json
@@ -269,6 +279,7 @@ multi-agent-village/
 │       │   ├── prompt_agent.py  # kind=prompt 的通用實作
 │       │   ├── remote_agent.py  # kind=remote（A2A client）
 │       │   ├── orchestrator.py  # 村長：規劃
+│       │   ├── workshop.py      # 工匠：對話打造村民草稿
 │       │   └── executor.py      # DAG 執行 + retry
 │       ├── harness/             # input_guard, validators, content_guard
 │       ├── events.py            # Event bus

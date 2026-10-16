@@ -6,7 +6,7 @@ export interface SpriteManifest {
   frameHeight: number;
   rows: string[]; // ["down","left","right","up"]
   walkCycle: number[];
-  characters: Record<string, { name: string; path: string }>;
+  characters: Record<string, { name: string; path: string; desc?: string; system?: boolean }>; // system：村長、工匠專用
   ui: { status_bubbles: { path: string; frameWidth: number; frameHeight: number } };
 }
 
@@ -28,6 +28,8 @@ export interface VillagerInfo {
 }
 
 export const MAYOR: VillagerInfo = { id: "mayor", name: "村長", sprite: "mayor", home: [15, 9] };
+/** 工匠：在「村民 → 用對話建立」幫忙打造村民，不接問答任務 */
+export const CRAFTSMAN: VillagerInfo = { id: "craftsman", name: "工匠", sprite: "craftsman", home: [26, 16] };
 
 class Villager {
   sprite: Phaser.GameObjects.Sprite;
@@ -209,7 +211,7 @@ export class VillageScene extends Phaser.Scene {
       this.pending = list;
       return;
     }
-    const wanted = new Map([MAYOR, ...list].map((v) => [v.id, v]));
+    const wanted = new Map([MAYOR, CRAFTSMAN, ...list].map((v) => [v.id, v]));
     const look = (v: VillagerInfo) => JSON.stringify([v.sprite, v.name, v.home]);
     for (const [id, v] of this.villagers) {
       const info = wanted.get(id);
@@ -253,12 +255,15 @@ export class VillageScene extends Phaser.Scene {
         v?.finish(false);
         break;
       case "agent.started":
+      case "workshop.started":
         v?.startWork();
         break;
       case "agent.finished":
+      case "workshop.finished":
         v?.finish(true);
         break;
       case "agent.error":
+      case "workshop.error":
         v?.finish(false);
         break;
       case "agent.handoff": {

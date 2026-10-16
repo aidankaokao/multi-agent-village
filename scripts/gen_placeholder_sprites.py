@@ -209,13 +209,88 @@ def acc_reviewer(d, view, frame, dy):
         r(d, 14, 21 + dy, 16, 21 + dy, band)
 
 
+def acc_craftsman(d, view, frame, dy):
+    helmet, belt, metal, handle = hexc("#f2a02c"), hexc("#7a4e2a"), hexc("#b8c0cc"), hexc("#8a5a32")
+    r(d, 9, 2 + dy, 22, 6 + dy, helmet)
+    r(d, 8, 6 + dy, 23, 6 + dy, helmet)
+    if view in ("down", "up"):
+        r(d, 10, 23, 21, 23, belt)
+    if view == "down":
+        px(d, [(15, 3 + dy), (16, 3 + dy)], hexc("#ffd27a"))
+        r(d, 24, 14 + dy, 24, 21 + dy, handle)  # 槌子
+        r(d, 23, 12 + dy, 26, 14 + dy, metal)
+    elif view == "left":
+        r(d, 6, 7 + dy, 9, 7 + dy, helmet)
+        r(d, 11, 23, 20, 23, belt)
+        r(d, 13, 14 + dy, 13, 21 + dy, handle)
+        r(d, 11, 12 + dy, 14, 14 + dy, metal)
+
+
+def acc_scholar(d, view, frame, dy):
+    cap, tassel, scroll = hexc("#22222e"), hexc("#f2c230"), hexc("#f1e6c8")
+    r(d, 7, 3 + dy, 24, 4 + dy, cap)
+    r(d, 10, 5 + dy, 21, 6 + dy, cap)
+    px(d, [(22, 5 + dy), (22, 6 + dy), (22, 7 + dy)], tassel)
+    if view == "down":
+        r(d, 17, 20 + dy, 21, 22 + dy, scroll)
+        px(d, [(17, 20 + dy), (17, 22 + dy), (21, 20 + dy), (21, 22 + dy)], hexc("#c8a060"))
+    elif view == "left":
+        r(d, 9, 20 + dy, 12, 22 + dy, scroll)
+
+
+def acc_merchant(d, view, frame, dy):
+    hat, band, bag, coin = hexc("#6b4226"), hexc("#d8343c"), hexc("#a8763e"), hexc("#f2c230")
+    r(d, 6, 5 + dy, 25, 6 + dy, hat)
+    r(d, 10, 1 + dy, 21, 5 + dy, hat)
+    r(d, 10, 4 + dy, 21, 4 + dy, band)
+    if view == "down":
+        r(d, 18, 21 + dy, 22, 25, bag)
+        px(d, [(20, 20 + dy)], coin)
+        px(d, [(19, 23), (21, 23)], coin)
+    elif view == "left":
+        r(d, 15, 21 + dy, 19, 25, bag)
+        px(d, [(17, 23)], coin)
+
+
+def acc_farmer(d, view, frame, dy):
+    straw, straw2, stalk = hexc("#e8c86a"), hexc("#c9a442"), hexc("#5aa04a")
+    r(d, 5, 5 + dy, 26, 6 + dy, straw)
+    r(d, 10, 2 + dy, 21, 5 + dy, straw)
+    r(d, 10, 5 + dy, 21, 5 + dy, straw2)
+    if view == "down":
+        r(d, 7, 14 + dy, 7, 24 + dy, stalk)  # 稻穗
+        px(d, [(6, 13 + dy), (8, 13 + dy), (7, 12 + dy), (6, 15 + dy), (8, 15 + dy)], straw)
+    elif view == "left":
+        r(d, 18, 14 + dy, 18, 24 + dy, stalk)
+        px(d, [(17, 13 + dy), (19, 13 + dy), (18, 12 + dy)], straw)
+
+
+def acc_chef(d, view, frame, dy):
+    white, shade, spoon = hexc("#fafafa"), hexc("#d8d8e0"), hexc("#b8c0cc")
+    r(d, 10, 0 + dy, 21, 5 + dy, white)
+    r(d, 9, 1 + dy, 22, 3 + dy, white)
+    r(d, 10, 5 + dy, 21, 6 + dy, shade)
+    if view in ("down", "up"):
+        r(d, 12, 19 + dy, 19, 25, white)  # 圍裙
+    if view == "down":
+        r(d, 24, 15 + dy, 24, 22 + dy, spoon)
+        r(d, 23, 13 + dy, 25, 15 + dy, spoon)
+    elif view == "left":
+        r(d, 12, 19 + dy, 17, 25, white)
+
+
 CHARACTERS = {
-    # id: (中文名, 調色盤, 配件)
-    "poet": ("詩人", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet),
-    "jester": ("笑話師", dict(hair="#e08a2c", cloth="#d8343c", cloth2="#7a2a8a", shoe="#3a2a20"), acc_jester),
-    "translator": ("翻譯官", dict(hair="#1e1e2a", cloth="#3a6fc4", cloth2="#28477d", shoe="#2a2a2a"), acc_translator),
-    "mayor": ("村長", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor),
-    "reviewer": ("審核員", dict(hair="#3b2a1e", cloth="#2b3a67", cloth2="#1b2442", shoe="#111111"), acc_reviewer),
+    # id: (中文名, 外觀說明（工匠挑外觀時參考）, 調色盤, 配件, 系統角色？)
+    "poet": ("詩人", "貝雷帽、羽毛筆，文藝創作", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet, False),
+    "jester": ("笑話師", "小丑帽，幽默娛樂", dict(hair="#e08a2c", cloth="#d8343c", cloth2="#7a2a8a", shoe="#3a2a20"), acc_jester, False),
+    "translator": ("翻譯官", "眼鏡、書本，語言文字", dict(hair="#1e1e2a", cloth="#3a6fc4", cloth2="#28477d", shoe="#2a2a2a"), acc_translator, False),
+    "reviewer": ("審核員", "制服帽、徽章，檢查把關", dict(hair="#3b2a1e", cloth="#2b3a67", cloth2="#1b2442", shoe="#111111"), acc_reviewer, False),
+    "scholar": ("學者", "學士帽、卷軸，知識研究、教學解說", dict(hair="#4a3426", cloth="#5a4a8a", cloth2="#3a2f5e", shoe="#2a2a2a"), acc_scholar, False),
+    "merchant": ("商人", "寬簷帽、錢袋，商業計算、買賣", dict(hair="#2a1e14", cloth="#2f7f7a", cloth2="#1f5552", shoe="#3a2a20"), acc_merchant, False),
+    "farmer": ("農夫", "草帽、稻穗，生活實用、自然", dict(hair="#5a3a22", cloth="#7a9a3a", cloth2="#4a6a2a", shoe="#3a2a20"), acc_farmer, False),
+    "chef": ("廚師", "高帽、湯匙，料理食譜", dict(hair="#3a2a1e", cloth="#e8e8ee", cloth2="#3a3a4a", shoe="#222222"), acc_chef, False),
+    "mayor": ("村長", "王冠、法杖", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor, True),
+    "craftsman": ("工匠", "安全帽、槌子", dict(hair="#3a2a1e", cloth="#4a6a8a", cloth2="#2a3a4a", shoe="#2a1a1a"), acc_craftsman, True),
 }
 
 
@@ -311,10 +386,12 @@ def main():
                                   "working": [0, 1, 2, 3], "error": 4, "done": 5, "thinking": 6, "idle": 7}},
     }
     sheets = []
-    for cid, (name, pal, acc) in CHARACTERS.items():
+    for cid, (name, desc, pal, acc, system) in CHARACTERS.items():
         sheet = build_sheet(pal, acc)
         sheet.save(OUT_CHAR / f"{cid}.png")
-        manifest["characters"][cid] = {"name": name, "path": f"characters/{cid}.png"}
+        manifest["characters"][cid] = {"name": name, "desc": desc, "path": f"characters/{cid}.png"}
+        if system:  # 系統角色（村長、工匠）不能給村民用
+            manifest["characters"][cid]["system"] = True
         sheets.append(sheet)
 
     bubbles = build_status_bubbles()

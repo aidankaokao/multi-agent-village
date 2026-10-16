@@ -2,13 +2,23 @@ import { useState } from "react";
 import { villagers, type AgentSpec, type AgentTest, type Expect, type Model, type TryResult } from "../api";
 import { Field, ListInput, NumInput } from "./fields";
 
-const EMPTY_EXPECT: Expect = { contains: [], not_contains: [], lang: null, min_chars: null, max_chars: null, regex: null };
+export const EMPTY_EXPECT: Expect = { contains: [], not_contains: [], lang: null, min_chars: null, max_chars: null, regex: null };
 
 /** 模型選單：依村民設定 / 分級 / 指定模型（比較雲端與本地用） */
-function TargetSelect({ value, onChange, models }: { value: string; onChange: (v: string) => void; models: Model[] }) {
+export function TargetSelect({
+  value,
+  onChange,
+  models,
+  defaultLabel = "依村民設定",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  models: Model[];
+  defaultLabel?: string;
+}) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">依村民設定</option>
+      <option value="">{defaultLabel}</option>
       <option value="tier:large">large 分級</option>
       <option value="tier:small">small 分級</option>
       {models.map((m) => (
@@ -20,7 +30,7 @@ function TargetSelect({ value, onChange, models }: { value: string; onChange: (v
   );
 }
 
-function ResultView({ r }: { r: TryResult }) {
+export function ResultView({ r }: { r: TryResult }) {
   return (
     <div className="try-result">
       <div className="row">

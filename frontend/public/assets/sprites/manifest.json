@@ -16,23 +16,55 @@
   "characters": {
     "poet": {
       "name": "詩人",
+      "desc": "貝雷帽、羽毛筆，文藝創作",
       "path": "characters/poet.png"
     },
     "jester": {
       "name": "笑話師",
+      "desc": "小丑帽，幽默娛樂",
       "path": "characters/jester.png"
     },
     "translator": {
       "name": "翻譯官",
+      "desc": "眼鏡、書本，語言文字",
       "path": "characters/translator.png"
-    },
-    "mayor": {
-      "name": "村長",
-      "path": "characters/mayor.png"
     },
     "reviewer": {
       "name": "審核員",
+      "desc": "制服帽、徽章，檢查把關",
       "path": "characters/reviewer.png"
+    },
+    "scholar": {
+      "name": "學者",
+      "desc": "學士帽、卷軸，知識研究、教學解說",
+      "path": "characters/scholar.png"
+    },
+    "merchant": {
+      "name": "商人",
+      "desc": "寬簷帽、錢袋，商業計算、買賣",
+      "path": "characters/merchant.png"
+    },
+    "farmer": {
+      "name": "農夫",
+      "desc": "草帽、稻穗，生活實用、自然",
+      "path": "characters/farmer.png"
+    },
+    "chef": {
+      "name": "廚師",
+      "desc": "高帽、湯匙，料理食譜",
+      "path": "characters/chef.png"
+    },
+    "mayor": {
+      "name": "村長",
+      "desc": "王冠、法杖",
+      "path": "characters/mayor.png",
+      "system": true
+    },
+    "craftsman": {
+      "name": "工匠",
+      "desc": "安全帽、槌子",
+      "path": "characters/craftsman.png",
+      "system": true
     }
   },
   "ui": {
