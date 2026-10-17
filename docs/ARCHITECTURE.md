@@ -283,6 +283,20 @@ class BaseAgent(Protocol):
   呼叫需要的目錄與提問者放 context variable `REMOTE_ENV`；token、key 只在 header，執行紀錄只記訊息內容。
 - 地圖：`/api/agents` 帶 status，外出中的駐村專家半透明並標「（外出中）」；`residents.status` 事件讓前端即時更新。
 
+#### 附文件（交給收文件的駐村專家）
+
+- 村子自己不讀文件內容。名片寫著收哪些檔案的駐村專家（`x-file-limits.extensions`，或 inputModes 的 mime；
+  `text/plain` 不算）→ `remote.accepts`（`core/docfiles.accepts_from_card`，重新讀取名片時更新）。
+- 💬 📎 附 xlsx / csv / txt / pdf（最多 3 份、每份 10MB、合計 20MB；`core/docfiles.py` 看副檔名＋檔頭）。
+  沒有「在村」且收這類檔案的駐村專家 → 409 / 422。文件存 `chat_files`（`kind=upload`，跟著對話保存），
+  使用者訊息 `meta.files = [{id, name, size}]`。
+- Runner 拿到 `docs`（這次附的，或前幾輪附的）放進 `REMOTE_ENV.docs`；村長名冊標「收文件」、規劃提示列出檔名。
+  村長漏派時補救：這次附了文件、或追問上一份報告（`_DOC_FOLLOWUP` / 修改字眼，且上一輪是收文件的專家做的）→ 直接派給它。
+- `remote.call` 把文件放進 A2A 訊息的 file part（base64）；對方的 `status-update` 進度（「讀取檔案 2/3」）用 `⏳` 先顯示；
+  回傳的 file part（報告 PDF）存 `chat_files`（`kind=report`，14 天過期，`purge_expired` 一起清）→ 附件
+  `{kind: "file", url: "/api/files/{id}"}`。收文件的步驟時間上限至少 900 秒（`DOC_STEP_TIMEOUT_S`）。
+- `GET /api/files/{id}`：只有本人拿得到，一律 `Content-Disposition: attachment`；過期回 404（前端顯示「已過期」）。
+
 #### 生圖模型（image 分級）
 
 - OpenRouter 的生圖 API：`POST {base_url}/images`（`model`、`prompt`、`n`、`aspect_ratio`）→ `data[].b64_json`、`media_type`、
@@ -382,7 +396,7 @@ multi-agent-village/
 │       ├── config.py            # 環境變數（DATABASE_URL、config_dir、agents_dir）
 │       ├── events.py            # Event bus；claim / for_viewer（事件只給提問者）
 │       ├── api/                 # auth、chat、conversations、memories、runs（含村規）、villagers、workshop、llm、
-│       │                        # images（附圖 / 畫作）、residents（駐村專家）
+│       │                        # images（附圖 / 畫作）、files（附文件 / 報告）、residents（駐村專家）
 │       ├── core/
 │       │   ├── card.py          # 村民定義（AgentSpec：prompt / tool / remote）
 │       │   ├── registry.py      # 記憶體中的村民名冊；保留名稱
@@ -394,7 +408,8 @@ multi-agent-village/
 │       │   ├── scribe.py        # 書記：長期記憶
 │       │   ├── appraiser.py     # 鑑定師：看圖（vision 分級）
 │       │   ├── painter.py       # 畫家的作畫環境：生圖、張數上限、畫作保存、參考圖
-│       │   ├── remote.py        # 駐村專家：agent card、健康檢查、A2A 呼叫（send / stream）
+│       │   ├── remote.py        # 駐村專家：agent card、健康檢查、A2A 呼叫（send / stream、文件與回傳檔案）
+│       │   ├── docfiles.py      # 附文件：格式與大小檢查、哪些駐村專家收哪些檔案
 │       │   ├── imagefmt.py      # 圖片格式判斷、寬高
 │       │   └── context.py       # 多輪上下文（Turn、prev、指稱判斷）
 │       ├── tools/               # 工具箱：calculator、chart（SVG）、clock、painter（生圖）

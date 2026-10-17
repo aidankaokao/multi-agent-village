@@ -136,13 +136,29 @@ def is_costly(spec: AgentSpec | None) -> bool:
     return bool(spec and spec.kind == "tool" and spec.tool and spec.tool.id in TOOLS and TOOLS[spec.tool.id].costly)
 
 
-def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "") -> str:
+def render_documents(docs, fresh: bool, doc_agents: list[AgentSpec]) -> str:
+    """附的文件（給村長規劃用）：只列檔名，內容村子不讀，只交給收文件的駐村專家。"""
+    names = "、".join(d.describe() for d in docs)
+    who = "、".join(f"{a.id}（{a.name}）" for a in doc_agents) or "（目前沒有在村的收文件村民）"
+    when = "使用者這次附了文件" if fresh else "前面的對話附過文件（這次沒有再附）"
+    return (
+        f"{when}：{names}。文件內容只有收文件的村民 {who} 拿得到，其他村民看不到。"
+        + ("整理、彙整、分析這些文件或做報告就派給它，instruction 寫清楚使用者要的重點方向。" if fresh else
+           "這次的請求如果是在追問那些文件或報告（例如「第二段寫詳細一點」「改成著重成本」），就再派給它；無關就不用。")
+    )
+
+
+def planner_system_prompt(
+    agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "", documents: str = "",
+) -> str:
     lines = []
     for a in agents:
         examples = "；".join(e for s in a.card.skills for e in s.examples[:3])
         costly = "【每次都要花錢：使用者沒有明確要求畫好幾張時，只安排一個步驟】" if is_costly(a) else ""
         tool = TOOLS.get(a.tool.id) if a.kind == "tool" and a.tool else None
         hint = f"（{tool.planner_hint}）" if tool and tool.planner_hint else ""
+        if a.kind == "remote" and a.remote and a.remote.accepts:
+            hint += f"【收文件：{'、'.join(a.remote.accepts)}；只有它讀得到使用者附的文件】"
         lines.append(f"- {a.id}（{a.name}）：{a.card.description}{hint}{costly}" + (f" 例：{examples}" if examples else ""))
     roster = "\n".join(lines)
     history_rule = history_block = ""
@@ -164,6 +180,8 @@ def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = 
             "要對圖片內容做事（翻譯、計算、畫圖表、寫詩…）才派村民，instruction 寫清楚要對圖片的哪些內容做什麼。"
         )
         image_block = f"\n\n{appraisal}"
+    if documents:
+        image_rule += f"\n10. {documents}"
     return f"""你是村長，負責把使用者的請求分派給適合的村民（agent）。
 
 可用的村民：
@@ -285,6 +303,7 @@ def _mentioned(instruction: str, message: str) -> bool:
 async def plan_with_llm(
     message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes, history: list[Turn] | None = None,
     appraisal: str = "",
+    documents: str = "",
 ) -> list[Step] | None:
     by_id = {a.id: a for a in agents}
     messages = [ChatMessage("user", f"請求：{message}")]
@@ -293,7 +312,7 @@ async def plan_with_llm(
             r = await llm.chat(
                 "tier:large",
                 messages,
-                system=planner_system_prompt(agents, history, appraisal),
+                system=planner_system_prompt(agents, history, appraisal, documents),
                 json_schema=plan_schema(list(by_id)),
                 max_tokens=1024,
             )
@@ -346,6 +365,7 @@ async def make_plan(
     on_note: NoteCallback | None = None,
     history: list[Turn] | None = None,
     appraisal: str = "",
+    documents: str = "",
 ) -> Plan:
     by_id = {a.id: a for a in agents}
     if plan := plan_from_mentions(message, by_id):
@@ -355,7 +375,7 @@ async def make_plan(
         return Plan(steps=[], source="direct", notes=["村裡還沒有任何村民"])
 
     notes = Notes(on_note)
-    steps = await plan_with_llm(message, agents, llm, notes, history, appraisal)
+    steps = await plan_with_llm(message, agents, llm, notes, history, appraisal, documents)
     if steps is not None:
         return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes))
 

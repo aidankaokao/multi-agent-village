@@ -1,6 +1,7 @@
 """對話紀錄：每個帳號的對話與訊息。問答前讀最近幾輪當上下文，問答結束後把回答存回來。
 
 附圖存在 chat_images（跟著對話保存），使用者訊息的 meta.images 記圖片 id。
+附的文件存在 chat_files（跟著對話保存），meta.files 記 [{id, name, size}]；駐村專家回傳的報告也存這裡（14 天過期）。
 """
 
 from dataclasses import dataclass, field
@@ -10,9 +11,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from village.core.context import Turn
-from village.store.models import ChatImage, Conversation, Message
+from village.core.docfiles import DocFile
+from village.store.models import ChatFile, ChatImage, Conversation, Message
 
 GENERATED_DAYS = 14  # 畫家畫的圖保存兩週：很少回頭查，「上週那張」還找得到
+REPORT_DAYS = 14  # 駐村專家回傳的報告（PDF）保存期限同畫作
 TITLE_CHARS = 40
 TURN_CHARS = 1500  # 每則訊息帶進上下文的上限，避免很長的回答把 prompt 撐爆
 
@@ -29,6 +32,7 @@ def _clip(text: str) -> str:
 class Started:
     conversation_id: str
     image_ids: list[str] = field(default_factory=list)
+    files: list[dict] = field(default_factory=list)  # [{id, name, size}]
 
 
 class ConversationStore:
@@ -41,9 +45,10 @@ class ConversationStore:
         return c if c and c.user_id == user_id else None
 
     async def start_turn(
-        self, user_id: str, conversation_id: str | None, message: str, images: list[tuple[str, bytes]] | None = None
+        self, user_id: str, conversation_id: str | None, message: str, images: list[tuple[str, bytes]] | None = None,
+        files: list[DocFile] | None = None,
     ) -> Started:
-        """存使用者的訊息（和附圖 (mime, data)）；沒有指定對話就開新對話（標題用第一句話）。"""
+        """存使用者的訊息（和附圖 (mime, data)、附的文件）；沒有指定對話就開新對話（標題用第一句話）。"""
         async with self._sm() as s:
             conv = await s.get(Conversation, conversation_id) if conversation_id else None
             if conv is None or conv.user_id != user_id:
@@ -56,12 +61,70 @@ class ConversationStore:
                 ChatImage(user_id=user_id, conversation_id=conv.id, mime=mime, data=data, size=len(data))
                 for mime, data in images or []
             ]
-            s.add_all(rows)
+            docs = [
+                ChatFile(user_id=user_id, conversation_id=conv.id, name=f.name, mime=f.mime, data=f.data, size=len(f.data))
+                for f in files or []
+            ]
+            s.add_all(rows + docs)
             await s.flush()
             ids = [r.id for r in rows]
-            s.add(Message(conversation_id=conv.id, role="user", content=message, meta={"images": ids} if ids else None))
+            listed = [{"id": d.id, "name": d.name, "size": d.size} for d in docs]
+            meta = {k: v for k, v in (("images", ids), ("files", listed)) if v}
+            s.add(Message(conversation_id=conv.id, role="user", content=message, meta=meta or None))
             await s.commit()
-            return Started(conv.id, ids)
+            return Started(conv.id, ids, listed)
+
+    async def recent_files(self, conversation_id: str, turns: int) -> list[DocFile]:
+        """前幾輪（不含目前這一輪）裡最近一次附的文件：追問（「第二段寫詳細一點」）時再交給駐村專家。"""
+        if turns <= 0:
+            return []
+        async with self._sm() as s:
+            rows = list(
+                await s.scalars(
+                    select(Message).where(Message.conversation_id == conversation_id, Message.role == "user")
+                    .order_by(Message.created_at.desc()).limit(turns + 1)
+                )
+            )
+            for m in rows[1:]:  # rows[0] 是目前這一輪的提問
+                ids = [f["id"] for f in (m.meta or {}).get("files") or []]
+                if ids:
+                    found = {f.id: f for f in await s.scalars(
+                        select(ChatFile).where(ChatFile.id.in_(ids), ChatFile.conversation_id == conversation_id)
+                    )}
+                    return [DocFile(found[i].name, found[i].mime, found[i].data) for i in ids if i in found]
+        return []
+
+    async def last_agents(self, conversation_id: str) -> list[str]:
+        """上一輪回答是哪些村民做的（追問時判斷要不要再交給同一位）。"""
+        async with self._sm() as s:
+            msg = await s.scalar(
+                select(Message).where(Message.conversation_id == conversation_id, Message.role == "assistant")
+                .order_by(Message.created_at.desc()).limit(1)
+            )
+        return list(((msg.meta or {}).get("agents") or []) if msg else [])
+
+    async def save_report(self, user_id: str, conversation_id: str | None, name: str, mime: str, data: bytes) -> str:
+        """存駐村專家回傳的檔案（REPORT_DAYS 天後自動清掉），回傳檔案 id。"""
+        row = ChatFile(
+            user_id=user_id, conversation_id=conversation_id, kind="report", name=name, mime=mime, data=data,
+            size=len(data), expires_at=_now() + timedelta(days=REPORT_DAYS),
+        )
+        async with self._sm() as s:
+            s.add(row)
+            await s.commit()
+            return row.id
+
+    async def get_file(self, file_id: str, user_id: str) -> ChatFile | None:
+        """只有本人拿得到（管理員也一樣）；過期的報告即使還沒被清掉也當作不存在。"""
+        async with self._sm() as s:
+            f = await s.get(ChatFile, file_id)
+        if f is None or f.user_id != user_id:
+            return None
+        if f.expires_at is not None:
+            exp = f.expires_at if f.expires_at.tzinfo else f.expires_at.replace(tzinfo=UTC)
+            if exp < _now():
+                return None
+        return f
 
     async def recent_images(self, conversation_id: str, turns: int) -> list[tuple[str, bytes]]:
         """前幾輪（不含目前這一輪）裡最近一次附的圖，給鑑定師追問時重看。超過 turns 輪就不算。"""
@@ -108,10 +171,12 @@ class ConversationStore:
             ) or 0
 
     async def purge_expired(self) -> int:
+        """清掉過期的畫作與報告。"""
         async with self._sm() as s:
-            n = (await s.execute(delete(ChatImage).where(ChatImage.expires_at < _now()))).rowcount
+            n = (await s.execute(delete(ChatImage).where(ChatImage.expires_at < _now()))).rowcount or 0
+            n += (await s.execute(delete(ChatFile).where(ChatFile.expires_at < _now()))).rowcount or 0
             await s.commit()
-        return n or 0
+        return n
 
     async def last_painting(self, conversation_id: str, user_id: str) -> tuple[str, bytes] | None:
         """上一輪回答裡的畫作（修圖追問「再改亮一點」用它當底圖）；過期或沒有就回 None。"""

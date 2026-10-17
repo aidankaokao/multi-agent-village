@@ -1,3 +1,4 @@
+import type { DocChip } from "./docs";
 import type { Attachment, MessageRow } from "../api";
 import type { VillageEvent } from "../events";
 
@@ -44,6 +45,7 @@ export interface RunView {
   id: string;
   message: string;
   images?: string[]; // 使用者附的圖（剛送出時是 data URL，從紀錄載入時是 /api/images/{id}）
+  files?: DocChip[]; // 使用者附的文件
   status: "planning" | "running" | "done" | "failed" | "cancelled";
   fromHistory?: boolean; // 從對話紀錄載入（沒有執行過程，只有結果）
   scribing?: boolean; // 書記正在記錄
@@ -70,7 +72,7 @@ export const initialRuns: RunsState = { order: [], byId: {} };
 
 type Action =
   | { type: "load"; messages: MessageRow[] } // 切換對話 / 重新整理：用存起來的訊息重建畫面
-  | { type: "local"; run_id: string; message: string; images?: string[] }
+  | { type: "local"; run_id: string; message: string; images?: string[]; files?: DocChip[] }
   | { type: "event"; event: VillageEvent }
   | { type: "reset" };
 
@@ -95,6 +97,7 @@ export function runsFromMessages(messages: MessageRow[]): RunsState {
     const run: RunView = {
       ...newRun(id, q.content),
       images: q.meta?.images?.map((i) => `/api/images/${i}`),
+      files: q.meta?.files?.map((f) => ({ name: f.name, size: f.size, url: `/api/files/${f.id}` })),
       startedAt: t0,
       finishedAt: a ? Date.parse(a.created_at) : t0,
       fromHistory: true,
@@ -118,10 +121,11 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
   if (action.type === "local") {
     const existing = state.byId[action.run_id];
     if (existing) {
-      // 事件比 POST 回應早到時 run 已經建好了，補上圖片
-      return action.images?.length ? { ...state, byId: { ...state.byId, [existing.id]: { ...existing, images: action.images } } } : state;
+      // 事件比 POST 回應早到時 run 已經建好了，補上圖片與文件
+      if (!action.images?.length && !action.files?.length) return state;
+      return { ...state, byId: { ...state.byId, [existing.id]: { ...existing, images: action.images, files: action.files } } };
     }
-    const run = { ...newRun(action.run_id, action.message), images: action.images };
+    const run = { ...newRun(action.run_id, action.message), images: action.images, files: action.files };
     return { order: [...state.order, run.id], byId: { ...state.byId, [run.id]: run } };
   }
 

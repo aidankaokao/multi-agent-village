@@ -3,16 +3,21 @@
 駐村專家是在別處獨立開發、獨立部署的 agent（例如 extra-agents/taiwan-history），村子用 A2A 協定呼叫：
   - GET  {網址}/.well-known/agent-card.json   自我介紹（名稱、說明、技能、A2A 的路徑）
   - GET  {網址}/health                         健康檢查（沒有這個路徑就改讀 agent card）
-  - POST {網址}{a2a_path}                       問答（下一步 B 才接上）
+  - POST {網址}{a2a_path}                       問答（A2A message/stream，不支援就改用 message/send）
+
+收文件的駐村專家（名片寫著收哪些檔案，例如文件彙整師）：問答附的文件放在訊息的 file part（base64）一起送；
+對方回傳的檔案（例如報告 PDF）存進 chat_files，回答附上下載連結。
 
 對方 card 裡寫的網址通常是它自己看到的（例如 localhost），從村子的容器連不到；
 所以一律用「管理員填的網址」加上 card 裡的路徑去呼叫。
 """
 
+import base64
+import binascii
 import json
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -23,6 +28,7 @@ import httpx
 from sqlalchemy import select
 
 from village.core.card import AgentSpec
+from village.core.docfiles import MAX_TOTAL_BYTES, DocFile, accepts_from_card, for_agent, safe_name
 from village.llm.base import LLMError, TextCallback
 from village.security.redact import register_secret
 
@@ -132,13 +138,18 @@ def spec_from_card(
         },
         "x-village": {"sprite": sprite or "scholar", "home": home, "keywords": keywords or []},
         "kind": "remote",
-        "remote": {"url": base, "a2a_path": a2a_path(card), "share_llm": share_llm},
+        "remote": {"url": base, "a2a_path": a2a_path(card), "share_llm": share_llm, "accepts": accepts_from_card(card)},
     })
 
 
 # ---------------------------------------------------------------- 問答時呼叫（A2A message/send）
 
-CALL_TIMEOUT = 300.0  # 駐村專家可能自己還要檢索、呼叫 LLM；實際上限由村規的「每一步時間上限」決定
+CALL_TIMEOUT = 900.0  # 駐村專家可能自己還要檢索、呼叫 LLM、產生報告；實際上限由村規的「每一步時間上限」決定
+# 對方回傳的檔案只收這些類型（下載時一律當附件，不在瀏覽器裡直接開）；其他類型存成 octet-stream
+RETURN_MIMES = {
+    "application/pdf", "text/plain", "text/csv", "image/png", "image/jpeg",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 class RemoteDirectory:
@@ -174,6 +185,9 @@ class RemoteEnv:
     llm: Any  # LLMService（取提問者可以分享的 LLM 設定）
     user_id: str | None
     shared_llm: dict | None = field(default=None)  # 快取：同一次問答只查一次
+    docs: list[DocFile] = field(default_factory=list)  # 這次問答附的文件（只交給收這類檔案的駐村專家）
+    # 存對方回傳的檔案（name, mime, data）→ 檔案 id；沒有就不收檔案
+    save_file: Callable[[str, str, bytes], Awaitable[str]] | None = None
 
 
 REMOTE_ENV: ContextVar[RemoteEnv | None] = ContextVar("remote_env", default=None)
@@ -205,8 +219,39 @@ def render_citations(data: dict) -> str:
     return "資料來源：\n" + "\n".join(lines) if lines else ""
 
 
-def parse_reply(body: Any) -> tuple[str, dict]:
-    """JSON-RPC 回覆 → (文字, data part)。支援直接回 Message，或回 Task（取 artifacts / status.message）。"""
+@dataclass
+class Reply:
+    text: str
+    data: dict = field(default_factory=dict)
+    files: list[DocFile] = field(default_factory=list)  # 對方回傳的檔案（例如報告 PDF）
+
+
+def _file_part(part: dict) -> DocFile | None:
+    f = part.get("file") if isinstance(part.get("file"), dict) else {}
+    if "bytes" not in f:
+        return None  # 不支援 uri（不去別處下載檔案）
+    try:
+        data = base64.b64decode(f["bytes"], validate=True)
+    except (binascii.Error, TypeError, ValueError):
+        raise LLMError("駐村專家回傳的檔案格式不對（base64）") from None
+    if not data or len(data) > MAX_TOTAL_BYTES:
+        raise LLMError("駐村專家回傳的檔案是空的或太大")
+    mime = str(f.get("mimeType") or "")
+    return DocFile(safe_name(str(f.get("name") or "檔案")), mime if mime in RETURN_MIMES else "application/octet-stream", data)
+
+
+def _collect(parts: list, reply: Reply) -> None:
+    for p in parts:
+        if not isinstance(p, dict):
+            continue
+        if p.get("kind") == "data" and isinstance(p.get("data"), dict):
+            reply.data.update(p["data"])
+        elif p.get("kind") == "file" and (f := _file_part(p)):
+            reply.files.append(f)
+
+
+def parse_reply(body: Any) -> Reply:
+    """JSON-RPC 回覆 → Reply（文字、data part、檔案）。支援直接回 Message，或回 Task（取 artifacts / status.message）。"""
     if not isinstance(body, dict):
         raise LLMError("駐村專家的回覆不是 JSON 物件")
     if err := body.get("error"):
@@ -227,13 +272,11 @@ def parse_reply(body: Any) -> tuple[str, dict]:
     else:
         parts = result.get("parts") or []
     text = "\n".join(p.get("text", "") for p in parts if isinstance(p, dict) and p.get("kind") == "text").strip()
-    data: dict = {}
-    for p in parts:
-        if isinstance(p, dict) and p.get("kind") == "data" and isinstance(p.get("data"), dict):
-            data.update(p["data"])
-    if not text:
+    reply = Reply(text)
+    _collect(parts, reply)
+    if not text and not reply.files:
         raise LLMError("駐村專家沒有回答內容")
-    return text, data
+    return reply
 
 
 _NO_STREAM: set[str] = set()  # 回過「不支援 message/stream」的 A2A 網址：之後直接用 message/send
@@ -258,11 +301,13 @@ async def _headers(env: RemoteEnv, spec, warnings: list[str]) -> dict:
     return headers
 
 
-def _rpc(method: str, instruction: str, context: str) -> dict:
-    message = {
-        "kind": "message", "role": "user", "messageId": uuid.uuid4().hex,
-        "parts": [{"kind": "text", "text": render_message(instruction, context)}],
-    }
+def _rpc(method: str, instruction: str, context: str, files: list[DocFile] | None = None) -> dict:
+    parts: list[dict] = [{"kind": "text", "text": render_message(instruction, context)}]
+    parts += [
+        {"kind": "file", "file": {"name": f.name, "mimeType": f.mime, "bytes": base64.b64encode(f.data).decode()}}
+        for f in files or []
+    ]
+    message = {"kind": "message", "role": "user", "messageId": uuid.uuid4().hex, "parts": parts}
     return {"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": method, "params": {"message": message}}
 
 
@@ -273,7 +318,7 @@ def _check_status(status: int, detail: str) -> None:
         raise LLMError(f"駐村專家回傳 HTTP {status}：{detail[:300]}")
 
 
-async def _send(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict) -> tuple[str, dict]:
+async def _send(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict) -> Reply:
     r = await http.post(url, json=rpc, headers=headers)
     _check_status(r.status_code, r.text)
     try:
@@ -287,9 +332,12 @@ class _NotStreaming(Exception):
     """對方不支援 message/stream（回 -32601）：改用 message/send。"""
 
 
-async def _stream(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict, on_text: TextCallback) -> tuple[str, dict]:
-    """A2A message/stream（SSE）：文字一段一段累積，每次把「目前為止的完整文字」交給 on_text。"""
-    text, data = "", {}
+async def _stream(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict, on_text: TextCallback) -> Reply:
+    """A2A message/stream（SSE）：文字一段一段累積，每次把「目前為止的完整文字」交給 on_text。
+
+    還沒有回答文字時，對方的進度（status-update 帶的訊息，例如「讀取檔案 2/3」）也用 on_text 顯示。
+    """
+    reply = Reply("")
     async with http.stream("POST", url, json=rpc, headers={**headers, "Accept": "text/event-stream"}) as r:
         if r.status_code >= 400:
             _check_status(r.status_code, (await r.aread()).decode(errors="replace"))
@@ -313,29 +361,43 @@ async def _stream(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict, o
             result = event.get("result") or {}
             kind = result.get("kind")
             if kind == "artifact-update":
-                for part in (result.get("artifact") or {}).get("parts") or []:
+                parts = (result.get("artifact") or {}).get("parts") or []
+                for part in parts:
                     if part.get("kind") == "text":
-                        text = text + part.get("text", "") if result.get("append") else part.get("text", "")
-                        await on_text(text)
-                    elif part.get("kind") == "data" and isinstance(part.get("data"), dict):
-                        data.update(part["data"])
+                        reply.text = reply.text + part.get("text", "") if result.get("append") else part.get("text", "")
+                        await on_text(reply.text)
+                _collect(parts, reply)
             elif kind == "message":  # 有些 agent 最後直接送完整的 Message
-                text, more = parse_reply({"result": result})
-                data.update(more)
-                await on_text(text)
+                more = parse_reply({"result": result})
+                reply.text, reply.files = more.text, reply.files + more.files
+                reply.data.update(more.data)
+                await on_text(reply.text)
             elif kind == "status-update":
                 state = (result.get("status") or {}).get("state")
                 if state in ("failed", "rejected", "canceled"):
                     raise LLMError(f"駐村專家的任務沒有完成（{state}）")
                 if result.get("final"):
                     break
-    if not text.strip():
+                note = " ".join(p.get("text", "") for p in ((result.get("status") or {}).get("message") or {}).get("parts") or []
+                                if isinstance(p, dict) and p.get("kind") == "text").strip()
+                if note and not reply.text:
+                    await on_text(f"⏳ {note}…")
+    reply.text = reply.text.strip()
+    if not reply.text and not reply.files:
         raise LLMError("駐村專家沒有回答內容")
-    return text.strip(), data
+    return reply
 
 
-async def call(spec, instruction: str, context: str, on_text: TextCallback | None = None) -> tuple[str, dict, list[str]]:
-    """呼叫駐村專家；回傳 (成果文字, data part, 警告)。
+def files_for(spec) -> list[DocFile]:
+    """這位駐村專家這次會拿到的文件（名片上寫著收的類型才給）。"""
+    env = REMOTE_ENV.get()
+    if env is None or spec.remote is None or not spec.remote.accepts:
+        return []
+    return for_agent(env.docs, spec.remote.accepts)
+
+
+async def call(spec, instruction: str, context: str, on_text: TextCallback | None = None) -> tuple[Reply, list[str]]:
+    """呼叫駐村專家；回傳 (回覆, 警告)。
 
     有 on_text 時先試 message/stream（邊收邊顯示）；對方不支援就改用 message/send，並記住這個網址。
     """
@@ -343,6 +405,10 @@ async def call(spec, instruction: str, context: str, on_text: TextCallback | Non
     if env is None or spec.remote is None:
         raise LLMError("駐村專家只能在問答或村民試打裡呼叫")
     warnings: list[str] = []
+    files = files_for(spec)
+    if spec.remote.accepts and not files:
+        kinds = "、".join(spec.remote.accepts)
+        raise LLMError(f"「{spec.name}」需要附上文件（{kinds}）：在問答視窗按 📎 附上文件再問一次")
     headers = await _headers(env, spec, warnings)
     url = spec.remote.url.rstrip("/") + spec.remote.a2a_path
     try:
@@ -350,16 +416,16 @@ async def call(spec, instruction: str, context: str, on_text: TextCallback | Non
             result = None
             if on_text and url not in _NO_STREAM:
                 try:
-                    result = await _stream(http, url, _rpc("message/stream", instruction, context), headers, on_text)
+                    result = await _stream(http, url, _rpc("message/stream", instruction, context, files), headers, on_text)
                 except _NotStreaming:
                     _NO_STREAM.add(url)
             if result is None:
-                result = await _send(http, url, _rpc("message/send", instruction, context), headers)
+                result = await _send(http, url, _rpc("message/send", instruction, context, files), headers)
     except httpx.HTTPError as e:
         raise LLMError(f"連不上駐村專家（{url}）：{type(e).__name__}") from None
-    text, data = result
-    if data.get("llm_error"):
-        warnings.append(f"駐村專家沒有用 LLM 整理回答（{data['llm_error']}），只列出找到的資料")
+    if result.data.get("llm_error"):
+        what = "只產生統計版報告" if files else "只列出找到的資料"
+        warnings.append(f"駐村專家沒有用 LLM 整理（{result.data['llm_error']}），{what}")
         if not spec.remote.share_llm:
             warnings.append("可以到村民頁 → 管理，打開「允許把提問者的 LLM 設定交給它」")
-    return text, data, warnings
+    return result, warnings

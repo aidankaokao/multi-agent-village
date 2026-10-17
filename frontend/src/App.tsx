@@ -4,6 +4,7 @@ import { auth, conversations, UNAUTHORIZED, village, type AgentInfo, type AuthSt
 import { LoginPage } from "./auth/LoginPage";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { ChatPanel, type Vision } from "./chat/ChatPanel";
+import type { DocFile } from "./chat/docs";
 import { initialRuns, runsReducer } from "./chat/runs";
 import { useVillageEvents } from "./events";
 import { RulesPanel } from "./rules/RulesPanel";
@@ -223,10 +224,11 @@ function VillageApp({
       .catch(() => {});
   }, [openConversation]);
 
-  const send = async (message: string, images: string[]) => {
-    const { run_id, conversation_id } = await village.chat(message, convId, images);
+  const send = async (message: string, images: string[], docs: DocFile[]) => {
+    const { run_id, conversation_id } = await village.chat(message, convId, images, docs);
     if (conversation_id !== convId) setConvId(conversation_id);
-    dispatch({ type: "local", run_id, message: message || "這張圖片裡有什麼？", images });
+    const fallback = docs.length ? "請彙整這些文件的重點" : "這張圖片裡有什麼？";
+    dispatch({ type: "local", run_id, message: message || fallback, images, files: docs.map(({ name, size }) => ({ name, size })) });
     loadConvs();
   };
 

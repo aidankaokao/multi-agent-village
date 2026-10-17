@@ -81,6 +81,7 @@ class RemoteConfig(BaseModel):
     url: str = Field(pattern=r"^https?://")  # 管理員填的網址，例如 http://host.docker.internal:8100
     a2a_path: str = "/a2a"  # 從對方的 agent card 讀來
     share_llm: bool = False  # 允許把提問者的 LLM 設定（含 key）交給它；預設關閉，管理員確認信任後才打開
+    accepts: list[str] = Field(default_factory=list)  # 收哪些文件（副檔名，從名片讀來，例如 [".xlsx", ".pdf"]）
 
 
 class Checks(BaseModel):

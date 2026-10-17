@@ -10,9 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from village.api import files as file_api
 from village.api import images as image_api
 from village.core import appraiser, scribe
 from village.core.context import refers_back
+from village.core.docfiles import for_agent
 from village.core.painter import PaintEnv, Reference
 from village.store.models import RemoteAgent
 from village.llm.base import ImagePart
@@ -24,8 +26,11 @@ log = logging.getLogger("village.chat")
 
 
 DEFAULT_IMAGE_QUESTION = "這張圖片裡有什麼？"
+DEFAULT_FILE_QUESTION = "請彙整這些文件的重點"
 
 # 追問時像在「修改上一張畫」：改、調、換、加上、去掉、再…一點、背景、顏色、風格…
+# 追問上一份報告（「改成著重成本」「第二段寫詳細一點」）
+_DOC_FOLLOWUP = re.compile(r"報告|文件|彙整|摘要|重點|詳細|簡短|精簡|著重|重新整理|重做|補充")
 _EDIT = re.compile(r"改|調|換|修|加上|加一|去掉|拿掉|刪掉|移除|再.{0,6}(一點|一些|些)|背景|顏色|色調|風格|畫風|更亮|更暗|放大|縮小")
 
 
@@ -33,6 +38,7 @@ class ChatBody(BaseModel):
     message: str = Field(default="", max_length=2000)  # 有附圖時可以留空
     conversation_id: str | None = None  # 接著哪段對話；不填 = 開新對話
     images: list[image_api.ImageIn] = Field(default_factory=list, max_length=image_api.HARD_MAX_IMAGES)
+    files: list[file_api.FileIn] = Field(default_factory=list, max_length=10)  # 文件（xlsx / csv / txt / pdf）
 
 
 class AgentOut(BaseModel):
@@ -45,6 +51,7 @@ class AgentOut(BaseModel):
     skills: list[dict]
     tags: list[str]
     status: str | None = None  # 駐村專家：online / offline / unknown
+    accepts: list[str] = []  # 駐村專家收哪些文件（副檔名）
 
 
 @router.get("/agents")
@@ -64,6 +71,7 @@ async def list_agents(request: Request):
             skills=[s.model_dump() for s in a.card.skills],
             tags=a.card.tags,
             status=status_of.get(a.id) if a.kind == "remote" else None,
+            accepts=a.remote.accepts if a.kind == "remote" and a.remote else [],
         )
         for a in registry.all()
     ]
@@ -79,15 +87,26 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     rules = ctx.rules.current
     message = body.message.strip()
     images = image_api.decode(body.images, rules.max_images)
-    if not message and not images:
+    docs = file_api.decode(body.files)
+    if not message and not images and not docs:
         raise HTTPException(422, "請輸入問題")
     if images and not await ctx.llm.has_vision(me.id):
         raise HTTPException(status.HTTP_409_CONFLICT, NO_VISION)  # 沒有視覺模型看不懂圖，先提醒
-    message = message or DEFAULT_IMAGE_QUESTION
+    if docs:
+        await _check_doc_agents(ctx, docs)
+    message = message or (DEFAULT_FILE_QUESTION if docs else DEFAULT_IMAGE_QUESTION)
     run_id = uuid.uuid4().hex[:12]
-    started = await ctx.conversations.start_turn(me.id, body.conversation_id, message, images)
+    started = await ctx.conversations.start_turn(me.id, body.conversation_id, message, images, docs)
     conv_id = started.conversation_id
     history = await ctx.conversations.recent_turns(conv_id, rules.context_turns)
+    # 文件：這次附的；沒附但前幾輪附過 → 也帶著（追問報告時村長可以再交給收文件的駐村專家）
+    fresh_docs = bool(docs)
+    doc_agent = None  # 追問上一份報告：直接再交給上一輪的那位駐村專家（不靠村長判斷，弱模型常漏掉）
+    if not docs and body.conversation_id:
+        docs = await ctx.conversations.recent_files(conv_id, rules.context_turns)
+        if docs and (_DOC_FOLLOWUP.search(message) or _EDIT.search(message) or refers_back(message)):
+            readers = {a.id for a in ctx.registry.all() if a.kind == "remote" and a.remote and a.remote.accepts}
+            doc_agent = next((a for a in await ctx.conversations.last_agents(conv_id) if a in readers), None)
     # 修改上一張畫作（「背景改成夜晚」）：畫家以那張畫為底，鑑定師不用去重看更早附的照片
     painting = None
     if not images and body.conversation_id and (_EDIT.search(message) or refers_back(message)):
@@ -109,12 +128,15 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
     ctx.bus.claim(run_id, me.id)  # 在 task 開始前就認領，第一個事件也只送給提問者
 
+    async def save_file(name: str, mime: str, data: bytes) -> str:
+        return await ctx.conversations.save_report(me.id, conv_id, name, mime, data)
+
     async def job():
         """執行問答，結束（含失敗、取消）後把回答存回對話。"""
         try:
             out = await ctx.runner.run(
                 run_id, message, traced=True, user_id=me.id, history=history, memories=memories,
-                images=parts, relook=relook, paint=paint,
+                images=parts, relook=relook, paint=paint, docs=docs, fresh_docs=fresh_docs, doc_agent=doc_agent, save_file=save_file,
             )
         except asyncio.CancelledError:
             await ctx.conversations.finish_turn(conv_id, run_id, "", "cancelled")
@@ -137,7 +159,22 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     ctx.active[run_id] = task
     task.add_done_callback(ctx.tasks.discard)
     task.add_done_callback(lambda _: (ctx.active.pop(run_id, None), ctx.owners.pop(run_id, None)))
-    return {"run_id": run_id, "conversation_id": conv_id, "image_ids": started.image_ids}
+    return {"run_id": run_id, "conversation_id": conv_id, "image_ids": started.image_ids, "files": started.files}
+
+
+async def _check_doc_agents(ctx, docs) -> None:
+    """附了文件：要有「在村」、而且收這類檔案的駐村專家，不然先提醒（村子自己不讀文件）。"""
+    online = await ctx.runner.directory.online_ids() if ctx.runner.directory else set()
+    agents = [a for a in ctx.registry.all() if a.kind == "remote" and a.remote and a.remote.accepts and a.id in online]
+    if not agents:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "村裡目前沒有能處理文件的駐村專家（例如文件彙整師）在村：請管理員到村民頁邀請，或確認它沒有外出中",
+        )
+    left = [d.name for d in docs if not any(for_agent([d], a.remote.accepts) for a in agents)]
+    if left:
+        kinds = "、".join(sorted({e for a in agents for e in a.remote.accepts}))
+        raise HTTPException(422, f"沒有駐村專家收這類檔案：{'、'.join(left)}（目前收 {kinds}）")
 
 
 def _references(

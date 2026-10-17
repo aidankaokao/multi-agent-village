@@ -6,6 +6,18 @@ import { SpriteThumb } from "./fields";
 
 export const STATUS_LABEL: Record<ResidentStatus, string> = { online: "🟢 在村", offline: "🔴 外出中", unknown: "⚪ 還沒檢查" };
 
+const FILES_HELP =
+  "使用者在問答附的文件會整份交給它處理（它用 LLM 整理時，內容也會交給那個 LLM 服務商）；只邀請你信任的服務。";
+
+function AcceptsNote({ accepts }: { accepts?: string[] }) {
+  if (!accepts?.length) return null;
+  return (
+    <div className="muted">
+      📎 收文件：{accepts.join("、")}。{FILES_HELP}
+    </div>
+  );
+}
+
 const SHARE_HELP =
   "打開後，有人問答派工給這位駐村專家時，會把「提問者自己的 LLM 設定」（網址、模型、API key）放在 header 交給它，" +
   "讓它用提問者的模型回答。等於把 key 交給另一個服務：只對你信任的專家打開（例如自己架的台灣史專家）。" +
@@ -45,6 +57,7 @@ function CardSummary({ p }: { p: ResidentPreview }) {
           {s.examples?.length ? `（例：${s.examples.slice(0, 2).join("、")}）` : ""}
         </div>
       ))}
+      <AcceptsNote accepts={p.accepts} />
       <div className="muted">
         問答網址：{p.url}
         {p.a2a_path}
@@ -220,6 +233,7 @@ export function ManageResident({
         </div>
         {r.last_error && <div className="step-error">{r.last_error}</div>}
         <div className="muted">{villager.spec.card.description}</div>
+        <AcceptsNote accepts={villager.spec.remote?.accepts} />
         <div className="row">
           <span className="muted">名片讀取於 {when(r.card_fetched_at)}</span>
           <button type="button" className="link" disabled={!!busy} onClick={() => run("refresh", () => residents.refresh(r.id), "已重新讀取名片（說明、技能已更新；名字、外觀保留）。")}>

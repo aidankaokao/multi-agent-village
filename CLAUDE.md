@@ -9,7 +9,7 @@
 
 ## 目前進度
 
-全部經使用者部署實測。DB 遷移到 0009。
+全部經使用者部署實測（文件彙整師的村子對接 R2/R3 待實測）。DB 遷移到 0010。
 
 - **Phase 0～5**：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
   帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。
@@ -23,8 +23,13 @@
   村子這邊叫「**駐村專家**」（村民 `kind: remote`）：邀請 / 管理介面、token 加密、健康檢查與外出中、村長派工、共享提問者 LLM 的開關、
   串流顯示。待改進（以後再說）：「起因 / 近因」檢索、測試題、回答風格。
 - **地圖互動**：點村民開始問答（自動 @）、村民冒泡自我介紹、村民之間聊天（頻率使用者覺得剛好）。
+- **Phase 6R 文件彙整師（外接 agent）**：`extra-agents/report-maker/`（規劃與進度在它的 `PLAN.md`）。
+  xlsx / csv / txt / pdf（最多 3 份）→ 程式讀檔與統計（含分組小計）→ 呼叫端自帶 LLM 整理成報告 JSON（重點數字和原始資料核對）
+  → WeasyPrint 報告 PDF；A2A file part 收發、串流進度、測試網頁、獨立 docker-compose（127.0.0.1:8101）。
+  村子這邊：💬 📎 附文件（`chat_files`、`core/docfiles.py`、`api/files.py`），只交給名片寫著收文件的駐村專家，
+  回傳的 PDF 存 14 天並顯示下載；追問上一份報告會再交給同一位。
 
-**下一步**：文件彙整師（`extra-agents/report-maker/`，規劃與進度在它的 `PLAN.md`），R1 專家本體開始。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
+**下一步**：使用者部署實測文件彙整師的村子對接（R2/R3）。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
 
@@ -48,6 +53,8 @@
   `appraiser` 鑑定師（`core/appraiser.py`，有附圖時先看圖，結果放 context variable `_APPRAISAL` 交給村長 / 村民 / 審核員）。
 - 駐村專家（外接的獨立 agent）：村民 `kind: remote`（`core/remote.py`、`api/residents.py`），
   存取 token 加密存 `remote_agents`；呼叫網址用「管理員填的網址 ＋ card 的路徑」；村子容器連主機服務用 `host.docker.internal`。
+  收文件的駐村專家（名片的 `x-file-limits` / inputModes → `remote.accepts`）才拿得到問答附的文件（A2A file part），
+  對方回傳的檔案存 `chat_files`（14 天）。
   「允許把提問者的 LLM 設定交給它」（`share_llm`）預設關閉；打開時送提問者 large 分級第一個 OpenAI 相容模型
   （`LLMService.shareable`）。村長只派工給「在村」的駐村專家（`RemoteDirectory.online_ids`）；呼叫狀態放 context variable
   `REMOTE_ENV`（問答與村民試打各自設定）。

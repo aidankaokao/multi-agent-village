@@ -13,6 +13,7 @@ from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
 from village.api.conversations import router as conversations_router
 from village.api.memories import router as memories_router
+from village.api.files import router as files_router
 from village.api.images import router as images_router
 from village.api.residents import health_loop
 from village.core.remote import RemoteDirectory
@@ -136,6 +137,7 @@ def create_app(
     app.include_router(conversations_router)
     app.include_router(memories_router)
     app.include_router(images_router)
+    app.include_router(files_router)
     app.include_router(residents_router)
 
     @app.get("/api/health")

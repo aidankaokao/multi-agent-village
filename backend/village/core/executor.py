@@ -17,8 +17,11 @@ from village.core.card import AgentSpec
 from village.core import remote
 from village.core.painter import PaintEnv, painting
 from village.core.context import PREV, Turn
+from village.core.docfiles import DocFile
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
-from village.core.orchestrator import ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan
+from village.core.orchestrator import (
+    ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan, render_documents,
+)
 from village.core.registry import AgentRegistry
 from village.core.scribe import render_memories
 from village.core.reviewer import REVIEWER_ID, Leaf, Review, review
@@ -28,6 +31,7 @@ from village.llm.service import llm_user
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore, VillageRules
 from village.tools import TOOLS, ToolError, ToolResult
+from village.tools.base import Attachment
 
 log = logging.getLogger("village.executor")
 
@@ -127,6 +131,17 @@ _PREVIOUS: ContextVar[str] = ContextVar("previous_answer", default="")
 _MEMORIES: ContextVar[str] = ContextVar("memories", default="")  # 書記記下的長期記憶（已排成文字）
 _APPRAISAL: ContextVar[str] = ContextVar("appraisal", default="")  # 鑑定師看圖的結果（已排成文字）
 
+
+@dataclass
+class _DocNote:
+    docs: list[DocFile]
+    fresh: bool  # True = 這次附的；False = 前幾輪附的（追問時才可能用到）
+    agent: str | None = None  # 追問上一份報告：一定要交給這位
+
+
+_DOCS: ContextVar[_DocNote] = ContextVar("docs", default=_DocNote([], False, None))
+DOC_STEP_TIMEOUT_S = 900  # 收文件的駐村專家（產生報告）比一般步驟久：至少給這麼久
+
 DEFAULT_RULES = VillageRules(reviewer_enabled=False, parallel=False)  # 沒接 DB 時（測試）維持最單純的行為
 
 
@@ -153,18 +168,27 @@ class Runner:
         self, run_id: str, message: str, traced: bool = False, user_id: str | None = None,
         history: list[Turn] | None = None, memories: list[str] | None = None,
         images: list[ImagePart] | None = None, relook: bool = False, paint: PaintEnv | None = None,
+        docs: list[DocFile] | None = None, fresh_docs: bool = False, doc_agent: str | None = None,
+        save_file: Callable[[str, str, bytes], Awaitable[str]] | None = None,
     ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。
 
         images：要給鑑定師看的圖（這次附的，或 relook=True 時是前面對話附的）。
         paint：畫家的作畫環境（誰、哪段對話、張數上限）；沒有就不能畫圖。
+        docs：文件（這次附的，fresh_docs=True；或前幾輪附的，追問時再交給收文件的駐村專家）。
+        doc_agent：追問上一份報告時，一定要交給的駐村專家（上一輪做報告的那位）。
+        save_file：存駐村專家回傳的檔案（例如報告 PDF），回傳檔案 id。
         """
         self.bus.claim(run_id, user_id)
         try:
-            env = remote.RemoteEnv(self.directory, self.llm, user_id) if self.directory else None
+            env = (
+                remote.RemoteEnv(self.directory, self.llm, user_id, docs=docs or [], save_file=save_file)
+                if self.directory else None
+            )
             with llm_user(user_id), painting(paint), remote.remote_calls(env):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
                 _MEMORIES.set(render_memories(memories) if memories else "")
                 _APPRAISAL.set("")
+                _DOCS.set(_DocNote(docs or [], fresh_docs, doc_agent))
                 return await self._run(run_id, message, traced, user_id, history or [], images or [], relook)
         finally:
             self.bus.release(run_id)
@@ -212,7 +236,22 @@ class Runner:
                 looked = await self._appraise(run_id, message, images, relook, history)
                 _APPRAISAL.set(looked.render())
 
-            plan = await make_plan(message, agents, self.llm, on_note=on_note, history=history, appraisal=_APPRAISAL.get())
+            note = _DOCS.get()
+            doc_agents = [a for a in agents if a.kind == "remote" and a.remote and a.remote.accepts]
+            documents = render_documents(note.docs, note.fresh, doc_agents) if note.docs else ""
+            plan = await make_plan(
+                message, agents, self.llm, on_note=on_note, history=history, appraisal=_APPRAISAL.get(), documents=documents,
+            )
+            if note.docs and (note.fresh or note.agent) and doc_agents and not any(
+                    s.agent in {a.id for a in doc_agents} for s in plan.steps):
+                # 這次附了文件（或在追問上一份報告），村長卻沒派給收文件的專家（弱模型常見）：補上這一步
+                why = "附了文件" if note.fresh else "追問上一份報告"
+                agent = next((a for a in doc_agents if a.id == note.agent), None) or next(
+                    (a for a in doc_agents if remote.files_for(a)), doc_agents[0])
+                plan = Plan(steps=[Step(id="s1", agent=agent.id, instruction=message)],
+                            source="llm" if plan.source == "direct" else plan.source,
+                            notes=plan.notes + [f"{why}：交給{agent.name}處理"])
+                await on_note(f"{why}：交給{agent.name}處理")
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:
@@ -293,6 +332,9 @@ class Runner:
         spec = self.registry.get(step.agent)
         await emit("agent.started", run_id=run_id, step_id=step.id, agent=step.agent, instruction=step.instruction)
         t0 = time.monotonic()
+        timeout = rules.step_timeout_s
+        if spec is not None and remote.files_for(spec):  # 要處理文件、產生報告：放寬時間上限
+            timeout = max(timeout, DOC_STEP_TIMEOUT_S)
         try:
             if spec is None:
                 raise LLMError(f"村民「{step.agent}」不存在")
@@ -306,11 +348,11 @@ class Runner:
                     on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
                     on_retry=on_retry,
                 ),
-                timeout=rules.step_timeout_s,
+                timeout=timeout,
             )
             r.status, r.error = "done", None
         except TimeoutError:
-            r.status, r.error = "error", f"逾時：超過 {rules.step_timeout_s} 秒沒有完成（可在「村規」調整）"
+            r.status, r.error = "error", f"逾時：超過 {timeout} 秒沒有完成（可在「村規」調整）"
         except LLMError as e:
             r.status, r.error = "error", str(e)
         r.elapsed_ms += int((time.monotonic() - t0) * 1000)
@@ -404,11 +446,21 @@ async def run_remote_agent(
     """駐村專家：用 A2A 把指示（＋前一步成果）交給對方，回答附上引用來源。對方自己處理檢索與 LLM。"""
     r.attempts += 1
     r.input = remote.render_message(instruction, context)  # 執行紀錄只記訊息內容；token、key 只在 header
-    text, data, warnings = await remote.call(spec, instruction, context, on_text=on_text)  # 支援的話邊收邊顯示
-    sources = remote.render_citations(data)
+    if files := remote.files_for(spec):
+        r.input += "\n\n附上的文件：" + "、".join(f.describe() for f in files)
+    reply, warnings = await remote.call(spec, instruction, context, on_text=on_text)  # 支援的話邊收邊顯示
+    sources = remote.render_citations(reply.data)
+    text = reply.text or "（沒有文字說明，請看附件）"
     r.output = f"{text}\n\n{sources}" if sources else text
-    r.model = f"{data['model']}（{spec.name}）" if data.get("model") else spec.name
+    r.model = f"{reply.data['model']}（{spec.name}）" if reply.data.get("model") else spec.name
     r.warnings += warnings
+    env = remote.REMOTE_ENV.get()
+    for f in reply.files:  # 對方回傳的檔案（例如報告 PDF）：存起來，回答附上下載連結
+        if env is None or env.save_file is None:
+            r.warnings.append(f"收到檔案「{f.name}」，但這裡沒辦法保存")
+            continue
+        file_id = await env.save_file(f.name, f.mime, f.data)
+        r.attachments.append(Attachment(kind="file", name=f.name, title=f.name, url=f"/api/files/{file_id}").to_dict())
     if on_text:
         await on_text(r.output)  # 最後補上資料來源
 

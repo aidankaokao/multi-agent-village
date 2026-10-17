@@ -199,6 +199,27 @@ class ChatImage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ChatFile(Base):
+    """問答的文件，只有本人拿得到；刪對話或帳號時一起刪。
+
+    kind=upload：使用者附的文件（xlsx / csv / txt / pdf），跟著對話保存；追問時再交給駐村專家（對方不存檔）。
+    kind=report：駐村專家回傳的檔案（例如文件彙整師的報告 PDF），expires_at 到了自動清掉（同畫作）。
+    """
+
+    __tablename__ = "chat_files"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="upload")
+    name: Mapped[str] = mapped_column(String(200))
+    mime: Mapped[str] = mapped_column(String(100))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    size: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Memory(Base):
     """長期記憶：關於使用者本人、跨對話有效的事（名字、偏好、事實）。由書記自動記錄或使用者手動新增。"""
 

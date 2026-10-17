@@ -213,6 +213,16 @@ LLM 只負責把請求整理成工具的參數（JSON schema），計算由程�
 
 ---
 
+## Phase 6R — 外接 agent：文件彙整師 ✅
+
+上傳 Excel / CSV / txt / PDF（最多 3 份）→ 彙整報告 PDF。詳細規劃與進度：[`extra-agents/report-maker/PLAN.md`](../extra-agents/report-maker/PLAN.md)
+
+- [x] R1：專家本體（讀檔、程式統計與分組小計、LLM 報告 JSON 與數字核對、WeasyPrint PDF、A2A 串流、測試網頁、容器）
+- [x] R2：村子 💬 📎 附文件（`chat_files`、只交給收文件的駐村專家、下載只有本人）
+- [x] R3：文件放進 A2A file part、收回報告 PDF（14 天）、進度顯示、追問時再交給同一位專家
+
+---
+
 ## 地圖互動 ✅
 
 - [x] 點村民開始問答：開新對話、輸入框填「@id 」（村長不加 @；系統角色自我介紹；外出中的駐村專家說外出中）

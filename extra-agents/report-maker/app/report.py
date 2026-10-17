@@ -99,14 +99,14 @@ class Report:
     generated_at: str = field(default_factory=lambda: datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"))
 
     def to_markdown(self) -> str:
-        """聊天視窗用的短版（完整內容在 PDF）。"""
-        lines = [f"**{self.title}**", "", self.summary.strip()]
+        """聊天視窗用的短版（完整內容在 PDF）。用純文字排版：呼叫端（例如村子）不一定會轉換 Markdown。"""
+        lines = [f"📑 {self.title}", "", self.summary.strip()]
         if self.conclusions:
-            lines += ["", "**結論**", *[f"- {c}" for c in self.conclusions]]
+            lines += ["", "結論：", *[f"・{c}" for c in self.conclusions]]
         if self.recommendations:
-            lines += ["", "**建議**", *[f"- {r}" for r in self.recommendations]]
+            lines += ["", "建議：", *[f"・{r}" for r in self.recommendations]]
         if self.failed:
-            lines += ["", "**沒有讀到的檔案**", *[f"- {f['error']}" for f in self.failed]]
+            lines += ["", "沒有讀到的檔案：", *[f"・{f['error']}" for f in self.failed]]
         if self.llm_error:
             lines += ["", f"（沒有用 LLM 整理：{self.llm_error}；報告只有程式統計的內容）"]
         lines += ["", "完整報告（含各檔重點與欄位統計）請下載 PDF。"]

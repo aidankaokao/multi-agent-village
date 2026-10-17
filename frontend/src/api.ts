@@ -153,15 +153,17 @@ export interface AgentInfo {
   skills: { id: string; description: string; examples: string[] }[];
   tags: string[];
   status?: ResidentStatus | null; // 駐村專家才有
+  accepts?: string[]; // 駐村專家收哪些文件（副檔名）
 }
 
 export const village = {
   agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
   /** images：data URL（前端已縮圖成 JPEG） */
-  chat: (message: string, conversation_id: string | null, images: string[] = []) =>
-    api<{ run_id: string; conversation_id: string; image_ids: string[] }>("/api/chat", {
+  /** files：文件（base64），只交給收文件的駐村專家 */
+  chat: (message: string, conversation_id: string | null, images: string[] = [], files: { name: string; data: string }[] = []) =>
+    api<{ run_id: string; conversation_id: string; image_ids: string[]; files: { id: string; name: string; size: number }[] }>("/api/chat", {
       method: "POST",
-      json: { message, conversation_id, images: images.map((data) => ({ data })) },
+      json: { message, conversation_id, images: images.map((data) => ({ data })), files: files.map(({ name, data }) => ({ name, data })) },
     }),
   cancel: (runId: string) => api<{ ok: boolean }>(`/api/chat/${runId}/cancel`, { method: "POST" }),
 };
@@ -292,7 +294,7 @@ export interface AgentSpec {
   "x-village": { sprite: string | null; home: [number, number] | null; keywords: string[] };
   kind: "prompt" | "tool" | "remote"; // remote = 駐村專家（外接的獨立 agent）
   tool?: { id: string; explain: boolean } | null; // 工具型村民：用哪個工具
-  remote?: { url: string; a2a_path: string; share_llm: boolean } | null; // 駐村專家的連線（token 另外加密保存）
+  remote?: { url: string; a2a_path: string; share_llm: boolean; accepts?: string[] } | null; // 駐村專家的連線（token 另外加密保存）；accepts：收哪些文件
   model: { tier: "large" | "small"; model_id: string | null; temperature: number | null; max_tokens: number };
   prompt: { system: string; user_template: string };
   validate: { must_not_be_empty: boolean; max_chars: number | null };
@@ -323,7 +325,7 @@ export interface TryResult {
 
 /** 工具產生的附件（目前是 SVG 圖表） */
 export interface Attachment {
-  kind: "svg" | "image"; // svg：data 是 SVG 原始碼；image：畫家的畫作，用 url 讀取（保存 14 天）
+  kind: "svg" | "image" | "file"; // svg：data 是 SVG 原始碼；image：畫家的畫作；file：駐村專家回傳的檔案（報告 PDF）。後兩者用 url 讀取（保存 14 天）
   name: string;
   data: string;
   title: string;
@@ -375,6 +377,7 @@ export interface ResidentPreview {
   online: boolean;
   health_error: string | null;
   wants_llm: boolean; // 對方需要呼叫端提供 LLM（例如台灣史專家）
+  accepts: string[]; // 收哪些文件（副檔名），例如文件彙整師
 }
 
 export interface Resident {
@@ -489,7 +492,13 @@ export interface MessageRow {
   content: string;
   run_id: string | null;
   status: "done" | "error" | "cancelled";
-  meta: { attachments?: Attachment[]; agents?: string[]; review?: boolean | null; images?: string[] } | null;
+  meta: {
+    attachments?: Attachment[];
+    agents?: string[];
+    review?: boolean | null;
+    images?: string[];
+    files?: { id: string; name: string; size: number }[];
+  } | null;
   created_at: string;
 }
 

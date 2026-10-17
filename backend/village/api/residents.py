@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from village.api.villagers import _changed, _get, parse_spec
 from village.core import remote
+from village.core.docfiles import accepts_from_card
 from village.core.registry import RESERVED_IDS
 from village.security.auth import require_admin
 from village.security.crypto import secret_hint
@@ -109,6 +110,7 @@ async def preview(body: PreviewBody) -> dict:
     return {
         "url": base, "card": card, "a2a_path": remote.a2a_path(card), "suggested_id": remote.suggest_id(card, base),
         "online": ok, "health_error": err, "wants_llm": bool(card.get("x-llm-headers")),
+        "accepts": accepts_from_card(card),
     }
 
 

@@ -56,7 +56,7 @@ async def test_compose_with_llm(monkeypatch, sales_xlsx):
     assert [k["value"] for k in rep.key_figures] == ["8,000 元"]
     assert any("對不上" in n for n in rep.notes)
     md = rep.to_markdown()
-    assert "**銷售彙整**" in md and "- 結論" in md
+    assert md.startswith("📑 銷售彙整") and "・結論" in md and "**" not in md
 
 
 async def test_compose_retries_then_falls_back(monkeypatch, sales_xlsx):

@@ -309,11 +309,11 @@ async def test_offline_resident_is_not_planned_and_errors_are_reported(village):
 
 
 def test_parse_reply_variants():
-    text, data = remote.parse_reply(REPLY)
-    assert text.startswith("霧社事件") and data["citations"][0]["n"] == 1
+    reply = remote.parse_reply(REPLY)
+    assert reply.text.startswith("霧社事件") and reply.data["citations"][0]["n"] == 1 and reply.files == []
     task = {"jsonrpc": "2.0", "id": 1, "result": {"kind": "task", "status": {"state": "completed"},
                                                     "artifacts": [{"parts": [{"kind": "text", "text": "任務結果"}]}]}}
-    assert remote.parse_reply(task)[0] == "任務結果"
+    assert remote.parse_reply(task).text == "任務結果"
     from village.llm.base import LLMError
 
     with pytest.raises(LLMError, match="回報錯誤"):

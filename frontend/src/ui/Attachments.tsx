@@ -1,12 +1,85 @@
 import { useState } from "react";
 import type { Attachment } from "../api";
+import { download, fmtSize, type DocChip } from "../chat/docs";
 import { Modal } from "./Modal";
 
-/** 工具產生的圖片：SVG 用 <img> 顯示（瀏覽器不會執行 img 裡的程式碼）；畫家的畫作用網址讀取。點圖放大、可以下載 */
+/** 工具 / 駐村專家產生的附件：檔案（報告 PDF）顯示成下載卡片，圖片另外排 */
 export function Attachments({ items }: { items?: Attachment[] }) {
+  if (!items?.length) return null;
+  const files = items.filter((a) => a.kind === "file");
+  const pictures = items.filter((a) => a.kind !== "file");
+  return (
+    <>
+      {files.length > 0 && <FileCards items={files} />}
+      {pictures.length > 0 && <Pictures items={pictures} />}
+    </>
+  );
+}
+
+/** 駐村專家回傳的檔案（例如文件彙整師的報告 PDF）：點一下下載；過期（14 天）就顯示已過期 */
+function FileCards({ items }: { items: Attachment[] }) {
+  const [state, setState] = useState<Record<number, string>>({});
+  return (
+    <div className="file-cards">
+      {items.map((a, i) => (
+        <div key={i} className="file-card">
+          <span className="file-icon">📄</span>
+          <span className="clamp">{a.name}</span>
+          <span style={{ flex: 1 }} />
+          {state[i] && state[i] !== "…" ? (
+            <span className="muted">{state[i]}</span>
+          ) : (
+            <button
+              type="button"
+              disabled={state[i] === "…"}
+              onClick={() => {
+                setState((s) => ({ ...s, [i]: "…" }));
+                download(a.url ?? "", a.name)
+                  .then(() => setState((s) => ({ ...s, [i]: "" })))
+                  .catch((e) => setState((s) => ({ ...s, [i]: (e as Error).message })));
+              }}
+            >
+              {state[i] === "…" ? "下載中…" : "⬇ 下載"}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 使用者附的文件：小標籤；有網址（從紀錄載入）就可以點來下載原檔 */
+export function DocChips({ files, onRemove }: { files?: DocChip[]; onRemove?: (i: number) => void }) {
+  const [error, setError] = useState("");
+  if (!files?.length) return null;
+  return (
+    <div className="doc-chips">
+      {files.map((f, i) => (
+        <span key={i} className="doc-chip" title={f.url ? "點一下下載原檔" : f.name}>
+          {f.url ? (
+            <button type="button" className="link" onClick={() => download(f.url!, f.name).catch((e) => setError((e as Error).message))}>
+              📄 {f.name}
+            </button>
+          ) : (
+            <span>📄 {f.name}</span>
+          )}
+          {f.size != null && <span className="muted">{fmtSize(f.size)}</span>}
+          {onRemove && (
+            <button type="button" className="link" title="移除" onClick={() => onRemove(i)}>
+              ✕
+            </button>
+          )}
+        </span>
+      ))}
+      {error && <span className="muted">{error}</span>}
+    </div>
+  );
+}
+
+/** 工具產生的圖片：SVG 用 <img> 顯示（瀏覽器不會執行 img 裡的程式碼）；畫家的畫作用網址讀取。點圖放大、可以下載 */
+function Pictures({ items }: { items: Attachment[] }) {
   const [zoom, setZoom] = useState<number | null>(null);
   const [expired, setExpired] = useState<Set<number>>(new Set());
-  if (!items?.length) return null;
   const url = (a: Attachment) => (a.kind === "image" ? (a.url ?? "") : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(a.data)}`);
   const gone = (i: number) => setExpired((s) => new Set(s).add(i));
   const big = zoom !== null ? items[zoom] : null;

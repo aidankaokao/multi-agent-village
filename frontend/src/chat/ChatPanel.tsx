@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ConversationRow } from "../api";
-import { Attachments, ImageStrip } from "../ui/Attachments";
+import { Attachments, DocChips, ImageStrip } from "../ui/Attachments";
+import { acceptedExts, docAgents, pickDocs, readDoc, type DocFile } from "./docs";
 import { imageFiles, prepareImage } from "./prepareImage";
 import { leafIds, type AppraisalView, type RunsState, type RunView, type StepView } from "./runs";
 
@@ -34,7 +35,7 @@ const EXAMPLES = [
 interface Props {
   runs: RunsState;
   agents: AgentInfo[];
-  onSend: (message: string, images: string[]) => Promise<void>;
+  onSend: (message: string, images: string[], docs: DocFile[]) => Promise<void>;
   vision: Vision;
   prefill?: { text: string; nonce: number } | null; // 點地圖上的村民：輸入框預先填好「@id 」
   onReset: () => void;
@@ -83,8 +84,12 @@ export function ChatPanel({
   const [error, setError] = useState("");
   const [images, setImages] = useState<string[]>([]); // 準備附上的圖（已縮圖的 data URL）
   const [preparing, setPreparing] = useState(false);
+  const [docs, setDocs] = useState<DocFile[]>([]); // 準備附上的文件（只交給收文件的駐村專家）
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const docInput = useRef<HTMLInputElement>(null);
+  const docExts = acceptedExts(agents);
+  const docHelpers = docAgents(agents).map((a) => a.name).join("、");
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 使用者往上捲去看舊內容時，串流不要把畫面拉回底部
   const names: Record<string, string> = { mayor: "村長", reviewer: "審核員", appraiser: "鑑定師", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
@@ -101,6 +106,31 @@ export function ChatPanel({
     : vision.maxImages === 0
       ? "村規目前不開放附圖"
       : `附圖（最多 ${vision.maxImages} 張；也可以直接貼上或拖曳進來）`;
+
+  const docHint = docExts.length
+    ? `附文件（${docExts.join("、")}，最多 3 份）：交給${docHelpers}整理`
+    : "附文件需要「在村」的文件彙整師這類駐村專家（管理員到村民頁邀請；外出中的也不行）";
+
+  const addDocs = async (files: File[]) => {
+    if (!files.length) return;
+    if (!docExts.length) return setError(docHint);
+    const { ok, error: why } = pickDocs(files, docs, docExts);
+    setError(why);
+    try {
+      const read = await Promise.all(ok.map(readDoc));
+      setDocs((xs) => [...xs, ...read]);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  /** 拖曳 / 貼上：圖片給鑑定師、其他檔案當文件 */
+  const addAny = (files: File[]) => {
+    const pics = files.filter((f) => f.type.startsWith("image/"));
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+    if (pics.length) addFiles(pics);
+    if (others.length) addDocs(others);
+  };
 
   const addFiles = async (files: File[]) => {
     if (!files.length) return;
@@ -121,14 +151,15 @@ export function ChatPanel({
 
   const send = async (message: string) => {
     const m = message.trim();
-    if ((!m && !images.length) || sending || preparing) return;
+    if ((!m && !images.length && !docs.length) || sending || preparing) return;
     setSending(true);
     setError("");
     stick.current = true;
     try {
-      await onSend(m, images);
+      await onSend(m, images, docs);
       setText("");
       setImages([]);
+      setDocs([]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -155,10 +186,16 @@ export function ChatPanel({
         if (!e.dataTransfer.files.length) return;
         e.preventDefault();
         setDragging(false);
-        addFiles(imageFiles(e.dataTransfer.files));
+        addAny([...e.dataTransfer.files]);
       }}
     >
-      {dragging && <div className="drop-hint">{vision.ready && vision.maxImages > 0 ? "放開就附上圖片" : attachHint}</div>}
+      {dragging && (
+        <div className="drop-hint">
+          {[vision.ready && vision.maxImages > 0 ? "圖片" : "", docExts.length ? `文件（${docExts.join("、")}）` : ""].filter(Boolean).join("或") ||
+            attachHint}
+          {(vision.ready && vision.maxImages > 0) || docExts.length ? "：放開就附上" : ""}
+        </div>
+      )}
       <div className="chat-bar">
         <button className="link conv-toggle" onClick={() => setListOpen(!listOpen)} title="對話紀錄">
           {listOpen ? "▾" : "▸"} 📂 {current ? current.title : "新對話"}
@@ -276,21 +313,24 @@ export function ChatPanel({
             {preparing && <span className="muted">縮圖中…</span>}
           </div>
         )}
+        {docs.length > 0 && <DocChips files={docs} onRemove={(i) => setDocs((xs) => xs.filter((_, j) => j !== i))} />}
         <textarea
           ref={input}
           rows={3}
           value={text}
           placeholder={
-            images.length
+            docs.length
+              ? "報告的重點方向，例如「著重各分店的比較」（留空 = 請彙整這些文件的重點）"
+              : images.length
               ? "問問關於這張圖的問題（留空 = 這張圖片裡有什麼？）"
               : "輸入問題，Enter 送出、Shift+Enter 換行；可用 @poet、@jester 直接指名"
           }
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
-            const files = imageFiles(e.clipboardData.items);
+            const files = [...e.clipboardData.files];
             if (files.length) {
               e.preventDefault();
-              addFiles(files);
+              addAny(files);
             }
           }}
           onKeyDown={(e) => {
@@ -321,7 +361,21 @@ export function ChatPanel({
           >
             🖼️
           </button>
-          <button type="submit" disabled={sending || preparing || (!text.trim() && !images.length)} style={{ flex: 1 }}>
+          <input
+            ref={docInput}
+            type="file"
+            accept={docExts.join(",")}
+            multiple
+            hidden
+            onChange={(e) => {
+              addDocs([...(e.target.files ?? [])]);
+              e.target.value = "";
+            }}
+          />
+          <button type="button" className="attach" title={docHint} disabled={!docExts.length} onClick={() => docInput.current?.click()}>
+            📎
+          </button>
+          <button type="submit" disabled={sending || preparing || (!text.trim() && !images.length && !docs.length)} style={{ flex: 1 }}>
             {sending ? "送出中…" : busy ? "送出（村民忙碌中）" : "送出"}
           </button>
           {busy && (
@@ -389,6 +443,7 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
     <div className="run">
       <div className="bubble user">
         {run.images && run.images.length > 0 && <ImageStrip urls={run.images} />}
+        <DocChips files={run.files} />
         {run.message}
       </div>
 
