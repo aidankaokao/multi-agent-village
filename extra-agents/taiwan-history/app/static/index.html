@@ -66,7 +66,7 @@
       </div>
       <div class="check"><input id="remember" type="checkbox"><label for="remember" style="margin:0">記住設定（用密碼加密後存在這個瀏覽器）</label></div>
       <div id="remember-box" hidden>
-        <label>加密用的密碼（至少 6 個字；忘記就只能重新填設定）</label>
+        <label id="remember-pw-label">加密用的密碼（至少 6 個字；忘記就只能重新填設定）</label>
         <input id="remember-pw" type="password" autocomplete="new-password">
       </div>
       <div class="row" style="margin-top:10px"><button id="save-btn" type="button">套用</button></div>
@@ -93,6 +93,7 @@
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = "th-settings-v1";
 let settings = { token: "", url: "", model: "", key: "", effort: "" };
+let unlockedPw = ""; // 解開記住的設定時用的密碼：再次套用時沿用它重新加密（只在這個分頁的記憶體裡）
 
 // ---------------------------------------------------------------- 加密保存（WebCrypto）
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -131,33 +132,45 @@ document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("cl
   if (b.dataset.preset === "openrouter") { $("llm-url").value = "https://openrouter.ai/api/v1"; }
   else { $("llm-url").value = "http://host.docker.internal:11434/v1"; $("llm-key").value = ""; $("llm-model").value ||= "qwen3.5:9b"; $("llm-effort").value = "none"; }
 }));
-$("remember").addEventListener("change", () => { $("remember-box").hidden = !$("remember").checked; });
+function syncRemember() {
+  $("remember-box").hidden = !$("remember").checked;
+  $("remember-pw-label").textContent = unlockedPw
+    ? "加密用的密碼（留空 = 沿用目前的密碼；要換密碼就填新的，至少 6 個字）"
+    : "加密用的密碼（至少 6 個字；忘記就只能重新填設定）";
+}
+$("remember").addEventListener("change", syncRemember);
 $("save-btn").addEventListener("click", async () => {
   settings = readForm();
   $("save-msg").className = "status ok";
   if ($("remember").checked) {
     if (!window.isSecureContext) { $("save-msg").className = "status bad"; $("save-msg").textContent = "瀏覽器的加密功能只能在 localhost 或 https 使用；請用 http://localhost:… 打開這個網頁"; return; }
-    const pw = $("remember-pw").value;
-    if (pw.length < 6) { $("save-msg").className = "status bad"; $("save-msg").textContent = "密碼至少 6 個字"; return; }
+    const pw = $("remember-pw").value || unlockedPw;
+    if (pw.length < 6) { $("save-msg").className = "status bad"; $("save-msg").textContent = "密碼至少 6 個字"; $("remember-pw").focus(); return; }
     localStorage.setItem(STORE_KEY, JSON.stringify(await seal(settings, pw)));
+    unlockedPw = pw;
     $("remember-pw").value = "";
+    syncRemember();
     $("save-msg").textContent = "已套用，並加密記住在這個瀏覽器。";
   } else {
     localStorage.removeItem(STORE_KEY);
+    unlockedPw = "";
     $("save-msg").textContent = "已套用（只在這個分頁，重新整理要重填）。";
   }
   showState();
 });
 $("unlock-btn").addEventListener("click", async () => {
   try {
-    settings = await unseal(storedBox(), $("unlock-pw").value);
+    const pw = $("unlock-pw").value;
+    settings = await unseal(storedBox(), pw);
+    unlockedPw = pw;
     fillForm(); showState(); $("unlock").hidden = true; $("unlock-pw").value = ""; $("remember").checked = true;
+    syncRemember();
     $("save-msg").className = "status ok"; $("save-msg").textContent = "已解開記住的設定。";
   } catch { $("unlock-msg").textContent = "密碼不對"; }
 });
 $("forget-btn").addEventListener("click", () => {
   if (!confirm("刪除這個瀏覽器記住的設定？")) return;
-  localStorage.removeItem(STORE_KEY); $("unlock").hidden = true; $("remember").checked = false;
+  localStorage.removeItem(STORE_KEY); unlockedPw = ""; $("unlock").hidden = true; $("remember").checked = false; syncRemember();
 });
 
 // ---------------------------------------------------------------- 呼叫 agent API
