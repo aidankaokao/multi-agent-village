@@ -271,7 +271,8 @@ class BaseAgent(Protocol):
 - 「允許把提問者的 LLM 設定交給它」（`share_llm`）預設關閉：打開才會把提問者的模型網址、模型、key 放進 X-LLM-* header
   （`LLMService.shareable`：large 分級第一個 OpenAI 相容模型；Anthropic 不相容）。
 - 派工：Runner 只把「在村」的駐村專家放進村長名冊（`RemoteDirectory.online_ids`）；`run_remote_agent` 用 A2A
-  `message/send` 送「指示＋前一步成果」，回覆的 text 是成果、data 的 citations 整理成「資料來源」附在後面。
+  送「指示＋前一步成果」：先試 `message/stream`（SSE，文字片段交給 DeltaEmitter，和村民一樣逐字顯示），
+  對方回 -32601 就改 `message/send` 並記住（`_NO_STREAM`，重啟後重試）。回覆的 text 是成果、data 的 citations 整理成「資料來源」附在後面。
   呼叫需要的目錄與提問者放 context variable `REMOTE_ENV`；token、key 只在 header，執行紀錄只記訊息內容。
 - 地圖：`/api/agents` 帶 status，外出中的駐村專家半透明並標「（外出中）」；`residents.status` 事件讓前端即時更新。
 

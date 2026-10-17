@@ -88,7 +88,7 @@ extra-agents/taiwan-history/
 - [x] 獨立部署：`Dockerfile`（非 root、corpus 打包進 image、索引在 volume `th-data`）、`docker-compose.yaml`
       （預設只綁 127.0.0.1:8100、連主機 Ollama）、`.env.example`、`./build.sh`（只 build）；啟動時自動補建索引
 - [x] 測試 14 個（含 token、A2A）；本機瀏覽器實測：加密保存（localStorage 只有密文）、錯誤密碼、解鎖、問答、引用跳轉
-- [ ] 使用者部署實測（README 的「部署」與「測試網頁」步驟）
+- [x] 使用者部署實測（README 的「部署」與「測試網頁」步驟）
 
 ### T4：接回村子（改的是村子這邊）
 外接的 agent 在村子裡叫「**駐村專家**」（和村子自己打造的「村民」區分）。
@@ -112,7 +112,12 @@ extra-agents/taiwan-history/
   - 對方沒用 LLM（llm_error）時提醒「可以打開共享開關」；401 提示檢查 token
   - 地圖：外出中半透明、名字加註「（外出中）」，狀態改變即時更新；派工時和村民一樣有工作與交接動畫
   - 實測：村子（開發模式）問「臺灣第一位民選總統是誰？」→ 村長派給台灣史專家 → 專家用共享的 qwen3.5 回答並附引用
-- [ ] 使用者部署實測
+- [x] 使用者部署實測（T4-A、T4-B）
+- [x] 串流：使用者發現駐村專家的回答一次跳出來、不像其他村民逐字出現
+  - 台灣史專家：LLM 改用串流（`chat_stream`，不支援串流的模型自動改一次拿完）；A2A 新增 `message/stream`（SSE：
+    Task → artifact-update 文字片段 → artifact-update 引用 data → status-update completed）；agent card `capabilities.streaming: true`
+  - 村子：呼叫駐村專家先試 `message/stream`、邊收邊顯示；對方回「不支援」（-32601）就改用 `message/send` 並記住；
+    對方直接回完整 JSON 也照收
 
 ### T5：進階（之後再說）
 - [ ] GraphRAG（人物、事件、地點的關係圖）或 agentic RAG（自己決定要查幾次、查什麼）

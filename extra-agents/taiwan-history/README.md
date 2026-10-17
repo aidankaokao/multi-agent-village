@@ -59,7 +59,7 @@ docker-compose up -d     # 部署 → http://localhost:8100
 |---|---|---|
 | GET | `/search?q=…&k=8` | 只檢索 |
 | POST | `/ask` | `{"question": "…", "top_k": 8}` → `{answer, citations, sources, model, llm_error, timings}` |
-| POST | `/a2a` | A2A JSON-RPC 2.0，`method: "message/send"`；回覆的 Message 有 text（回答）與 data（引用）兩個 part |
+| POST | `/a2a` | A2A JSON-RPC 2.0。`message/send`：回覆的 Message 有 text（回答）與 data（引用）兩個 part；`message/stream`：SSE 串流（Task → 文字片段 → 引用 → 完成） |
 
 回答用的 LLM 由呼叫端每次放在 header（agent 用完就丟，不保存）：
 
