@@ -2,8 +2,17 @@
 
 import anthropic
 
-from village.llm.base import ChatResult, LLMClient, LLMError, RemoteModel
+from village.llm.base import ChatMessage, ChatResult, LLMClient, LLMError, RemoteModel
 from village.security.redact import redact
+
+
+def _content(m: ChatMessage) -> str | list[dict]:
+    if not m.images:
+        return m.content
+    parts: list[dict] = [
+        {"type": "image", "source": {"type": "base64", "media_type": img.mime, "data": img.data}} for img in m.images
+    ]
+    return [*parts, {"type": "text", "text": m.content}]
 
 
 class AnthropicClient(LLMClient):
@@ -18,7 +27,7 @@ class AnthropicClient(LLMClient):
         kwargs: dict = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [{"role": m.role, "content": _content(m)} for m in messages],
         }
         if system:
             kwargs["system"] = system

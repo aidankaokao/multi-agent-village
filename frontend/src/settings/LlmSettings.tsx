@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
-import { llm, type Model, type Provider, type ProviderKind, type ReasoningEffort, type RemoteModel, type Tiers } from "../api";
+import { llm, type Model, type Provider, type ProviderKind, type ReasoningEffort, type RemoteModel, type Tiers, type VisionTestResult } from "../api";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
   ollama: "Ollama（本地）",
@@ -17,7 +17,7 @@ const FALLBACK_URL: Record<ProviderKind, string> = {
 export function LlmSettings() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
-  const [tiers, setTiers] = useState<Tiers>({ large: [], small: [] });
+  const [tiers, setTiers] = useState<Tiers>({ large: [], small: [], vision: [] });
   const [error, setError] = useState("");
   const [sub, setSub] = useState<Sub | null>(null);
 
@@ -295,7 +295,7 @@ const EFFORT_HELP =
   "思考型模型（qwen3.5、gpt-5、DeepSeek…）設 none 可大幅加速，也避免 token 全花在思考上。gpt-5 沒有 none 會自動改用 minimal；一定要思考的模型（GLM 5.3）會自動改用 low；不支援思考的模型（gpt-4o-mini）會自動略過。";
 
 function tierBadges(id: string, tiers: Tiers) {
-  return (["large", "small"] as const)
+  return (["large", "small", "vision"] as const)
     .filter((t) => tiers[t].includes(id))
     .map((t) => `${t} #${tiers[t].indexOf(id) + 1}`);
 }
@@ -331,6 +331,7 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
                   {b}
                 </span>
               ))}
+              {m.vision_verified_at && <span className="tag">👁️ 可看圖</span>}
             </div>
             <div className="muted">
               {m.provider_name}・思考：{m.reasoning_effort ?? "預設"}
@@ -377,6 +378,7 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
             <input type="checkbox" checked={current.enabled} onChange={(e) => run(() => llm.updateModel(current.id, { enabled: e.target.checked }))} />
             啟用
           </label>
+          <VisionTest key={current.id} model={current} run={run} />
           <div className="row modal-foot">
             <button
               className="danger"
@@ -391,7 +393,68 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
   );
 }
 
+const COLOR_DOT: Record<string, string> = { 紅: "#dc2828", 藍: "#285adc", 綠: "#1e963c", 紫: "#8c3cbe" };
+
+/** 看圖測驗：當場出一張答案已知的圖（四位數字＋彩色圖形），答對才算真的看得到圖 */
+function VisionTest({ model, run }: { model: Model; run: Run }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<VisionTestResult | string | null>(null);
+
+  const test = async () => {
+    setBusy(true);
+    setResult(null);
+    await run(async () => {
+      try {
+        setResult(await llm.visionTest(model.id));
+      } catch (e) {
+        setResult((e as Error).message);
+      }
+    });
+    setBusy(false);
+  };
+
+  return (
+    <div className="field">
+      <span className="field-label">看圖測驗</span>
+      <div className="row">
+        <span className={model.vision_verified_at ? "" : "muted"} style={{ flex: 1 }}>
+          {model.vision_verified_at ? `👁️ 通過（${new Date(model.vision_verified_at).toLocaleString("zh-TW")}）` : "還沒通過：不能放進 vision 分級"}
+        </span>
+        <button type="button" disabled={busy} onClick={test}>
+          {busy ? "測驗中…" : model.vision_verified_at ? "重新測驗" : "開始測驗"}
+        </button>
+      </div>
+      <span className="hint">
+        給模型看一張當場畫的圖，請它說出圖上的四位數字和圖形顏色。兩個都對才算通過（有些模型收到圖片不會報錯，而是忽略圖片亂答）。
+        會用掉一次這個模型的呼叫費用。
+      </span>
+      {typeof result === "string" && <p className="error">{result}</p>}
+      {result && typeof result !== "string" && (
+        <div className={`card vision-result ${result.passed ? "ok" : "fail"}`}>
+          <img src={result.image} alt="測驗圖" />
+          <div>
+            <strong>{result.passed ? "✅ 通過" : "❌ 沒通過"}</strong>
+            <div className="muted">
+              正確答案：{result.expected_number}，
+              <span className="color-dot" style={{ background: COLOR_DOT[result.expected_color] }} />
+              {result.expected_color}色
+            </div>
+            <div className="clamp">模型回答：{result.answer}</div>
+            <div className="hint">{result.reason}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- tiers
+
+const TIER_LABEL = {
+  large: "large（村長、工匠、困難任務）",
+  small: "small（村民日常、備援）",
+  vision: "👁️ vision（鑑定師看圖）",
+} as const;
 
 function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tiers; run: Run; goto: (s: Sub) => void }) {
   const [draft, setDraft] = useState<Tiers>(tiers);
@@ -423,31 +486,46 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
     <section>
       <p className="hint">村長、工匠用 large；村民依自己的設定用 large 或 small。排在前面的優先使用，失敗依序往下；兩級互為備援。</p>
       <div className="tiers">
-        {(["large", "small"] as const).map((tier) => (
-          <div key={tier} className="card">
-            <strong>{tier === "large" ? "large（村長、工匠、困難任務）" : "small（村民日常、備援）"}</strong>
-            <ol>
-              {draft[tier].map((id, i) => (
-                <li key={id}>
-                  <code className={byId[id]?.enabled === false ? "muted" : ""}>{byId[id]?.model ?? id}</code>
-                  <button className="link" onClick={() => move(tier, i, -1)}>↑</button>
-                  <button className="link" onClick={() => move(tier, i, 1)}>↓</button>
-                  <button className="link danger" onClick={() => setDraft((t) => ({ ...t, [tier]: t[tier].filter((x) => x !== id) }))}>✕</button>
-                </li>
-              ))}
-            </ol>
-            <select value="" onChange={(e) => e.target.value && setDraft((t) => ({ ...t, [tier]: [...t[tier], e.target.value] }))}>
-              <option value="">＋加入模型…</option>
-              {models
-                .filter((m) => !draft[tier].includes(m.id))
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.model}（{m.provider_name}）
-                  </option>
+        {(["large", "small", "vision"] as const).map((tier) => {
+          const pool = tier === "vision" ? models.filter((m) => m.vision_verified_at) : models;
+          const untested = tier === "vision" ? models.filter((m) => !m.vision_verified_at).length : 0;
+          return (
+            <div key={tier} className={`card ${tier === "vision" ? "tier-vision" : ""}`}>
+              <strong>{TIER_LABEL[tier]}</strong>
+              {tier === "vision" && <span className="hint">鑑定師看圖專用：村長、村民、審核員、書記都不會用到它；也不和 large / small 互相備援。</span>}
+              <ol>
+                {draft[tier].map((id, i) => (
+                  <li key={id}>
+                    <code className={byId[id]?.enabled === false ? "muted" : ""}>{byId[id]?.model ?? id}</code>
+                    {tier === "vision" && byId[id] && !byId[id].vision_verified_at && <span className="tag warn">測驗沒過，會略過</span>}
+                    <button className="link" onClick={() => move(tier, i, -1)}>↑</button>
+                    <button className="link" onClick={() => move(tier, i, 1)}>↓</button>
+                    <button className="link danger" onClick={() => setDraft((t) => ({ ...t, [tier]: t[tier].filter((x) => x !== id) }))}>✕</button>
+                  </li>
                 ))}
-            </select>
-          </div>
-        ))}
+              </ol>
+              <select value="" onChange={(e) => e.target.value && setDraft((t) => ({ ...t, [tier]: [...t[tier], e.target.value] }))}>
+                <option value="">{tier === "vision" && pool.length === 0 ? "（還沒有通過看圖測驗的模型）" : "＋加入模型…"}</option>
+                {pool
+                  .filter((m) => !draft[tier].includes(m.id))
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.model}（{m.provider_name}）
+                    </option>
+                  ))}
+              </select>
+              {tier === "vision" && untested > 0 && (
+                <span className="hint">
+                  只有通過看圖測驗的模型能加入。到「
+                  <button className="link" onClick={() => goto("models")}>
+                    模型
+                  </button>
+                  」按「設定」→「開始測驗」（gpt-4o-mini、gpt-5、Gemini、Claude、Qwen VL 這類模型通常看得到圖）。
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
       <div className="row">
         <button disabled={!dirty} onClick={() => run(() => llm.saveTiers(draft))}>
@@ -474,6 +552,7 @@ function TrySection({ models }: { models: Model[] }) {
         <select value={target} onChange={(e) => setTarget(e.target.value)}>
           <option value="tier:large">tier: large</option>
           <option value="tier:small">tier: small</option>
+          <option value="tier:vision">tier: vision</option>
           {models.map((m) => (
             <option key={m.id} value={m.id}>
               {m.model}

@@ -9,10 +9,11 @@
 ## 目前進度
 
 Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
-帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0005。
+帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0006。
 
-**下一個話題**：使用者想討論「視覺模型（看圖）」與「生圖模型（OpenRouter 或其他雲端）」能不能做、怎麼做。
-Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
+**進行中：Phase 5V 視覺模型**（`docs/ROADMAP.md`）。A 完成（訊息帶圖、`vision` 分級、看圖測驗）；
+接著 B（💬 附圖上傳與存放）、C（系統角色「鑑定師」看圖，追問時重看原圖，圖片跟著對話保存）。
+生圖模型等視覺做完再討論。Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
 
 ## 使用者偏好（重要）
 
@@ -32,7 +33,9 @@ Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
   JSON 輸出被截斷時換下一個模型；模型取消勾選「支援 JSON schema」= 不送約束照樣使用。
 - 規劃（LLM）與執行（程式碼）分開：村長只產生 Plan JSON（`steps`、`use`，`"prev"` = 上一輪的回答），Executor 負責執行。
 - 系統角色（保留名稱，不會被派去做問答）：`mayor` 村長、`craftsman` 工匠（`core/workshop.py`，對話打造村民）、
-  `reviewer` 審核員（`core/reviewer.py`）、`scribe` 書記（`core/scribe.py`，長期記憶）。
+  `reviewer` 審核員（`core/reviewer.py`）、`scribe` 書記（`core/scribe.py`，長期記憶）；規劃中：鑑定師（看圖）。
+- 視覺模型自成 `vision` 分級（`tier:vision`），不和 large / small 互相備援；只有通過看圖測驗（`llm/vision_test.py`，
+  `llm_models.vision_verified_at`）的模型會被用到。一般 LLM 流程不可以用到視覺模型。
 - 村民類型：對話型（prompt）與工具型（tool，工具在 `backend/village/tools/`；LLM 只整理參數，計算交給程式，並有退路）。
   年份 / 今天日期這類 LLM 不知道的事一律交給程式決定。
 - 驗證 / 審核 / 重試放在 harness 層，不寫進個別 agent。全域行為是「村規」（`settings` 表，「村規」分頁）。

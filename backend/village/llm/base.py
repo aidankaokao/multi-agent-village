@@ -23,9 +23,22 @@ class LLMError(Exception):
 
 
 @dataclass
+class ImagePart:
+    """附在訊息上的圖片（只有視覺模型看得懂）。data 是 base64（不含 data: 前綴）。"""
+
+    mime: str
+    data: str
+
+    @property
+    def data_url(self) -> str:
+        return f"data:{self.mime};base64,{self.data}"
+
+
+@dataclass
 class ChatMessage:
     role: Literal["user", "assistant"]
     content: str
+    images: list[ImagePart] = field(default_factory=list)
 
 
 @dataclass

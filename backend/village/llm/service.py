@@ -40,7 +40,10 @@ def llm_user(user_id: str | None) -> Iterator[None]:
     finally:
         LLM_USER.reset(token)
 
-TIERS = ("large", "small")
+TIERS = ("large", "small")  # 一般分級：村長、村民、審核員、書記，互為備援
+VISION = "vision"  # 視覺分級：只給鑑定師看圖，不和一般分級互相備援
+ALL_TIERS = (*TIERS, VISION)
+NO_VISION = "你還沒有設定視覺模型：請到「LLM 設定」對模型做看圖測驗，通過後加入 vision 分級"
 
 ClientFactory = Callable[[str, str | None, str | None], LLMClient]
 
@@ -82,11 +85,14 @@ class LLMService:
             return list(rows.scalars())
 
     async def candidates(self, target: str, user_id: str) -> list[LlmModel]:
-        """target：'tier:large' / 'tier:small' / 模型 id。
+        """target：'tier:large' / 'tier:small' / 'tier:vision' / 模型 id。
 
         兩級互為備援：large 失敗退到 small（弱模型總比沒有好）；small 沒設定或失敗則用 large。
+        vision 自成一級：只用通過看圖測驗的模型，沒有就是沒有（一般模型看不到圖，備援也沒用）。
         """
-        if target.startswith("tier:"):
+        if target == f"tier:{VISION}":
+            models = [m for m in await self.tier_models(VISION, user_id) if m.vision_verified_at is not None]
+        elif target.startswith("tier:"):
             tier = target.removeprefix("tier:")
             other = "small" if tier == "large" else "large"
             models = await self.tier_models(tier, user_id)
@@ -99,6 +105,9 @@ class LLMService:
 
     async def has_models(self, user_id: str) -> bool:
         return bool(await self.candidates("tier:large", user_id))
+
+    async def has_vision(self, user_id: str) -> bool:
+        return bool(await self.candidates(f"tier:{VISION}", user_id))
 
     async def chat(
         self,
@@ -120,7 +129,7 @@ class LLMService:
         if not models and fallback:
             models = await self.candidates(fallback, user_id)
         if not models:
-            raise NoModelError(NOT_CONFIGURED)
+            raise NoModelError(NO_VISION if target == f"tier:{VISION}" else NOT_CONFIGURED)
         errors: list[str] = []
         for m in models:
             call_kw = dict(kw)

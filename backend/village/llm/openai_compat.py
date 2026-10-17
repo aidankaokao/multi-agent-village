@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from village.llm.base import ChatResult, LLMClient, LLMError, RemoteModel
+from village.llm.base import ChatMessage, ChatResult, LLMClient, LLMError, RemoteModel
 from village.security.redact import redact
 
 # 各家「OpenAI 相容」API 支援的參數不一樣（例如 OpenAI 的 gpt-5 / o 系列不收 max_tokens 與 temperature）。
@@ -98,6 +98,14 @@ def _usage(u) -> dict:
     return {"input_tokens": u.get("prompt_tokens") or 0, "output_tokens": u.get("completion_tokens") or 0}
 
 
+def _content(m: ChatMessage) -> str | list[dict]:
+    """有圖片時改用多段內容（OpenAI / OpenRouter / Ollama 都收這個格式）；圖片放在文字前面。"""
+    if not m.images:
+        return m.content
+    parts: list[dict] = [{"type": "image_url", "image_url": {"url": img.data_url}} for img in m.images]
+    return [*parts, {"type": "text", "text": m.content}]
+
+
 class OpenAICompatClient(LLMClient):
     def __init__(self, base_url: str, api_key: str | None, timeout: float = 120.0):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -118,7 +126,7 @@ class OpenAICompatClient(LLMClient):
         reasoning_effort=None, on_delta=None,
     ):
         msgs = [{"role": "system", "content": system}] if system else []
-        msgs += [{"role": m.role, "content": m.content} for m in messages]
+        msgs += [{"role": m.role, "content": _content(m)} for m in messages]
         body: dict = {"model": model, "messages": msgs, "max_tokens": max_tokens}
         if temperature is not None:
             body["temperature"] = temperature

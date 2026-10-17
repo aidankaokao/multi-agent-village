@@ -57,6 +57,8 @@ class LlmModel(Base):
     context_window: Mapped[int | None] = mapped_column(Integer)
     # 思考型模型的思考強度：None=provider 預設；none/low/medium/high。本地小模型設 none 可大幅加速
     reasoning_effort: Mapped[str | None] = mapped_column(String(16))
+    # 看圖測驗通過的時間；None = 沒測過或沒通過。只有通過的模型能放進 vision 分級（鑑定師專用）
+    vision_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

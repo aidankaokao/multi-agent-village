@@ -239,14 +239,25 @@ class BaseAgent(Protocol):
 3. 勾選要註冊的模型，可設顯示名稱、是否支援 JSON schema 輸出、context 長度
 4. 在「模型分級」把模型拖進 `large` / `small`，排出備援順序
 5. 村民設定裡選 `small` / `large` 分級，也可以指定某個模型（只對指定的人有效，其他人改用分級）
+6. 視覺模型：在模型設定按「看圖測驗」，通過後才能放進 `vision` 分級（鑑定師看圖專用）
+
+#### 視覺模型（vision 分級）
+
+- `ChatMessage.images`（`ImagePart`：mime + base64）。OpenAI 相容送多段 `content`（`image_url` data URL），
+  Anthropic 送 `image` block；沒圖片的訊息維持純文字。
+- `vision` 分級自成一級：`tier:vision` 只取 vision 分級裡**通過看圖測驗**的模型，不借用 large / small；
+  large / small 也不會用到 vision 分級。沒有可用模型時錯誤訊息提醒去做測驗。
+- 看圖測驗（`llm/vision_test.py`）：純 Python 畫 PNG（隨機四位數字＋紅藍綠紫其中一色的圖形），
+  數字與顏色都答對才通過，記在 `llm_models.vision_verified_at`；沒通過就清掉（vision 分級會略過它）。
+  原因：有些模型收到圖片不會報錯，而是忽略圖片亂答。
 
 #### 資料表
 
 | 表 | 主要欄位 |
 |---|---|
 | `llm_providers` | id, **user_id**, name（同一人不可重複）, kind, base_url, `api_key_ct`, `api_key_nonce`, `key_version`, `api_key_hint`(如 `sk-…a1b2`), enabled, created_at, updated_at |
-| `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, enabled |
-| `model_tiers` | **user_id**, tier(`large`/`small`), position, model_id |
+| `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, reasoning_effort, vision_verified_at, enabled |
+| `model_tiers` | **user_id**, tier(`large`/`small`/`vision`), position, model_id |
 
 #### 加密設計（信封加密的簡化版）
 

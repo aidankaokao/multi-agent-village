@@ -64,6 +64,7 @@ export interface Model {
   supports_json_schema: boolean;
   context_window: number | null;
   reasoning_effort: ReasoningEffort | null;
+  vision_verified_at: string | null; // 看圖測驗通過的時間
   enabled: boolean;
 }
 
@@ -72,6 +73,17 @@ export type ReasoningEffort = "none" | "low" | "medium" | "high";
 export interface Tiers {
   large: string[];
   small: string[];
+  vision: string[]; // 鑑定師看圖專用，不和 large / small 互相備援
+}
+
+export interface VisionTestResult {
+  passed: boolean;
+  reason: string;
+  answer: string;
+  expected_number: string;
+  expected_color: string;
+  image: string;
+  model: Model;
 }
 
 export const llm = {
@@ -91,6 +103,7 @@ export const llm = {
   deleteModel: (id: string) => api<void>(`/api/llm/models/${id}`, { method: "DELETE" }),
   tiers: () => api<Tiers>("/api/llm/tiers"),
   saveTiers: (t: Tiers) => api<Tiers>("/api/llm/tiers", { method: "PUT", json: t }),
+  visionTest: (id: string) => api<VisionTestResult>(`/api/llm/models/${id}/vision-test`, { method: "POST" }),
   tryModel: (target: string, prompt: string) =>
     api<{ text: string; model: string }>("/api/llm/try", { method: "POST", json: { target, prompt } }),
 };

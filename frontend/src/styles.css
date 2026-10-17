@@ -442,6 +442,39 @@ td {
   font-size: 12px;
 }
 
+.tiers .tier-vision {
+  grid-column: 1 / -1;
+  border-left: 3px solid var(--accent);
+}
+
+.vision-result {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border-left: 3px solid var(--danger);
+}
+
+.vision-result.ok {
+  border-left-color: var(--ok);
+}
+
+.vision-result img {
+  width: 180px;
+  max-width: 45%;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  flex: none;
+}
+
+.color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin: 0 3px;
+  vertical-align: middle;
+}
+
 .remote-list {
   list-style: none;
   margin: 0;

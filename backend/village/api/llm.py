@@ -1,11 +1,11 @@
-"""LLM 設定 API：provider / 模型註冊、模型分級、試打。
+"""LLM 設定 API：provider / 模型註冊、模型分級、試打、看圖測驗。
 
 每個帳號各自管理自己的 LLM（自己的 API key 與額度），只看得到、改得到自己的；
 用別人的 id 一律當作不存在（404），不透露是否存在。
 API key 只寫不讀：回應只有 has_api_key 與 api_key_hint。
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, SecretStr
@@ -14,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, LLMError, ProviderKind, ReasoningEffort
-from village.llm.service import TIERS, LLMService, llm_user
+from village.llm import vision_test
+from village.llm.service import ALL_TIERS, VISION, LLMService, llm_user
 from village.security.auth import CurrentUser, require_user
 from village.security.crypto import SecretBox, secret_hint
 from village.store.models import LlmModel, LlmProvider, ModelTier, new_id
@@ -100,12 +101,24 @@ class ModelOut(BaseModel):
     supports_json_schema: bool
     context_window: int | None
     reasoning_effort: str | None
+    vision_verified_at: datetime | None
     enabled: bool
 
 
 class TiersBody(BaseModel):
     large: list[str] = []
     small: list[str] = []
+    vision: list[str] = []  # 只能放通過看圖測驗的模型
+
+
+class VisionTestOut(BaseModel):
+    passed: bool
+    reason: str
+    answer: str
+    expected_number: str
+    expected_color: str
+    image: str  # data URL，給畫面顯示測驗圖
+    model: ModelOut
 
 
 class TryBody(BaseModel):
@@ -167,6 +180,7 @@ def _model_out(m: LlmModel) -> ModelOut:
         supports_json_schema=m.supports_json_schema,
         context_window=m.context_window,
         reasoning_effort=m.reasoning_effort,
+        vision_verified_at=m.vision_verified_at,
         enabled=m.enabled,
     )
 
@@ -308,7 +322,7 @@ async def get_tiers(request: Request, me: CurrentUser = Me):
         rows = await s.execute(
             select(ModelTier).where(ModelTier.user_id == me.id).order_by(ModelTier.tier, ModelTier.position)
         )
-        out: dict[str, list[str]] = {t: [] for t in TIERS}
+        out: dict[str, list[str]] = {t: [] for t in ALL_TIERS}
         for t in rows.scalars():
             out.setdefault(t.tier, []).append(t.model_id)
         return TiersBody(**out)
@@ -317,14 +331,17 @@ async def get_tiers(request: Request, me: CurrentUser = Me):
 @router.put("/tiers", response_model=TiersBody)
 async def put_tiers(body: TiersBody, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        ids = set(body.large) | set(body.small)
-        found = set((await s.execute(
-            select(LlmModel.id).join(LlmProvider).where(LlmModel.id.in_(ids), LlmProvider.user_id == me.id)
-        )).scalars())
-        if missing := ids - found:
+        ids = set(body.large) | set(body.small) | set(body.vision)
+        rows = (await s.execute(
+            select(LlmModel).join(LlmProvider).where(LlmModel.id.in_(ids), LlmProvider.user_id == me.id)
+        )).scalars()
+        found = {m.id: m for m in rows}
+        if missing := ids - set(found):
             raise HTTPException(422, f"unknown model ids: {sorted(missing)}")
+        if unverified := [found[i].model for i in body.vision if found[i].vision_verified_at is None]:
+            raise HTTPException(422, f"還沒通過看圖測驗，不能放進 vision 分級：{', '.join(unverified)}")
         await s.execute(delete(ModelTier).where(ModelTier.user_id == me.id))
-        for tier in TIERS:
+        for tier in ALL_TIERS:
             for i, mid in enumerate(dict.fromkeys(getattr(body, tier))):
                 s.add(ModelTier(user_id=me.id, tier=tier, position=i, model_id=mid))
         await s.commit()
@@ -342,3 +359,33 @@ async def try_model(body: TryBody, request: Request, me: CurrentUser = Me):
     except LLMError as e:
         raise HTTPException(502, str(e)) from None
     return TryOut(text=r.text, model=r.model)
+
+
+@router.post("/models/{model_id}/vision-test", response_model=VisionTestOut)
+async def vision_test_model(model_id: str, request: Request, me: CurrentUser = Me):
+    """看圖測驗：通過就記下時間（可以放進 vision 分級），沒通過就清掉（vision 分級會略過它）。"""
+    async with _sm(request)() as s:
+        m = await _own_model(s, model_id, me)
+        if not (m.enabled and m.provider.enabled):
+            raise HTTPException(409, "這個模型（或它的供應商）已停用，先啟用再測驗")
+    quiz = vision_test.make_quiz()
+    try:
+        with llm_user(me.id):
+            r = await _llm(request).chat(
+                model_id, [ChatMessage("user", vision_test.PROMPT, images=[quiz.image])], max_tokens=1024, temperature=0
+            )
+        answer = r.text.strip()
+        result = vision_test.grade(quiz, answer)
+    except LLMError as e:
+        # 不收圖片的模型通常會在這裡報錯（400），也算沒通過
+        answer = f"（呼叫失敗）{e}"
+        result = vision_test.QuizResult(False, False, False, "模型回報錯誤：可能不支援圖片輸入")
+    async with _sm(request)() as s:
+        m = await _own_model(s, model_id, me)
+        m.vision_verified_at = datetime.now(UTC) if result.passed else None
+        await s.commit()
+        out = _model_out(m)
+    return VisionTestOut(
+        passed=result.passed, reason=result.reason, answer=answer, expected_number=quiz.number,
+        expected_color=quiz.color, image=quiz.image.data_url, model=out,
+    )
