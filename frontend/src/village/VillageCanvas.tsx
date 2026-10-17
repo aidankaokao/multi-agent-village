@@ -5,16 +5,28 @@ import { MAP_H, MAP_W, TILE, VillageScene, type SpriteManifest, type VillagerInf
 
 export interface VillageHandle {
   dispatch(e: VillageEvent): void;
+  say(id: string, text: string): void; // 讓某位村民冒一句話
 }
 
-export const VillageCanvas = forwardRef<VillageHandle, { villagers: VillagerInfo[] }>(function VillageCanvas({ villagers }, ref) {
+interface Props {
+  villagers: VillagerInfo[];
+  onVillagerClick?: (id: string) => void;
+}
+
+export const VillageCanvas = forwardRef<VillageHandle, Props>(function VillageCanvas({ villagers, onVillagerClick }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<VillageScene | null>(null);
 
   const latest = useRef(villagers);
   latest.current = villagers;
+  const clickRef = useRef(onVillagerClick);
+  clickRef.current = onVillagerClick;
 
-  useImperativeHandle(ref, () => ({ dispatch: (e) => scene.current?.handleEvent(e) }), []);
+  useImperativeHandle(
+    ref,
+    () => ({ dispatch: (e) => scene.current?.handleEvent(e), say: (id, text) => scene.current?.say(id, text) }),
+    [],
+  );
 
   useEffect(() => {
     scene.current?.syncVillagers(villagers);
@@ -28,6 +40,8 @@ export const VillageCanvas = forwardRef<VillageHandle, { villagers: VillagerInfo
       .then((manifest: SpriteManifest) => {
         if (cancelled || !host.current) return;
         scene.current = new VillageScene(manifest);
+        scene.current.onVillagerClick = (id) => clickRef.current?.(id);
+        if (import.meta.env.DEV) (window as unknown as { __village?: VillageScene }).__village = scene.current; // e2e 測試用
         scene.current.syncVillagers(latest.current, false);
         game = new Phaser.Game({
           type: Phaser.AUTO,

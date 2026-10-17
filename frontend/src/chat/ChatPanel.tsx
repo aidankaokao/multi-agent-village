@@ -36,6 +36,7 @@ interface Props {
   agents: AgentInfo[];
   onSend: (message: string, images: string[]) => Promise<void>;
   vision: Vision;
+  prefill?: { text: string; nonce: number } | null; // 點地圖上的村民：輸入框預先填好「@id 」
   onReset: () => void;
   onCancel: (runId: string) => Promise<void>;
   onOpenTrace: (runId: string) => void;
@@ -52,6 +53,7 @@ export function ChatPanel({
   agents,
   onSend,
   vision,
+  prefill,
   onReset,
   onCancel,
   onOpenTrace,
@@ -65,6 +67,18 @@ export function ChatPanel({
   const [listOpen, setListOpen] = useState(false);
   const current = conversations.find((c) => c.id === currentConversation);
   const [text, setText] = useState("");
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!prefill) return;
+    setText(prefill.text);
+    // 問答視窗剛打開時還沒顯示，等下一個畫面再把游標放到最後
+    requestAnimationFrame(() => {
+      const el = input.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(prefill.text.length, prefill.text.length);
+    });
+  }, [prefill]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [images, setImages] = useState<string[]>([]); // 準備附上的圖（已縮圖的 data URL）
@@ -263,6 +277,7 @@ export function ChatPanel({
           </div>
         )}
         <textarea
+          ref={input}
           rows={3}
           value={text}
           placeholder={

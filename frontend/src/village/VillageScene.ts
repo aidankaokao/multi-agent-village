@@ -27,6 +27,8 @@ export interface VillagerInfo {
   sprite: string | null;
   home: [number, number] | null;
   away?: boolean; // 駐村專家連不上（外出中）：半透明、名字後面標示
+  lines?: string[]; // 閒著時偶爾冒出的短句（從名片產生，10 個字左右）
+  skill?: string; // 一句話的專長（村民互動時別人會提到），例如「寫詩」
 }
 
 // ---------------------------------------------------------------- 地圖裝飾與障礙物
@@ -117,15 +119,15 @@ function pathBlocked(ax: number, ay: number, bx: number, by: number): boolean {
   return false;
 }
 
-export const MAYOR: VillagerInfo = { id: "mayor", name: "村長", sprite: "mayor", home: [15, 9] };
+export const MAYOR: VillagerInfo = { id: "mayor", name: "村長", sprite: "mayor", home: [15, 9], lines: ["有問題儘管問！", "我來分派工作", "點我開始問答"], skill: "分派工作" };
 /** 工匠：在「村民 → 用對話建立」幫忙打造村民，不接問答任務 */
-export const CRAFTSMAN: VillagerInfo = { id: "craftsman", name: "工匠", sprite: "craftsman", home: [26, 16] };
+export const CRAFTSMAN: VillagerInfo = { id: "craftsman", name: "工匠", sprite: "craftsman", home: [26, 16], lines: ["想要新村民嗎？", "我會打造村民", "敲敲打打～"], skill: "打造村民" };
 /** 審核員：最終答案送出前檢查（可在「村規」關閉），事件的 agent 是 reviewer */
-export const REVIEWER: VillagerInfo = { id: "reviewer", name: "審核員", sprite: "auditor", home: [10, 12] };
+export const REVIEWER: VillagerInfo = { id: "reviewer", name: "審核員", sprite: "auditor", home: [10, 12], lines: ["答案我會把關", "仔細檢查中…"], skill: "檢查答案" };
 /** 書記：問答後在背景記下使用者的長期記憶，事件的 agent 是 scribe */
-export const SCRIBE: VillagerInfo = { id: "scribe", name: "書記", sprite: "scribe", home: [13, 15] };
+export const SCRIBE: VillagerInfo = { id: "scribe", name: "書記", sprite: "scribe", home: [13, 15], lines: ["我會記住你說的", "記下來了～"], skill: "記事情" };
 /** 鑑定師：使用者附圖時先看圖，把內容寫成文字交給村長，事件的 agent 是 appraiser */
-export const APPRAISER: VillagerInfo = { id: "appraiser", name: "鑑定師", sprite: "appraiser", home: [19, 12] };
+export const APPRAISER: VillagerInfo = { id: "appraiser", name: "鑑定師", sprite: "appraiser", home: [19, 12], lines: ["有圖給我看看", "我很會看圖喔"], skill: "看圖" };
 
 class Villager {
   sprite: Phaser.GameObjects.Sprite;
@@ -138,13 +140,20 @@ class Villager {
   private bubbleTimer?: Phaser.Time.TimerEvent;
 
   away = false;
+  chatting = false; // 正在和別的村民聊天
+  lines: string[] = [];
+  skill = "";
+  private speech?: Phaser.GameObjects.Text;
+  private speechTimer?: Phaser.Time.TimerEvent;
+  private chatTimers: Phaser.Time.TimerEvent[] = [];
 
   constructor(
     private scene: Phaser.Scene,
     public id: string,
     private skin: string, // spritesheet key
-    private name: string,
+    public name: string,
     public home: Phaser.Math.Vector2,
+    onClick?: (id: string) => void,
   ) {
     this.sprite = scene.add.sprite(home.x, home.y, skin, 1).setOrigin(0.5, 0.9).setScale(CHAR_SCALE);
     this.bubble = scene.add.sprite(home.x, home.y, "bubbles", 0).setScale(2).setVisible(false);
@@ -152,7 +161,23 @@ class Villager {
       .text(home.x, home.y, name, { fontSize: "12px", color: "#fff", backgroundColor: "#0009", padding: { x: 4, y: 1 } })
       .setOrigin(0.5, 0)
       .setResolution(2);
+    if (onClick) {
+      this.sprite.setInteractive({ useHandCursor: true }).on("pointerdown", () => onClick(this.id));
+    }
     this.scheduleWander(Phaser.Math.Between(300, 2500));
+  }
+
+  /** 閒著：可以冒泡、聊天（沒在工作、沒在聊天、沒外出） */
+  get idle(): boolean {
+    return !this.busy && !this.chatting && !this.away;
+  }
+
+  get speaking(): boolean {
+    return !!this.speech;
+  }
+
+  get pos(): Phaser.Math.Vector2 {
+    return new Phaser.Math.Vector2(this.sprite.x, this.sprite.y);
   }
 
   update() {
@@ -160,6 +185,86 @@ class Villager {
     this.sprite.setDepth(y);
     this.label.setPosition(x, y + 2).setDepth(y + 1);
     this.bubble.setPosition(x + 22, y - 62).setDepth(10_000);
+    this.speech?.setPosition(x, y - 66).setDepth(10_001);
+  }
+
+  /** 頭上冒一句話（幾秒後淡出） */
+  say(text: string, ms = 3200) {
+    this.speechTimer?.remove();
+    this.speech?.destroy();
+    this.speech = this.scene.add
+      .text(this.sprite.x, this.sprite.y - 66, text, {
+        fontSize: "12px",
+        color: "#2b2a27",
+        backgroundColor: "#fffdf6",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5, 1)
+      .setResolution(2)
+      .setDepth(10_001);
+    const s = this.speech;
+    this.speechTimer = this.scene.time.delayedCall(ms, () => {
+      this.scene.tweens.add({
+        targets: s,
+        alpha: 0,
+        duration: 400,
+        onComplete: () => {
+          s.destroy();
+          if (this.speech === s) this.speech = undefined;
+        },
+      });
+    });
+  }
+
+  /** 面向某個點（不走路） */
+  faceTo(p: Phaser.Math.Vector2) {
+    const dx = p.x - this.sprite.x;
+    const dy = p.y - this.sprite.y;
+    this.face(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up", false);
+  }
+
+  /** 停下來回應使用者（被點到）：轉向前方、冒泡 */
+  greet(text: string) {
+    if (!this.busy && !this.chatting) {
+      this.tween?.stop();
+      this.face("down", false);
+      this.scheduleWander(4000);
+    }
+    this.say(text, 2600);
+  }
+
+  /** 走到另一位村民旁邊聊幾句再散開；中途被派工就中斷 */
+  chatWith(other: Villager, script: [string, string, string?]) {
+    this.chatting = other.chatting = true;
+    this.timer?.remove();
+    other.timer?.remove();
+    other.tween?.stop();
+    other.face("down", false);
+    const side = this.sprite.x < other.sprite.x ? -1 : 1;
+    const spot = new Phaser.Math.Vector2(other.sprite.x + side * 64, other.sprite.y); // 站開一點，名字才不會疊在一起
+    this.walkTo(spot, () => {
+      if (!this.chatting) return; // 走路途中被派工
+      this.faceTo(other.pos);
+      other.faceTo(this.pos);
+      const lines: [Villager, string | undefined][] = [[this, script[0]], [other, script[1]], [this, script[2]]];
+      lines.forEach(([who, text], i) => {
+        if (!text) return;
+        const t = this.scene.time.delayedCall(i * 1700, () => who.say(text, 1800));
+        this.chatTimers.push(t);
+      });
+      this.chatTimers.push(this.scene.time.delayedCall(lines.filter((l) => l[1]).length * 1700 + 600, () => {
+        this.endChat();
+        other.endChat();
+      }));
+    });
+  }
+
+  endChat() {
+    this.chatTimers.forEach((t) => t.remove());
+    this.chatTimers = [];
+    if (!this.chatting) return;
+    this.chatting = false;
+    if (!this.busy) this.scheduleWander(Phaser.Math.Between(800, 2500));
   }
 
   private face(dir: Dir, walking: boolean) {
@@ -193,7 +298,7 @@ class Villager {
   private scheduleWander(delay: number) {
     this.timer?.remove();
     this.timer = this.scene.time.delayedCall(delay, () => {
-      if (this.busy) return;
+      if (this.busy || this.chatting) return;
       const r = 4 * TILE;
       const { x, y } = this.sprite;
       // 挑一個不在障礙物上、路線也不會穿過障礙物的點；挑不到就原地休息一下
@@ -220,6 +325,7 @@ class Villager {
   }
 
   startWork(kind: "working" | "thinking" = "working") {
+    this.endChat(); // 正在聊天也立刻去工作
     this.busy = true;
     this.timer?.remove();
     this.tween?.stop();
@@ -254,6 +360,9 @@ class Villager {
     this.tween?.stop();
     this.timer?.remove();
     this.bubbleTimer?.remove();
+    this.speechTimer?.remove();
+    this.chatTimers.forEach((t) => t.remove());
+    this.speech?.destroy();
     this.sprite.destroy();
     this.bubble.destroy();
     this.label.destroy();
@@ -261,6 +370,8 @@ class Villager {
 
   /** 走到另一位村民旁邊交接，再回家附近繼續閒晃 */
   handoffTo(other: Villager) {
+    this.endChat();
+    other.endChat();
     this.busy = true;
     this.timer?.remove();
     const side = this.sprite.x < other.sprite.x ? -1 : 1;
@@ -275,8 +386,34 @@ class Villager {
   }
 }
 
+// ---------------------------------------------------------------- 閒聊
+
+const AMBIENT_MS: [number, number] = [8000, 15000]; // 每隔幾秒挑一位閒著的村民冒一句
+const CHAT_MS: [number, number] = [30000, 60000]; // 每隔幾秒挑兩位聊幾句
+const MAX_SPEAKING = 2; // 同時最多幾個人在冒泡
+const CHAT_RANGE = 10 * TILE; // 太遠的不湊在一起聊
+
+const GREETINGS: [string, string, string?][] = [
+  ["嗨！", "嗨～最近好嗎？", "還不錯！"],
+  ["今天好忙啊", "我也是…"],
+  ["天氣真好", "適合散步～"],
+  ["有人找你喔", "真的嗎？我去看看"],
+  ["吃飽了嗎？", "剛吃完！"],
+];
+
+function chatScript(b: Villager): [string, string, string?] {
+  if (b.skill && Math.random() < 0.6) {
+    const ask = `${b.name}，你會${b.skill}對吧？`;
+    return [ask.length > 16 ? `你會${b.skill}對吧？` : ask, "對啊，交給我！", "下次找你幫忙"];
+  }
+  return Phaser.Utils.Array.GetRandom(GREETINGS);
+}
+
 export class VillageScene extends Phaser.Scene {
   private villagers = new Map<string, Villager>();
+  onVillagerClick?: (id: string) => void; // 點村民（App 決定要開問答還是讓他自我介紹）
+  private nextAmbient = 0;
+  private nextChat = 0;
   private looks = new Map<string, string>(); // 外觀 / 名字 / 住處，變了就重新登場
   private ready = false;
   private pending: VillagerInfo[] | null = null;
@@ -316,6 +453,38 @@ export class VillageScene extends Phaser.Scene {
     }
     this.ready = true;
     this.syncVillagers(this.pending ?? [], false);
+    this.nextAmbient = this.time.now + Phaser.Math.Between(...AMBIENT_MS);
+    this.nextChat = this.time.now + Phaser.Math.Between(...CHAT_MS);
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickIdle() });
+  }
+
+  /** 閒聊排程：偶爾有村民冒一句自我介紹、偶爾兩位村民湊在一起聊天 */
+  private tickIdle() {
+    const now = this.time.now;
+    const all = [...this.villagers.values()];
+    if (now >= this.nextAmbient) {
+      this.nextAmbient = now + Phaser.Math.Between(...AMBIENT_MS);
+      const free = all.filter((v) => v.idle && !v.speaking && v.lines.length);
+      if (free.length && all.filter((v) => v.speaking).length < MAX_SPEAKING) {
+        const v = Phaser.Utils.Array.GetRandom(free);
+        v.say(Phaser.Utils.Array.GetRandom(v.lines));
+      }
+    }
+    if (now >= this.nextChat) {
+      this.nextChat = now + Phaser.Math.Between(...CHAT_MS);
+      const free = all.filter((v) => v.idle && !v.speaking);
+      const a = free.length > 1 ? Phaser.Utils.Array.GetRandom(free) : undefined;
+      const near = a ? free.filter((v) => v !== a && Phaser.Math.Distance.BetweenPoints(v.pos, a.pos) < CHAT_RANGE) : [];
+      if (a && near.length) {
+        const b = Phaser.Utils.Array.GetRandom(near);
+        a.chatWith(b, chatScript(b));
+      }
+    }
+  }
+
+  /** 讓某位村民說一句話（例如被點到時的回應） */
+  say(id: string, text: string) {
+    this.villagers.get(id)?.greet(text);
   }
 
   /** 依後端村民清單增減角色（在村民管理新增或修改後，村民會淡入登場） */
@@ -337,12 +506,18 @@ export class VillageScene extends Phaser.Scene {
       const existing = this.villagers.get(info.id);
       if (existing) {
         existing.setAway(!!info.away); // 在村 / 外出中切換不用重建角色
+        existing.lines = info.lines ?? [];
+        existing.skill = info.skill ?? "";
         continue;
       }
       this.looks.set(info.id, look(info));
       const skin = info.sprite && this.manifest.characters[info.sprite] ? info.sprite : "poet";
       const [hx, hy] = nearestFree(info.home ?? this.freeSpot(info.id));
-      const v = new Villager(this, info.id, skin, info.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE));
+      const v = new Villager(this, info.id, skin, info.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE), (id) =>
+        this.onVillagerClick?.(id),
+      );
+      v.lines = info.lines ?? [];
+      v.skill = info.skill ?? "";
       this.villagers.set(info.id, v);
       if (animate && !info.away) v.appear();
       v.setAway(!!info.away);

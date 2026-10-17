@@ -61,6 +61,27 @@ export function App() {
  * 版面：像素地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
  * 右下 💬 打開問答視窗。抽屜與問答視窗同時只開一個（進行中的問答不受影響）。
  */
+/** 系統角色被點到時的自我介紹（他們不接受 @ 指名） */
+const SYSTEM_SAY: Record<string, string> = {
+  craftsman: "到「村民」頁找我打造新村民",
+  reviewer: "答案交出前我會檢查",
+  scribe: "我會記住你說過的事",
+  appraiser: "附圖給我，我幫大家看",
+};
+
+/** 從名片產生閒聊短句與一句話專長（泡泡不大，控制在十來個字） */
+function idleLines(a: AgentInfo): { lines: string[]; skill: string } {
+  // 說明與技能各取第一句，挑 10 個字以內、比較短的；都太長就不講專長（截斷的半句話反而不通順）
+  const clause = (t?: string) => (t || "").split(/[，。、；：,.;:（(\n]/)[0].trim().replace(/^(會|能|可以|負責|幫你|幫忙|專門)/, "");
+  const skill = [clause(a.description), clause(a.skills[0]?.description)]
+    .filter((c) => c && c.length <= 10)
+    .sort((x, y) => x.length - y.length)[0] ?? "";
+  const lines = [`我是${a.name}！`, "點我就能問我"];
+  if (skill) lines.unshift(`我會${skill}`);
+  if (a.kind === "remote") lines.push("我從外地來幫忙～");
+  return { lines: lines.map((l) => (l.length > 14 ? l.slice(0, 13) + "…" : l)), skill };
+}
+
 function VillageApp({
   me,
   llmReady,
@@ -111,7 +132,15 @@ function VillageApp({
   });
 
   const villagers = useMemo<VillagerInfo[]>(
-    () => agents.map((a) => ({ id: a.id, name: a.name, sprite: a.sprite, home: a.home, away: a.kind === "remote" && a.status !== "online" })),
+    () =>
+      agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        sprite: a.sprite,
+        home: a.home,
+        away: a.kind === "remote" && a.status !== "online",
+        ...idleLines(a),
+      })),
     [agents],
   );
   const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));
@@ -153,6 +182,21 @@ function VillageApp({
 
   const clearTraceId = useCallback(() => setTraceId(null), []);
 
+  // ---------------------------------------------------------------- 點地圖上的村民
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  const clickVillager = (id: string) => {
+    const say = (text: string) => villageRef.current?.say(id, text);
+    if (SYSTEM_SAY[id]) return say(SYSTEM_SAY[id]); // 工匠、審核員、書記、鑑定師不能被指名派工：自我介紹
+    const a = agents.find((x) => x.id === id);
+    if (a?.kind === "remote" && a.status !== "online") return say("我外出中，晚點再來");
+    say(id === "mayor" ? "有什麼問題呢？" : "你好！請說～");
+    openConversation(null); // 開新對話
+    openPage(null);
+    setChatOpen(true);
+    setUnseen(false);
+    setPrefill({ text: id === "mayor" ? "" : `@${id} `, nonce: Date.now() });
+  };
+
   // ---------------------------------------------------------------- 對話
   const [convs, setConvs] = useState<ConversationRow[]>([]);
   const [convId, setConvId] = useState<string | null>(null);
@@ -191,7 +235,7 @@ function VillageApp({
   return (
     <div className={`stage ${page ? "with-drawer" : ""}`}>
       <div className="map" onMouseDown={() => setMenuOpen(false)}>
-        <VillageCanvas ref={villageRef} villagers={villagers} />
+        <VillageCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
       </div>
       <div className="village-name">Multi-Agent Village</div>
       <div className="user-chip">
@@ -288,6 +332,7 @@ function VillageApp({
           agents={agents}
           onSend={send}
           vision={vision}
+          prefill={prefill}
           onReset={() => openConversation(null)}
           conversations={convs}
           currentConversation={convId}
