@@ -10,7 +10,7 @@
 ## 目前進度
 
 Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
-帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0008。
+帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0009。
 
 **Phase 5V 視覺模型完成**（使用者已實測）：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、小圖放大、`chat_images` 表、
 `/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（清單類一律完整抄寫、追問時重看原圖）。
@@ -22,7 +22,8 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 
 **進行中：Phase 6 台灣史專家**（外接 agent），規劃與進度在 `extra-agents/taiwan-history/PLAN.md`（每完成一步要更新）。
 - 複雜的 agent 放 `extra-agents/<名稱>/` 獨立開發、獨立部署（自己的程式、docker-compose、.env），不 import 村子的程式碼；
-  完成後村子用 HTTP（A2A）接成外接村民（T4，改村子這邊）。
+  完成後村子用 HTTP（A2A）接成外接村民（T4，改村子這邊）。外接的 agent 在村子裡叫「**駐村專家**」。
+- T1～T3 完成並經使用者部署實測（容器 127.0.0.1:8100）。T4-A（駐村專家的資料與管理介面）完成；接著 T4-B（派工與 A2A 呼叫）。
 - 使用者沒有台灣史資料：由 Claude 從中文維基百科等公開資料抓取、整理成 Markdown（附來源網址與 CC BY-SA 授權）。
 - 回答範圍、風格、它自己的 LLM 設定等「之後再討論」，先不要自己決定。
 本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
@@ -47,6 +48,9 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 - 系統角色（保留名稱，不會被派去做問答）：`mayor` 村長、`craftsman` 工匠（`core/workshop.py`，對話打造村民）、
   `reviewer` 審核員（`core/reviewer.py`）、`scribe` 書記（`core/scribe.py`，長期記憶）、
   `appraiser` 鑑定師（`core/appraiser.py`，有附圖時先看圖，結果放 context variable `_APPRAISAL` 交給村長 / 村民 / 審核員）。
+- 駐村專家（外接的獨立 agent）：村民 `kind: remote`（`core/remote.py`、`api/residents.py`），
+  存取 token 加密存 `remote_agents`；呼叫網址用「管理員填的網址 ＋ card 的路徑」；村子容器連主機服務用 `host.docker.internal`。
+  「允許把提問者的 LLM 設定交給它」預設關閉。T4-B 之前村長不會派工給駐村專家（executor 先排除）。
 - 視覺模型自成 `vision` 分級（`tier:vision`），不和 large / small 互相備援；只有通過看圖測驗（`llm/vision_test.py`，
   `llm_models.vision_verified_at`）的模型會被用到。一般 LLM 流程不可以用到視覺模型。
 - 生圖模型（`llm_models.output="image"`）只能放 `image` 分級、只能透過 `LLMService.generate_image` 使用（OpenRouter `POST /images`），

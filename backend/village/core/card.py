@@ -75,6 +75,14 @@ class ToolConfig(BaseModel):
         return self
 
 
+class RemoteConfig(BaseModel):
+    """駐村專家（外接的獨立 agent）：用 A2A 呼叫。存取 token 加密存在 remote_agents 表，不放在這裡。"""
+
+    url: str = Field(pattern=r"^https?://")  # 管理員填的網址，例如 http://host.docker.internal:8100
+    a2a_path: str = "/a2a"  # 從對方的 agent card 讀來
+    share_llm: bool = False  # 允許把提問者的 LLM 設定（含 key）交給它；預設關閉，管理員確認信任後才打開
+
+
 class Checks(BaseModel):
     must_not_be_empty: bool = True
     max_chars: int | None = None
@@ -111,10 +119,11 @@ class AgentSpec(BaseModel):
 
     card: CardInfo
     village: VillageInfo = Field(default_factory=VillageInfo, alias="x-village")
-    kind: Literal["prompt", "tool"] = "prompt"  # remote 於 Phase 6 加入
+    kind: Literal["prompt", "tool", "remote"] = "prompt"  # remote = 駐村專家（外接的獨立 agent）
     model: ModelConfig = Field(default_factory=ModelConfig)
     prompt: PromptConfig | None = None
     tool: ToolConfig | None = None
+    remote: RemoteConfig | None = None
     checks: Checks = Field(default_factory=Checks, alias="validate")
     tests: list[AgentTest] = []
 
@@ -124,6 +133,8 @@ class AgentSpec(BaseModel):
             raise ValueError("kind: prompt 需要 prompt.system")
         if self.kind == "tool" and self.tool is None:
             raise ValueError("kind: tool 需要選一個工具（tool.id）")
+        if self.kind == "remote" and self.remote is None:
+            raise ValueError("kind: remote 需要 remote.url（駐村專家的網址）")
         if self.prompt is None:  # 工具型可以不寫 prompt（用工具的預設說明）；補上空的，介面才有欄位可以填
             self.prompt = PromptConfig()
         return self

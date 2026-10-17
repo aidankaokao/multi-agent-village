@@ -91,10 +91,24 @@ extra-agents/taiwan-history/
 - [ ] 使用者部署實測（README 的「部署」與「測試網頁」步驟）
 
 ### T4：接回村子（改的是村子這邊）
-- [ ] 村民新增「外接型」：在村民管理頁填網址（＋token），讀取 agent card 自動帶入名稱、說明、技能
-- [ ] 村長可以派工給外接村民；問答時用 HTTP 呼叫，逾時與錯誤照一般村民處理
-- [ ] 健康檢查：連不上時村民在村子裡顯示「外出中」，並暫時不派工
-- [ ] 外接村民的動畫與角色外觀（在介面上選 sprite）
+外接的 agent 在村子裡叫「**駐村專家**」（和村子自己打造的「村民」區分）。
+
+- [x] A：資料與管理（村子 DB 遷移 0009）
+  - 村民定義新增 `kind: remote`（`remote: {url, a2a_path, share_llm}`）；`remote_agents` 表存加密的存取 token
+    （AES-256-GCM，AAD 綁定這位專家；`village rotate-key` 也會重新加密）、讀到的 agent card、健康狀態
+  - 管理 API `/api/residents`（管理員）：讀取名片（preview）、邀請入村、改網址 / token / 共享 LLM 開關、重新讀取名片、立刻檢查；
+    改名字、外觀、停用、刪除沿用村民 API
+  - 每分鐘健康檢查（`/health`，沒有就讀 agent card；`ok: false` 也算外出中），狀態改變發 `residents.status` 事件
+  - 介面：村民頁「🧳 邀請駐村專家」（填網址與 token → 讀取名片 → 確認 id、名字、外觀、共享開關）、
+    列表顯示「🧳 駐村專家」與「🟢 在村 / 🔴 外出中」、「管理」視窗
+  - 「允許把提問者的 LLM 設定交給它」預設關閉，打開時要確認
+  - 網路：村子的容器用 `http://host.docker.internal:8100` 連得到主機上只綁 127.0.0.1 的台灣史專家（已實測）；
+    呼叫時用「管理員填的網址 ＋ card 裡的路徑」（card 寫的 localhost 從容器連不到）
+- [ ] B：派工與呼叫
+  - 村長名冊加入在村的駐村專家；執行時 A2A `message/send`（指示＋前一步成果），帶 Bearer token
+  - 共享開關打開時，把提問者 large 分級第一個 OpenAI 相容模型（網址、模型、key）放進 X-LLM-* header
+  - 回覆的 text 當成果、data 的引用整理成「資料來源」附在後面
+  - 地圖上「外出中」的顯示、工作動畫
 
 ### T5：進階（之後再說）
 - [ ] GraphRAG（人物、事件、地點的關係圖）或 agentic RAG（自己決定要查幾次、查什麼）

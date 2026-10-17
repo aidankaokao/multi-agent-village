@@ -16,7 +16,7 @@ from sqlalchemy import select
 from village.config import Settings
 from village.security.crypto import SecretBox, keyring_from_env, keyring_path, load_keyring, save_keyring
 from village.store.db import init_db, make_engine, make_sessionmaker
-from village.store.models import AuthSession, LlmProvider, User
+from village.store.models import AuthSession, LlmProvider, RemoteAgent, User
 
 
 async def rotate_key(settings: Settings) -> None:
@@ -37,6 +37,11 @@ async def rotate_key(settings: Settings) -> None:
             plain = box.decrypt(p.api_key_ct, p.api_key_nonce, p.key_version, p.api_key_aad)
             enc = box.encrypt(plain, p.api_key_aad)
             p.api_key_ct, p.api_key_nonce, p.key_version = enc.ciphertext, enc.nonce, enc.key_version
+            count += 1
+        for r in (await s.execute(select(RemoteAgent).where(RemoteAgent.token_ct.is_not(None)))).scalars():
+            plain = box.decrypt(r.token_ct, r.token_nonce, r.key_version, r.token_aad)
+            enc = box.encrypt(plain, r.token_aad)
+            r.token_ct, r.token_nonce, r.key_version = enc.ciphertext, enc.nonce, enc.key_version
             count += 1
         await s.commit()
     await engine.dispose()

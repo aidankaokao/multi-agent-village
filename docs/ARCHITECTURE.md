@@ -260,6 +260,16 @@ class BaseAgent(Protocol):
   追問（這輪沒附圖）時 `wants_relook` 判斷問題是否跟圖有關（位置、顏色、文字、它 / 那個…），是就重看 `context_turns` 輪內最近附的圖，
   並附上前一輪問答當背景。看不了圖時告訴村長「看不到，不要猜」；村長 LLM 不能用時直接交出鑑定內容。
 
+#### 駐村專家（外接的獨立 agent）
+
+- 在別處獨立開發、獨立部署的 agent（`extra-agents/`），村子用 A2A 呼叫。村民定義 `kind: remote`，
+  `remote: {url, a2a_path, share_llm}`；`remote_agents` 表存加密的存取 token（AAD `remote_agent:{id}:token`）、
+  原樣保存的 agent card、健康狀態（online / offline / unknown）。
+- `core/remote.py`：讀 card（`{url}/.well-known/agent-card.json`）、健康檢查（`/health`，沒有就讀 card；回 `ok: false` 視為外出中）、
+  card → 村民定義。呼叫網址用管理員填的網址加上 card 裡 `url` 的路徑（card 寫的主機從容器多半連不到）。
+- `api/residents.py`（管理員）：preview、invite、update、refresh、check；`health_loop` 每分鐘檢查，狀態改變發 `residents.status`。
+- 「允許把提問者的 LLM 設定交給它」（`share_llm`）預設關閉：打開才會把提問者的模型網址、模型、key 放進 X-LLM-* header。
+
 #### 生圖模型（image 分級）
 
 - OpenRouter 的生圖 API：`POST {base_url}/images`（`model`、`prompt`、`n`、`aspect_ratio`）→ `data[].b64_json`、`media_type`、
@@ -287,6 +297,7 @@ class BaseAgent(Protocol):
 | `llm_providers` | id, **user_id**, name（同一人不可重複）, kind, base_url, `api_key_ct`, `api_key_nonce`, `key_version`, `api_key_hint`(如 `sk-…a1b2`), enabled, created_at, updated_at |
 | `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, reasoning_effort, vision_verified_at, output(`text`/`image`), image_verified_at, enabled |
 | `model_tiers` | **user_id**, tier(`large`/`small`/`vision`/`image`), position, model_id |
+| `remote_agents` | agent_id（agents.id）, `token_ct`, `token_nonce`, `key_version`, `token_hint`, card, card_fetched_at, status, checked_at, last_error |
 
 #### 加密設計（信封加密的簡化版）
 

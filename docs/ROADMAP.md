@@ -204,10 +204,9 @@ LLM 只負責把請求整理成工具的參數（JSON schema），計算由程�
 詳細規劃與進度：[`extra-agents/taiwan-history/PLAN.md`](../extra-agents/taiwan-history/PLAN.md)
 
 - [x] T0：規劃、建立資料夾
-- [ ] T1：資料蒐集（條目清單 → 抓取 → Markdown 文件，附來源與授權）
-- [ ] T2：RAG 服務（切塊、向量化、檢索、附引用的回答、測試題）
-- [ ] T3：對外介面（A2A + health + token）與獨立部署
-- [ ] T4：村子這邊的「外接村民」（填網址、讀 agent card、健康檢查、外出中）
+- [x] T1～T3：資料蒐集、RAG、對外介面與獨立部署（使用者已部署實測）
+- [x] T4-A：「駐村專家」（外接 agent）的資料表、邀請 / 管理介面、token 加密、健康檢查
+- [ ] T4-B：村長派工給駐村專家（A2A 呼叫、共享提問者的 LLM、引用來源、外出中動畫）
 - [ ] T5：GraphRAG / agentic RAG、更多資料來源
 
 ---

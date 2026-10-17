@@ -152,6 +152,7 @@ export interface AgentInfo {
   home: [number, number] | null;
   skills: { id: string; description: string; examples: string[] }[];
   tags: string[];
+  status?: ResidentStatus | null; // 駐村專家才有
 }
 
 export const village = {
@@ -289,8 +290,9 @@ export interface AgentSpec {
     tags: string[];
   };
   "x-village": { sprite: string | null; home: [number, number] | null; keywords: string[] };
-  kind: "prompt" | "tool";
+  kind: "prompt" | "tool" | "remote"; // remote = 駐村專家（外接的獨立 agent）
   tool?: { id: string; explain: boolean } | null; // 工具型村民：用哪個工具
+  remote?: { url: string; a2a_path: string; share_llm: boolean } | null; // 駐村專家的連線（token 另外加密保存）
   model: { tier: "large" | "small"; model_id: string | null; temperature: number | null; max_tokens: number };
   prompt: { system: string; user_template: string };
   validate: { must_not_be_empty: boolean; max_chars: number | null };
@@ -350,6 +352,54 @@ export const villagers = {
   fromYaml: (yaml: string) => api<{ spec: AgentSpec }>("/api/villagers/from-yaml", { method: "POST", json: { yaml } }),
   try: (body: { spec: AgentSpec; instruction: string; context?: string; target?: string | null; expect?: Expect }) =>
     api<TryResult>("/api/villagers/try", { method: "POST", json: body }),
+};
+
+// ---------------------------------------------------------------- 駐村專家（外接的獨立 agent）
+
+export type ResidentStatus = "online" | "offline" | "unknown";
+
+export interface A2ACard {
+  name: string;
+  description: string;
+  url?: string;
+  version?: string;
+  skills?: { id?: string; name?: string; description?: string; examples?: string[]; tags?: string[] }[];
+  "x-llm-headers"?: Record<string, string>;
+}
+
+export interface ResidentPreview {
+  url: string;
+  card: A2ACard;
+  a2a_path: string;
+  suggested_id: string;
+  online: boolean;
+  health_error: string | null;
+  wants_llm: boolean; // 對方需要呼叫端提供 LLM（例如台灣史專家）
+}
+
+export interface Resident {
+  id: string;
+  url: string;
+  a2a_path: string;
+  share_llm: boolean;
+  has_token: boolean;
+  token_hint: string | null;
+  status: ResidentStatus;
+  checked_at: string | null;
+  last_error: string | null;
+  card: A2ACard | null;
+  card_fetched_at: string | null;
+}
+
+export const residents = {
+  list: () => api<Resident[]>("/api/residents"),
+  preview: (url: string) => api<ResidentPreview>("/api/residents/preview", { method: "POST", json: { url } }),
+  invite: (body: { id: string; url: string; token?: string; name?: string; sprite?: string | null; share_llm: boolean }) =>
+    api<Resident>("/api/residents", { method: "POST", json: body }),
+  update: (id: string, body: Partial<{ url: string; token: string; clear_token: boolean; share_llm: boolean }>) =>
+    api<Resident>(`/api/residents/${id}`, { method: "PATCH", json: body }),
+  refresh: (id: string) => api<Resident>(`/api/residents/${id}/refresh`, { method: "POST" }),
+  check: (id: string) => api<Resident>(`/api/residents/${id}/check`, { method: "POST" }),
 };
 
 // ---------------------------------------------------------------- 村民工坊（工匠）

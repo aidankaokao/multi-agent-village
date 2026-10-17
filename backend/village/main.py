@@ -14,6 +14,8 @@ from village.api.villagers import router as villagers_router
 from village.api.conversations import router as conversations_router
 from village.api.memories import router as memories_router
 from village.api.images import router as images_router
+from village.api.residents import health_loop
+from village.api.residents import router as residents_router
 from village.api.runs import router as runs_router
 from village.api.workshop import router as workshop_router
 from village.config import Settings
@@ -106,8 +108,10 @@ def create_app(
             memories=MemoryStore(sm),
         )
         purger = asyncio.create_task(_purge_generated(app.state.ctx.conversations))
+        checker = asyncio.create_task(health_loop(app.state.ctx))  # 駐村專家每分鐘檢查一次
         yield
         purger.cancel()
+        checker.cancel()
         # 關閉時：取消還在跑的問答，等它們把「已取消」寫回 DB（最多 5 秒）再關資料庫，
         # 否則收尾的 DB 寫入會卡在已關閉的連線上，整個程序關不掉
         pending = list(app.state.ctx.tasks)
@@ -128,6 +132,7 @@ def create_app(
     app.include_router(conversations_router)
     app.include_router(memories_router)
     app.include_router(images_router)
+    app.include_router(residents_router)
 
     @app.get("/api/health")
     async def health():

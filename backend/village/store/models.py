@@ -93,6 +93,27 @@ class AgentDef(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class RemoteAgent(Base):
+    """駐村專家的連線資訊（村民定義在 agents 表，kind=remote）：存取 token（加密）、讀到的 agent card、健康狀態。"""
+
+    __tablename__ = "remote_agents"
+
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True)
+    token_ct: Mapped[bytes | None] = mapped_column(LargeBinary)
+    token_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    key_version: Mapped[int | None] = mapped_column(Integer)
+    token_hint: Mapped[str | None] = mapped_column(String(32))
+    card: Mapped[dict | None] = mapped_column(JSON)  # 對方的 agent card（原樣保存）
+    card_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="unknown")  # online / offline / unknown
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+    @property
+    def token_aad(self) -> str:
+        return f"remote_agent:{self.agent_id}:token"
+
+
 class Setting(Base):
     """村規等全域設定：key → JSON（例如 village → 審核員、逾時、平行執行）。"""
 

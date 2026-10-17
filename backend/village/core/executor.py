@@ -172,7 +172,7 @@ class Runner:
         _PREVIOUS.set(history[-1].answer if history else "")  # use 裡的 "prev" 指這個（每次問答各自一份）
         emit = self.bus.publish
         rules = self.rules.current if self.rules else DEFAULT_RULES
-        agents = self.registry.all()
+        agents = [a for a in self.registry.all() if a.kind != "remote"]  # 駐村專家的派工在 T4-B 接上
         t0 = time.monotonic()
         plan: Plan | None = None
         results: dict[str, StepResult] = {}
@@ -383,6 +383,8 @@ async def run_agent(
     target: str | None = None,
 ) -> None:
     """依村民類型執行；問答、試打、測試題共用。"""
+    if spec.kind == "remote":
+        raise LLMError("駐村專家的派工還沒接上（Phase 6 T4-B）")
     if spec.kind == "tool":
         await run_tool_agent(llm, spec, instruction, context, r, on_text=on_text, on_retry=on_retry, target=target)
     else:

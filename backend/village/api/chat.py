@@ -8,11 +8,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from village.api import images as image_api
 from village.core import appraiser, scribe
 from village.core.context import refers_back
 from village.core.painter import PaintEnv, Reference
+from village.store.models import RemoteAgent
 from village.llm.base import ImagePart
 from village.llm.service import NO_VISION, NOT_CONFIGURED, llm_user
 from village.security.auth import CurrentUser, require_user
@@ -42,11 +44,15 @@ class AgentOut(BaseModel):
     home: tuple[int, int] | None
     skills: list[dict]
     tags: list[str]
+    status: str | None = None  # 駐村專家：online / offline / unknown
 
 
 @router.get("/agents")
 async def list_agents(request: Request):
-    registry = request.app.state.ctx.registry
+    ctx = request.app.state.ctx
+    registry = ctx.registry
+    async with ctx.sessionmaker() as s:
+        status_of = dict((await s.execute(select(RemoteAgent.agent_id, RemoteAgent.status))).all())
     agents = [
         AgentOut(
             id=a.id,
@@ -57,6 +63,7 @@ async def list_agents(request: Request):
             home=a.village.home,
             skills=[s.model_dump() for s in a.card.skills],
             tags=a.card.tags,
+            status=status_of.get(a.id) if a.kind == "remote" else None,
         )
         for a in registry.all()
     ]

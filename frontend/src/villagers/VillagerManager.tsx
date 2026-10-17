@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { llm, villagers, type AgentSpec, type AgentTest, type Model, type ToolInfo, type Villager } from "../api";
+import { llm, residents, villagers, type AgentSpec, type AgentTest, type Model, type Resident, type ToolInfo, type Villager } from "../api";
 import { SpriteThumb, useManifest } from "./fields";
 import { TestsPanel, TryPanel } from "./Lab";
+import { InviteResident, ManageResident, STATUS_LABEL } from "./Residents";
 import { SpecForm } from "./SpecForm";
 import { NEW_SESSION, Workshop, type WorkshopSession } from "./Workshop";
 
@@ -32,13 +33,17 @@ export function VillagerManager() {
   const [importing, setImporting] = useState(false);
   const [inWorkshop, setInWorkshop] = useState(false);
   const [session, setSession] = useState<WorkshopSession>(NEW_SESSION);
+  const [residentList, setResidentList] = useState<Resident[]>([]);
+  const [inviting, setInviting] = useState(false);
+  const [managing, setManaging] = useState<string | null>(null); // 駐村專家 id
 
   const reload = useCallback(async () => {
     try {
-      const [v, m, t] = await Promise.all([villagers.list(), llm.models(), villagers.tools()]);
+      const [v, m, t, r] = await Promise.all([villagers.list(), llm.models(), villagers.tools(), residents.list()]);
       setList(v);
       setModels(m);
       setTools(t);
+      setResidentList(r);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -123,6 +128,9 @@ export function VillagerManager() {
         <button className="link" onClick={() => setImporting(!importing)}>
           匯入 YAML
         </button>
+        <button className="link" onClick={() => setInviting(true)} title="把在別處獨立部署的 agent（例如台灣史專家）接進村子">
+          🧳 邀請駐村專家
+        </button>
         <span style={{ flex: 1 }} />
         <button
           className="link"
@@ -162,13 +170,17 @@ export function VillagerManager() {
 
       {list.map((v) => {
         const s = v.spec;
+        const res = s.kind === "remote" ? residentList.find((r) => r.id === v.id) : undefined;
+        const openIt = () => (s.kind === "remote" ? setManaging(v.id) : setEditing(open(s, s)));
         return (
           <div key={v.id} className={`card villager-row ${v.enabled ? "" : "disabled"}`}>
             <SpriteThumb sprite={s["x-village"].sprite} manifest={manifest} />
-            <div className="villager-info" onClick={() => setEditing(open(s, s))}>
+            <div className="villager-info" onClick={openIt}>
               <div className="row">
                 <strong>{s.card.name}</strong>
                 <code className="muted">@{v.id}</code>
+                {s.kind === "remote" && <span className="tag">🧳 駐村專家</span>}
+                {res && <span className={`tag ${res.status === "online" ? "ok" : "warn"}`}>{STATUS_LABEL[res.status]}</span>}
                 {v.builtin && <span className="tag">內建範例</span>}
                 {!v.enabled && <span className="tag warn">停用中</span>}
                 {s.kind === "tool" && <span className="tag">🔧 {tools.find((t) => t.id === s.tool?.id)?.name ?? s.tool?.id}</span>}
@@ -177,10 +189,12 @@ export function VillagerManager() {
               <div className="muted clamp">{s.card.description}</div>
             </div>
             <div className="villager-actions">
-              <button onClick={() => setEditing(open(s, s))}>編輯</button>
-              <button className="link" onClick={() => setEditing(open(copyOf(s), null))}>
-                複製
-              </button>
+              <button onClick={openIt}>{s.kind === "remote" ? "管理" : "編輯"}</button>
+              {s.kind !== "remote" && (
+                <button className="link" onClick={() => setEditing(open(copyOf(s), null))}>
+                  複製
+                </button>
+              )}
               <label className="toggle">
                 <input
                   type="checkbox"
@@ -199,6 +213,24 @@ export function VillagerManager() {
         );
       })}
       {list.length === 0 && <p className="hint">村裡還沒有村民，按「✨ 跟工匠聊聊」開始。</p>}
+      {inviting && (
+        <InviteResident
+          manifest={manifest}
+          onClose={() => setInviting(false)}
+          onDone={() => {
+            setInviting(false);
+            reload();
+          }}
+        />
+      )}
+      {managing &&
+        (() => {
+          const v = list.find((x) => x.id === managing);
+          const r = residentList.find((x) => x.id === managing);
+          return v && r ? (
+            <ManageResident key={managing} villager={v} resident={r} manifest={manifest} onClose={() => setManaging(null)} onChanged={reload} />
+          ) : null;
+        })()}
     </div>
   );
 }
