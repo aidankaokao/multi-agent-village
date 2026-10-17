@@ -24,6 +24,12 @@ class Settings:
     embed_model: str = field(default_factory=lambda: os.environ.get("TH_EMBED_MODEL", "bge-m3"))
     allowed_llm_hosts: list[str] = field(default_factory=lambda: _list("TH_ALLOWED_LLM_HOSTS", DEFAULT_ALLOWED_LLM_HOSTS))
     top_k: int = field(default_factory=lambda: int(os.environ.get("TH_TOP_K", "8")))
+    # 存取 token：呼叫 /ask、/search、A2A 時要帶（Authorization: Bearer …）；可以設多個（逗號分隔），沒設定時一律拒絕
+    access_tokens: list[str] = field(default_factory=lambda: _list("TH_ACCESS_TOKENS", []))
+    # 對外的網址（寫進 agent card，讓呼叫端知道要打哪裡）
+    public_url: str = field(default_factory=lambda: os.environ.get("TH_PUBLIC_URL", "http://localhost:8100"))
+    # 啟動時自動補建索引（只處理有變動的文件；第一次約 7 分鐘）
+    auto_index: bool = field(default_factory=lambda: os.environ.get("TH_AUTO_INDEX", "1") not in ("0", "false", "no"))
 
     @property
     def index_path(self) -> Path:

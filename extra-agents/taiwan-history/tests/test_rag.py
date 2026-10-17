@@ -188,21 +188,67 @@ async def test_ask_adapts_max_tokens(corpus, monkeypatch):
     assert a.answer == "答案[1]" and "max_completion_tokens" in bodies[-1]
 
 
-async def test_http_api(corpus, monkeypatch):
+TOKEN = "test-token-123"
+LLM_HEADERS = {"X-LLM-Base-URL": "https://openrouter.ai/api/v1", "X-LLM-Model": "m", "X-LLM-API-Key": "sk-secret"}
+
+
+async def _client(corpus, monkeypatch, tokens=(TOKEN,)):
     from app.main import create_app
 
     await _indexed(corpus)
+    corpus.access_tokens, corpus.auto_index = list(tokens), False
     app = create_app(corpus, embedder=FakeEmbedder())
     _mock_llm(monkeypatch, lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "鄭成功於1661年攻臺[1]。"}}]}))
+    return app
+
+
+async def test_http_api(corpus, monkeypatch):
+    app = await _client(corpus, monkeypatch)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            assert (await c.get("/health")).json()["ok"] is True
-            assert (await c.get("/search", params={"q": "鄭成功"})).json()["hits"][0]["title"] == "鄭成功"
-            headers = {"X-LLM-Base-URL": "https://openrouter.ai/api/v1", "X-LLM-Model": "m", "X-LLM-API-Key": "sk-secret"}
-            r = (await c.post("/ask", json={"question": "鄭成功何時攻臺？"}, headers=headers)).json()
+            h = (await c.get("/health")).json()
+            assert h["ok"] is True and h["auth_configured"] is True
+            assert (await c.get("/")).status_code == 200  # 測試網頁公開
+            # 沒有 token / token 錯：擋下
+            assert (await c.get("/search", params={"q": "鄭成功"})).status_code == 401
+            assert (await c.post("/ask", json={"question": "x"}, headers={"Authorization": "Bearer nope"})).status_code == 401
+            assert (await c.get("/search", params={"q": "鄭成功"}, headers=auth)).json()["hits"][0]["title"] == "鄭成功"
+            r = (await c.post("/ask", json={"question": "鄭成功何時攻臺？"}, headers={**auth, **LLM_HEADERS})).json()
             assert r["answer"].startswith("鄭成功於1661年") and r["citations"][0]["title"] == "鄭成功"
             assert "sk-secret" not in json.dumps(r)
-            bad = await c.post("/ask", json={"question": "x"}, headers={**headers, "X-LLM-Base-URL": "http://10.0.0.5/v1"})
+            bad = await c.post("/ask", json={"question": "x"}, headers={**auth, **LLM_HEADERS, "X-LLM-Base-URL": "http://10.0.0.5/v1"})
             assert bad.status_code == 400 and "不允許" in bad.json()["detail"]
-            r = (await c.post("/ask", json={"question": "霧社事件"})).json()  # 沒帶 LLM：只給資料
+            r = (await c.post("/ask", json={"question": "霧社事件"}, headers=auth)).json()  # 沒帶 LLM：只給資料
             assert r["llm_error"] and r["sources"]
+
+
+async def test_no_token_configured_rejects_everything(corpus, monkeypatch):
+    app = await _client(corpus, monkeypatch, tokens=())
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            assert (await c.get("/health")).json()["auth_configured"] is False
+            r = await c.post("/ask", json={"question": "x"}, headers={"Authorization": "Bearer anything"})
+            assert r.status_code == 503 and "TH_ACCESS_TOKENS" in r.json()["detail"]
+
+
+async def test_a2a(corpus, monkeypatch):
+    app = await _client(corpus, monkeypatch)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    msg = {"role": "user", "messageId": "m1", "contextId": "c1", "parts": [{"kind": "text", "text": "鄭成功何時攻臺？"}]}
+    rpc = {"jsonrpc": "2.0", "id": 7, "method": "message/send", "params": {"message": msg}}
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            card = (await c.get("/.well-known/agent-card.json")).json()
+            assert card["name"] == "台灣史專家" and card["url"].endswith("/a2a") and card["skills"][0]["examples"]
+            assert "X-LLM-API-Key" in card["x-llm-headers"]
+            assert (await c.post("/a2a", json=rpc)).status_code == 401
+            r = (await c.post("/a2a", json=rpc, headers={**auth, **LLM_HEADERS})).json()
+            assert r["id"] == 7 and r["result"]["role"] == "agent" and r["result"]["contextId"] == "c1"
+            text, data = r["result"]["parts"]
+            assert text["text"].startswith("鄭成功於1661年") and data["data"]["citations"][0]["title"] == "鄭成功"
+            assert "sk-secret" not in json.dumps(r)
+            r = (await c.post("/a2a", json={**rpc, "method": "tasks/get"}, headers=auth)).json()
+            assert r["error"]["code"] == -32601
+            r = (await c.post("/a2a", json={**rpc, "params": {"message": {"parts": []}}}, headers=auth)).json()
+            assert r["error"]["code"] == -32602

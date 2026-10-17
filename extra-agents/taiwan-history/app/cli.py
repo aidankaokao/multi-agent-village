@@ -5,6 +5,7 @@
     uv run th search 霧社事件的起因
     uv run th ask 霧社事件的起因是什麼？ --llm-url http://localhost:11434/v1 --llm-model qwen3.5:9b
     uv run th serve            # 啟動 HTTP 服務（預設 127.0.0.1:8100）
+    uv run th gen-token        # 產生一個隨機的存取 token（貼到 .env 的 TH_ACCESS_TOKENS）
 
 問答用的 LLM 由參數或環境變數 TH_DEV_LLM_URL / TH_DEV_LLM_MODEL / TH_DEV_LLM_KEY 提供（只給指令列測試用，服務本身不讀這些）。
 """
@@ -62,11 +63,16 @@ def main() -> None:
             p.add_argument("--llm-url")
             p.add_argument("--llm-model")
             p.add_argument("--effort", help="思考強度：none / low / medium / high")
+    sub.add_parser("gen-token", help="產生隨機的存取 token")
     p = sub.add_parser("serve", help="啟動 HTTP 服務")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8100)
     args = ap.parse_args()
-    if args.cmd == "serve":
+    if args.cmd == "gen-token":
+        from app.auth import new_token
+
+        print(new_token())
+    elif args.cmd == "serve":
         import uvicorn
 
         uvicorn.run("app.main:app", host=args.host, port=args.port)

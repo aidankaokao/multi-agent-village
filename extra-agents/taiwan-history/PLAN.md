@@ -1,6 +1,6 @@
 # 台灣史專家：規劃與進度
 
-> 最後更新：2026-10-17（T2 進行中）。每完成一步就更新這份文件（勾選、補上實際做法與決定）。
+> 最後更新：2026-10-17（T3 完成，等使用者部署實測）。每完成一步就更新這份文件（勾選、補上實際做法與決定）。
 
 ## 已確定的決定
 
@@ -77,14 +77,18 @@ extra-agents/taiwan-history/
       → 之後試「多問法改寫」（請 LLM 把問題改寫成幾種說法再檢索）或重新排序（rerank）
 - [ ] 測試題：一組有標準答案的問題，量檢索與回答的正確率（改進檢索時當基準）
 
-### T3：對外介面與獨立部署
-- [ ] HTTP 介面：A2A 協定（`/.well-known/agent-card.json` 自我介紹 ＋ `message/send` 問答），
-      另外提供簡單的 `/health` 給村子做健康檢查
-- [ ] 對接用的 token（村子呼叫時帶上，避免任何人都能用它的 LLM 額度）
-- [ ] `docker-compose.yaml`、`.env.example`、`./build.sh`（照村子的習慣：只 build，部署由使用者執行）
-- [ ] 簡易問答網頁（單一 HTML，由服務本身提供）：輸入問題 → 顯示回答與引用來源（可點開原文段落），
-      方便在獨立專案裡測試；不用華麗
-- [ ] 部署後的手動測試步驟
+### T3：對外介面與獨立部署 ✅
+- [x] 存取 token（`app/auth.py`）：`Authorization: Bearer …`，可設多個（`.env` 的 `TH_ACCESS_TOKENS`）；
+      沒設定時一律拒絕（503）；固定時間比較。`./build.sh` 在 .env 沒有 token 時自動產生一個；`th gen-token` 也能產生
+- [x] A2A（`app/a2a.py`）：`GET /.well-known/agent-card.json`（公開，含技能、範例、需要的 LLM header）、
+      `POST /a2a`（JSON-RPC 2.0 `message/send`；回覆 Message 的 parts = text 回答 ＋ data 引用）；LLM 一樣放 header
+- [x] 簡易問答網頁（`app/static/index.html`，`GET /` 公開）：連線設定（token、LLM 網址、模型、key、思考強度、
+      OpenRouter / 本機 Ollama 快速填入）；「記住」時用自訂密碼 PBKDF2 + AES-GCM 加密存在 localStorage
+      （只能在 localhost 或 https 使用）；回答的 [編號] 可點、跳到原文段落；「只看找到的資料」不呼叫 LLM；顯示服務與建索引進度
+- [x] 獨立部署：`Dockerfile`（非 root、corpus 打包進 image、索引在 volume `th-data`）、`docker-compose.yaml`
+      （預設只綁 127.0.0.1:8100、連主機 Ollama）、`.env.example`、`./build.sh`（只 build）；啟動時自動補建索引
+- [x] 測試 14 個（含 token、A2A）；本機瀏覽器實測：加密保存（localStorage 只有密文）、錯誤密碼、解鎖、問答、引用跳轉
+- [ ] 使用者部署實測（README 的「部署」與「測試網頁」步驟）
 
 ### T4：接回村子（改的是村子這邊）
 - [ ] 村民新增「外接型」：在村民管理頁填網址（＋token），讀取 agent card 自動帶入名稱、說明、技能

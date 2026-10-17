@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣史專家 · 測試問答</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --line:#ddd6c8; --text:#2b2a27; --muted:#7a7468; --accent:#8a3b2b; --ok:#2f7a4a; --bad:#b03a2e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.7 -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 12px 0; }
+  details > summary { cursor: pointer; font-weight: 600; }
+  label { display:block; margin: 8px 0 2px; font-size: 13px; color: var(--muted); }
+  input, select, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: #fffdf9; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 160px; }
+  button { padding: 7px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { font-size: 13px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .answer { white-space: pre-wrap; }
+  .cite { color: var(--accent); cursor: pointer; font-weight: 600; text-decoration: none; }
+  .source { border-left: 3px solid var(--line); padding: 4px 10px; margin: 8px 0; font-size: 14px; }
+  .source.hl { border-color: var(--accent); background: #fbf3ef; }
+  .source .text { white-space: pre-wrap; display: none; margin-top: 4px; }
+  .source.open .text { display: block; }
+  .q { font-weight: 600; margin-bottom: 6px; }
+  .check { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .check input { width: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>台灣史專家 · 測試問答</h1>
+  <div class="muted">這個網頁模擬「另一個應用程式呼叫 agent API」：下方設定的 token 與 LLM 會在每次發問時放進 HTTP header 送出。</div>
+  <div id="health" class="status muted">檢查服務狀態中…</div>
+
+  <div class="card">
+    <details id="settings-box">
+      <summary>⚙️ 連線設定 <span id="settings-state" class="muted"></span></summary>
+      <div id="unlock" hidden>
+        <label>已記住的設定是加密的，輸入密碼解開</label>
+        <div class="row"><input id="unlock-pw" type="password" autocomplete="current-password"><button id="unlock-btn" type="button">解開</button>
+          <button id="forget-btn" type="button" class="ghost">忘記已記住的設定</button></div>
+        <div id="unlock-msg" class="status bad"></div>
+      </div>
+      <label>存取 token（agent 的 .env 裡 TH_ACCESS_TOKENS 的其中一個）</label>
+      <input id="token" type="password" autocomplete="off">
+      <div class="row">
+        <div><label>LLM 網址（OpenAI 相容）</label><input id="llm-url" placeholder="https://openrouter.ai/api/v1"></div>
+        <div><label>模型</label><input id="llm-model" placeholder="例如 openai/gpt-5-mini、deepseek/deepseek-v4-flash"></div>
+      </div>
+      <div class="row">
+        <div><label>LLM API key（本機 Ollama 可以留空）</label><input id="llm-key" type="password" autocomplete="off"></div>
+        <div><label>思考強度（選填）</label>
+          <select id="llm-effort"><option value="">預設</option><option>none</option><option>low</option><option>medium</option><option>high</option></select></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button type="button" class="ghost" data-preset="openrouter">填入 OpenRouter</button>
+        <button type="button" class="ghost" data-preset="ollama">填入本機 Ollama</button>
+      </div>
+      <div class="check"><input id="remember" type="checkbox"><label for="remember" style="margin:0">記住設定（用密碼加密後存在這個瀏覽器）</label></div>
+      <div id="remember-box" hidden>
+        <label>加密用的密碼（至少 6 個字；忘記就只能重新填設定）</label>
+        <input id="remember-pw" type="password" autocomplete="new-password">
+      </div>
+      <div class="row" style="margin-top:10px"><button id="save-btn" type="button">套用</button></div>
+      <div id="save-msg" class="status"></div>
+      <div class="muted" style="margin-top:6px">不勾「記住」時，設定只存在這個分頁的記憶體裡，重新整理就要重填。
+        勾選時用你的密碼在瀏覽器裡加密（PBKDF2 + AES-GCM）後才存，沒有密碼的人只看得到密文。</div>
+    </details>
+  </div>
+
+  <div class="card">
+    <form id="ask-form">
+      <textarea id="question" rows="3" placeholder="問一個台灣史的問題，例如：霧社事件的起因是什麼？（Enter 送出、Shift+Enter 換行）"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="ask-btn" type="submit">問答</button>
+        <button id="search-btn" type="button" class="ghost" title="只檢索、不呼叫 LLM（不花錢）">只看找到的資料</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="results"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STORE_KEY = "th-settings-v1";
+let settings = { token: "", url: "", model: "", key: "", effort: "" };
+
+// ---------------------------------------------------------------- 加密保存（WebCrypto）
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function deriveKey(password, salt) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 310000, hash: "SHA-256" }, base,
+    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function seal(obj, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(password, salt), enc.encode(JSON.stringify(obj)));
+  return { v: 1, salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+}
+async function unseal(box, password) {
+  const key = await deriveKey(password, unb64(box.salt));
+  return JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct))));
+}
+function storedBox() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } }
+
+// ---------------------------------------------------------------- 設定
+function fillForm() {
+  $("token").value = settings.token; $("llm-url").value = settings.url; $("llm-model").value = settings.model;
+  $("llm-key").value = settings.key; $("llm-effort").value = settings.effort;
+}
+function readForm() {
+  return { token: $("token").value.trim(), url: $("llm-url").value.trim(), model: $("llm-model").value.trim(),
+           key: $("llm-key").value.trim(), effort: $("llm-effort").value };
+}
+function showState() {
+  const parts = [settings.token ? "token ✓" : "還沒填 token", settings.url && settings.model ? `LLM：${settings.model}` : "沒有 LLM（只會列出資料）"];
+  $("settings-state").textContent = "（" + parts.join("、") + "）";
+}
+document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.preset === "openrouter") { $("llm-url").value = "https://openrouter.ai/api/v1"; }
+  else { $("llm-url").value = "http://host.docker.internal:11434/v1"; $("llm-key").value = ""; $("llm-model").value ||= "qwen3.5:9b"; $("llm-effort").value = "none"; }
+}));
+$("remember").addEventListener("change", () => { $("remember-box").hidden = !$("remember").checked; });
+$("save-btn").addEventListener("click", async () => {
+  settings = readForm();
+  $("save-msg").className = "status ok";
+  if ($("remember").checked) {
+    if (!window.isSecureContext) { $("save-msg").className = "status bad"; $("save-msg").textContent = "瀏覽器的加密功能只能在 localhost 或 https 使用；請用 http://localhost:… 打開這個網頁"; return; }
+    const pw = $("remember-pw").value;
+    if (pw.length < 6) { $("save-msg").className = "status bad"; $("save-msg").textContent = "密碼至少 6 個字"; return; }
+    localStorage.setItem(STORE_KEY, JSON.stringify(await seal(settings, pw)));
+    $("remember-pw").value = "";
+    $("save-msg").textContent = "已套用，並加密記住在這個瀏覽器。";
+  } else {
+    localStorage.removeItem(STORE_KEY);
+    $("save-msg").textContent = "已套用（只在這個分頁，重新整理要重填）。";
+  }
+  showState();
+});
+$("unlock-btn").addEventListener("click", async () => {
+  try {
+    settings = await unseal(storedBox(), $("unlock-pw").value);
+    fillForm(); showState(); $("unlock").hidden = true; $("unlock-pw").value = ""; $("remember").checked = true;
+    $("save-msg").className = "status ok"; $("save-msg").textContent = "已解開記住的設定。";
+  } catch { $("unlock-msg").textContent = "密碼不對"; }
+});
+$("forget-btn").addEventListener("click", () => {
+  if (!confirm("刪除這個瀏覽器記住的設定？")) return;
+  localStorage.removeItem(STORE_KEY); $("unlock").hidden = true; $("remember").checked = false;
+});
+
+// ---------------------------------------------------------------- 呼叫 agent API
+function headers() {
+  const h = { "Content-Type": "application/json", Authorization: `Bearer ${settings.token}` };
+  if (settings.url && settings.model) {
+    h["X-LLM-Base-URL"] = settings.url; h["X-LLM-Model"] = settings.model;
+    if (settings.key) h["X-LLM-API-Key"] = settings.key;
+    if (settings.effort) h["X-LLM-Reasoning-Effort"] = settings.effort;
+  }
+  return h;
+}
+async function call(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: headers() });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+  return data;
+}
+
+// ---------------------------------------------------------------- 顯示
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function sourceHtml(s, cited) {
+  return `<div class="source" data-n="${s.n}">
+    <div><b>[${s.n}]</b> 《<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>》${esc(s.section.replace(s.title, "").replace(/^ › /, ""))}
+      <span class="muted">${esc(s.period)}${cited ? "・被引用" : ""}</span>
+      <a href="#" class="cite toggle">看原文段落</a></div>
+    <div class="text">${esc(s.text)}</div></div>`;
+}
+function render(q, data, kind) {
+  const box = document.createElement("div");
+  box.className = "card";
+  let html = `<div class="q">❓ ${esc(q)}</div>`;
+  if (kind === "ask") {
+    // 簡單的 Markdown：粗體、項目符號、小標題（先跳脫 HTML 再轉，安全）
+    const answer = esc(data.answer)
+      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+      .replace(/^\s*[*-]\s+/gm, "• ")
+      .replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>")
+      .replace(/\[(\d{1,2})\]/g, '<a href="#" class="cite" data-n="$1">[$1]</a>');
+    html += `<div class="answer">${answer}</div>`;
+    const meta = [data.model && `模型：${esc(data.model)}`, data.timings?.retrieve_ms != null && `檢索 ${data.timings.retrieve_ms} ms`,
+                  data.timings?.answer_ms != null && `回答 ${(data.timings.answer_ms / 1000).toFixed(1)} 秒`].filter(Boolean).join("・");
+    html += `<div class="muted" style="margin-top:6px">${meta}</div>`;
+    if (data.llm_error) html += `<div class="status bad">LLM：${esc(data.llm_error)}</div>`;
+    const cited = new Set((data.citations || []).map((c) => c.n));
+    html += `<details style="margin-top:8px" ${cited.size ? "" : "open"}><summary>找到的資料（${data.sources.length} 筆，被引用 ${cited.size} 筆）</summary>
+             ${data.sources.map((s) => sourceHtml(s, cited.has(s.n))).join("")}</details>`;
+  } else {
+    html += `<div class="muted">只檢索、沒有呼叫 LLM：</div>` + data.hits.map((h, i) => sourceHtml({ ...h, n: i + 1 }, false)).join("");
+  }
+  box.innerHTML = html;
+  box.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.classList.contains("toggle")) { e.preventDefault(); t.closest(".source").classList.toggle("open"); }
+    else if (t.classList.contains("cite") && t.dataset.n) {
+      e.preventDefault();
+      box.querySelector("details").open = true;
+      box.querySelectorAll(".source").forEach((s) => s.classList.toggle("hl", s.dataset.n === t.dataset.n));
+      const s = box.querySelector(`.source[data-n="${t.dataset.n}"]`);
+      if (s) { s.classList.add("open"); s.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    }
+  });
+  $("results").prepend(box);
+}
+function renderError(q, err) {
+  const box = document.createElement("div");
+  box.className = "card";
+  box.innerHTML = `<div class="q">❓ ${esc(q)}</div><div class="status bad">${esc(err.message)}</div>`;
+  $("results").prepend(box);
+}
+
+async function run(kind) {
+  const q = $("question").value.trim();
+  if (!q) return;
+  if (!settings.token) { $("settings-box").open = true; $("save-msg").className = "status bad"; $("save-msg").textContent = "先填存取 token 並按「套用」"; return; }
+  $("ask-btn").disabled = $("search-btn").disabled = true;
+  $("ask-btn").textContent = kind === "ask" ? "回答中…" : "問答";
+  try {
+    const data = kind === "ask"
+      ? await call("/ask", { method: "POST", body: JSON.stringify({ question: q }) })
+      : await call(`/search?q=${encodeURIComponent(q)}`);
+    render(q, data, kind);
+  } catch (e) { renderError(q, e); }
+  finally { $("ask-btn").disabled = $("search-btn").disabled = false; $("ask-btn").textContent = "問答"; }
+}
+$("ask-form").addEventListener("submit", (e) => { e.preventDefault(); run("ask"); });
+$("search-btn").addEventListener("click", () => run("search"));
+$("question").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); run("ask"); } });
+
+// ---------------------------------------------------------------- 啟動
+async function health() {
+  try {
+    const h = await (await fetch("/health")).json();
+    const ix = h.indexing || {};
+    let text = h.ok ? `✅ 服務正常：${h.docs} 篇、${h.chunks} 段（${h.embed_model}）` : "⏳ 索引還沒建好";
+    if (ix.running) text += `・正在補建索引 ${ix.done}/${ix.total ?? "?"}`;
+    if (ix.error) text += `・建索引失敗：${ix.error}`;
+    if (!h.auth_configured) text += "・⚠️ agent 還沒設定存取 token（.env 的 TH_ACCESS_TOKENS）";
+    $("health").className = "status " + (h.ok ? "ok" : "bad");
+    $("health").textContent = text;
+    if (ix.running) setTimeout(health, 3000);
+  } catch { $("health").className = "status bad"; $("health").textContent = "連不上服務"; }
+}
+health();
+if (storedBox()) { $("unlock").hidden = false; $("settings-box").open = true; }
+else if (!settings.token) $("settings-box").open = true;
+showState();
+</script>
+</body>
+</html>

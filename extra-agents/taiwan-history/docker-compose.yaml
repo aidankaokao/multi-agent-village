@@ -1,0 +1,29 @@
+# 台灣史專家：獨立部署（和 Multi-Agent Village 分開）
+#   cp .env.example .env → ./build.sh → docker-compose up -d → 打開 http://localhost:${TH_PORT}
+services:
+  taiwan-history:
+    image: ${IMAGE_REGISTRY:-}${IMAGE_NAME:-taiwan-history-agent}:${IMAGE_TAG:-0.1.0}
+    build:
+      context: .
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+        UV_VERSION: ${UV_VERSION:-0.6.14}
+    restart: unless-stopped
+    ports:
+      # 預設只開給本機：呼叫時 header 裡有 LLM 的 API key，跨機器要走 HTTPS 才安全
+      - "${TH_BIND:-127.0.0.1}:${TH_PORT:-8100}:8100"
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      TH_ACCESS_TOKENS: ${TH_ACCESS_TOKENS:-}
+      TH_PUBLIC_URL: ${TH_PUBLIC_URL:-http://localhost:8100}
+      TH_OLLAMA_URL: ${TH_OLLAMA_URL:-http://host.docker.internal:11434}
+      TH_EMBED_MODEL: ${TH_EMBED_MODEL:-bge-m3}
+      TH_ALLOWED_LLM_HOSTS: ${TH_ALLOWED_LLM_HOSTS:-}
+      TH_TOP_K: ${TH_TOP_K:-8}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Linux 也能連主機上的 Ollama
+    volumes:
+      - th-data:/data
+
+volumes:
+  th-data:
