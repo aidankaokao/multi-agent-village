@@ -297,6 +297,20 @@ def acc_auditor(d, view, frame, dy):
         r(d, 11, 17 + dy, 11, 20 + dy, handle)
 
 
+def acc_scribe(d, view, frame, dy):
+    book, page, quill, hood = hexc("#7a3a2a"), hexc("#f1e6c8"), hexc("#f4f4f4"), hexc("#5a3a22")
+    r(d, 9, 3 + dy, 22, 5 + dy, hood)  # 頭巾
+    px(d, [(8, 6 + dy), (23, 6 + dy)], hood)
+    if view == "down":
+        r(d, 11, 20 + dy, 18, 24 + dy, book)  # 筆記本
+        r(d, 12, 21 + dy, 17, 23 + dy, page)
+        r(d, 14, 21 + dy, 14, 23 + dy, book)
+        px(d, [(21, 17 + dy), (22, 16 + dy), (23, 15 + dy), (24, 14 + dy), (20, 18 + dy)], quill)
+    elif view == "left":
+        r(d, 8, 20 + dy, 12, 24 + dy, book)
+        r(d, 9, 21 + dy, 11, 23 + dy, page)
+
+
 CHARACTERS = {
     # id: (中文名, 外觀說明（工匠挑外觀時參考）, 調色盤, 配件, 系統角色？)
     "poet": ("詩人", "貝雷帽、羽毛筆，文藝創作", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet, False),
@@ -309,6 +323,7 @@ CHARACTERS = {
     "chef": ("廚師", "高帽、湯匙，料理食譜", dict(hair="#3a2a1e", cloth="#e8e8ee", cloth2="#3a3a4a", shoe="#222222"), acc_chef, False),
     "mayor": ("村長", "王冠、法杖", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor, True),
     "craftsman": ("工匠", "安全帽、槌子", dict(hair="#3a2a1e", cloth="#4a6a8a", cloth2="#2a3a4a", shoe="#2a1a1a"), acc_craftsman, True),
+    "scribe": ("書記", "頭巾、筆記本、羽毛筆", dict(hair="#3a2a1e", cloth="#8a6a3a", cloth2="#5a4424", shoe="#2a1a1a"), acc_scribe, True),
     "auditor": ("審核員", "黑袍、放大鏡", dict(hair="#5a4a3a", cloth="#2a2a3a", cloth2="#1a1a26", shoe="#111111"), acc_auditor, True),
 }
 

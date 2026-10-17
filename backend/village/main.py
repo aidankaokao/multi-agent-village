@@ -12,6 +12,7 @@ from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
 from village.api.conversations import router as conversations_router
+from village.api.memories import router as memories_router
 from village.api.runs import router as runs_router
 from village.api.workshop import router as workshop_router
 from village.config import Settings
@@ -25,6 +26,7 @@ from village.security.redact import install_log_redaction
 from village.store.agents import load_registry, seed_builtin
 from village.store.db import init_db, make_engine, make_sessionmaker
 from village.store.conversations import ConversationStore
+from village.store.memories import MemoryStore
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore
 
@@ -44,6 +46,7 @@ class AppContext:
     rules: RulesStore
     trace: TraceStore
     conversations: ConversationStore
+    memories: MemoryStore
     tasks: set[asyncio.Task] = field(default_factory=set)
     active: dict[str, asyncio.Task] = field(default_factory=dict)  # run_id → 執行中的問答（取消用）
     owners: dict[str, str] = field(default_factory=dict)  # run_id → 提問者 user_id
@@ -85,10 +88,16 @@ def create_app(
             rules=rules,
             trace=trace,
             conversations=ConversationStore(sm),
+            memories=MemoryStore(sm),
         )
         yield
-        for t in list(app.state.ctx.tasks):
+        # 關閉時：取消還在跑的問答，等它們把「已取消」寫回 DB（最多 5 秒）再關資料庫，
+        # 否則收尾的 DB 寫入會卡在已關閉的連線上，整個程序關不掉
+        pending = list(app.state.ctx.tasks)
+        for t in pending:
             t.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=5)
         await engine.dispose()
 
     app = FastAPI(title="Multi-Agent Village", lifespan=lifespan)
@@ -100,6 +109,7 @@ def create_app(
     app.include_router(workshop_router)
     app.include_router(runs_router)
     app.include_router(conversations_router)
+    app.include_router(memories_router)
 
     @app.get("/api/health")
     async def health():

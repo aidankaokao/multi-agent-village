@@ -322,6 +322,17 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
         {run.status === "done" && !run.answer && <div className="step-error">沒有產生結果，請展開執行過程查看原因。</div>}
         {run.status === "failed" && <div className="step-error">執行失敗：{run.error}</div>}
         {run.status === "cancelled" && <div className="muted">■ 已停止。完成的步驟保留在執行過程與紀錄裡。</div>}
+        {run.scribing && <div className="muted scribe-note">📝 書記正在整理要記住的事…</div>}
+        {run.remembered?.map((m) => (
+          <div key={m} className="scribe-note" title="可以在「記憶」頁修改或刪除">
+            📝 書記記下：{m}
+          </div>
+        ))}
+        {run.forgotten?.map((m) => (
+          <div key={m} className="scribe-note muted">
+            🗑 書記忘掉：{m}
+          </div>
+        ))}
         {finished && (
           <div className="row answer-foot">
             {lastReview && !lastReview.skipped && (

@@ -18,6 +18,9 @@ class VillageRules(BaseModel):
     keep_runs: int = Field(default=500, ge=10, le=10_000)  # 執行紀錄保留筆數
     allow_registration: bool = True  # 登入頁可以自己註冊（一般成員）
     context_turns: int = Field(default=3, ge=0, le=10)  # 問答時帶入前幾輪對話（0 = 每次都是新問題）
+    memory_enabled: bool = True  # 問答時帶入長期記憶
+    memory_auto: bool = True  # 書記在問答後自動記錄
+    memory_max: int = Field(default=10, ge=1, le=30)  # 每次最多帶入幾條記憶
 
 
 class RulesStore:

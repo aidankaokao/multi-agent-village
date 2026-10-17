@@ -66,6 +66,12 @@
       "path": "characters/craftsman.png",
       "system": true
     },
+    "scribe": {
+      "name": "書記",
+      "desc": "頭巾、筆記本、羽毛筆",
+      "path": "characters/scribe.png",
+      "system": true
+    },
     "auditor": {
       "name": "審核員",
       "desc": "黑袍、放大鏡",

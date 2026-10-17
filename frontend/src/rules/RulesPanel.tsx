@@ -94,6 +94,22 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>📝 長期記憶（書記）</h3>
+        <p className="hint">書記會在問答後記下關於使用者本人、長期有效的事（名字、偏好、生日…），之後的問答會帶入，跨對話也記得。每個人只會用到自己的記憶，可以在「記憶」頁查看與修改。</p>
+        <label className="toggle">
+          <input type="checkbox" checked={draft.memory_enabled} onChange={(e) => set({ memory_enabled: e.target.checked })} />
+          問答時帶入長期記憶
+        </label>
+        <label className="toggle">
+          <input type="checkbox" checked={draft.memory_auto} onChange={(e) => set({ memory_auto: e.target.checked })} />
+          書記在問答後自動記錄（只在句子提到自己時才呼叫 LLM，用 small 分級）
+        </label>
+        <Field label="每次最多帶入幾條記憶" hint="1～30；記憶多時，偏好類一定帶，其他依跟問題的相關程度挑選">
+          <NumInput value={draft.memory_max} min={1} max={30} onChange={(v) => set({ memory_max: v ?? 10 })} />
+        </Field>
+      </section>
+
+      <section>
         <h3>📜 執行紀錄</h3>
         <Field label="保留最近幾筆" hint="超過的舊紀錄會自動刪除；10～10000">
           <NumInput value={draft.keep_runs} min={10} max={10000} step={100} onChange={(v) => set({ keep_runs: v ?? 500 })} />

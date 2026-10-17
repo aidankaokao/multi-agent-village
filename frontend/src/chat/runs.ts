@@ -35,6 +35,9 @@ export interface RunView {
   message: string;
   status: "planning" | "running" | "done" | "failed" | "cancelled";
   fromHistory?: boolean; // 從對話紀錄載入（沒有執行過程，只有結果）
+  scribing?: boolean; // 書記正在記錄
+  remembered?: string[]; // 書記這次記下的
+  forgotten?: string[]; // 書記這次忘掉的
   reviewing?: boolean; // 審核員檢查中
   reviews: ReviewView[];
   source?: PlanSource;
@@ -181,6 +184,12 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
         finishedAt: Date.now(),
         steps: run.steps.map((s) => (s.status === "running" || s.status === "pending" ? { ...s, status: "error", live: undefined, error: "已取消" } : s)),
       };
+      break;
+    case "memory.started":
+      run = { ...run, scribing: true };
+      break;
+    case "memory.finished":
+      run = { ...run, scribing: false, remembered: (e.added as string[]) ?? [], forgotten: (e.forgot as string[]) ?? [] };
       break;
     case "review.started":
       run = { ...run, reviewing: true };

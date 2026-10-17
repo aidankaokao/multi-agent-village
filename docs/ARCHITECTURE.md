@@ -294,7 +294,12 @@ session token 放 httpOnly + SameSite=Lax cookie，DB 只存 SHA-256；密碼 sc
 村長直接回覆（當成真的對話）、審核員（上一輪）；Executor 把 `use: ["prev"]` 換成「參考資料（上一輪的回答）」。
 上一輪的回答放 context variable（Runner 全村共用，同時有多人問答）。
 
-**長期記憶（規劃中）**：
+**長期記憶（已完成，`core/scribe.py`、`store/memories.py`、`api/memories.py`）**：問答結束且成功後，
+`api/chat.py` 的 `take_notes_after` 請書記（`scribe`）看使用者這一句（附上既有記憶的編號清單），輸出 `{add, forget}`；
+發 `memory.started` / `memory.finished`（含 added / forgot）事件。問答開始前 `MemoryStore.relevant` 挑出相關記憶，
+以 context variable 帶進每一步的參考資料與村長直接回覆。
+
+**以後（規劃中）**：
 
 - `users`、`conversations`、`messages`：對話紀錄（短期記憶）
 - `memories`：長期記憶（使用者偏好、事實），由一個 `memory` 背景 agent 從對話中萃取，問答前檢索相關記憶塞進 context

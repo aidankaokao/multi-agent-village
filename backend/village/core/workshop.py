@@ -29,7 +29,7 @@ MAX_INTERVIEW_ROUNDS = 4  # 使用者回答幾輪後就不再追問，直接請�
 
 # 地圖（與前端 VillageScene 相同）：住處避開村長、工匠與道路
 MAP_W, MAP_H = 30, 20
-SYSTEM_HOMES = [(15, 9), (26, 16), (10, 12)]  # 村長、工匠、審核員
+SYSTEM_HOMES = [(15, 9), (26, 16), (10, 12), (13, 15)]  # 村長、工匠、審核員、書記
 ROAD_ROW, ROAD_COL = 9, 15
 
 CREATIVITY = {"stable": 0.2, "balanced": 0.6, "creative": 0.9}

@@ -176,6 +176,9 @@ export interface RunDetail extends RunSummary {
 export interface VillageRules {
   allow_registration: boolean;
   context_turns: number;
+  memory_enabled: boolean;
+  memory_auto: boolean;
+  memory_max: number;
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -384,4 +387,26 @@ export const conversations = {
   messages: (id: string) => api<MessageRow[]>(`/api/conversations/${id}/messages`),
   rename: (id: string, title: string) => api<{ id: string; title: string }>(`/api/conversations/${id}`, { method: "PATCH", json: { title } }),
   remove: (id: string) => api<void>(`/api/conversations/${id}`, { method: "DELETE" }),
+};
+
+// ---------------------------------------------------------------- 長期記憶
+
+export interface MemoryRow {
+  id: string;
+  content: string;
+  kind: "preference" | "fact";
+  source: "auto" | "manual";
+  enabled: boolean;
+  use_count: number;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export const memories = {
+  list: () => api<MemoryRow[]>("/api/memories"),
+  create: (content: string, kind: MemoryRow["kind"]) => api<MemoryRow>("/api/memories", { method: "POST", json: { content, kind } }),
+  update: (id: string, body: Partial<Pick<MemoryRow, "content" | "kind" | "enabled">>) =>
+    api<MemoryRow>(`/api/memories/${id}`, { method: "PATCH", json: body }),
+  remove: (id: string) => api<void>(`/api/memories/${id}`, { method: "DELETE" }),
+  clear: () => api<void>("/api/memories", { method: "DELETE" }),
 };

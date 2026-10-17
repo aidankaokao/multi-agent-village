@@ -15,6 +15,7 @@ frontend/public/assets/sprites/
 │   ├── scholar.png / merchant.png / farmer.png / chef.png  # 學者、商人、農夫、廚師：給新村民挑的外觀
 │   ├── mayor.png               # 村長 = orchestrator（system，不給村民用）
 │   ├── craftsman.png           # 工匠 = 村民工坊（system，不給村民用）
+│   ├── scribe.png              # 書記 = 長期記憶（system）
 │   └── auditor.png             # 審核員 = 最終答案檢查（system，不給村民用）；reviewer.png 改名「巡查員」給村民用
 ├── deco/                       # 地圖裝飾：tree、pine、bush、flowers、rock、well、house_red、house_blue、sign、workbench
 └── ui/status_bubbles.png       # 頭頂狀態泡泡

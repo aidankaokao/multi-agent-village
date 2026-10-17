@@ -152,6 +152,24 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class Memory(Base):
+    """長期記憶：關於使用者本人、跨對話有效的事（名字、偏好、事實）。由書記自動記錄或使用者手動新增。"""
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    content: Mapped[str] = mapped_column(String(300))
+    kind: Mapped[str] = mapped_column(String(16), default="fact")  # preference / fact
+    source: Mapped[str] = mapped_column(String(16), default="auto")  # auto（書記）/ manual
+    source_run_id: Mapped[str | None] = mapped_column(String(32))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class RunTrace(Base):
     """一次問答的執行紀錄：計畫、每一步的輸入輸出、審核結果、耗時與 token。steps 存 JSON（總是跟著 run 一起讀）。"""
 

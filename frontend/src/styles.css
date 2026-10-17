@@ -1332,3 +1332,8 @@ button.conv-open {
   color: var(--text);
   box-shadow: none;
 }
+
+.scribe-note {
+  font-size: 12px;
+  color: #c9a46a;
+}

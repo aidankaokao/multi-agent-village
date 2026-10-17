@@ -331,6 +331,7 @@ async def direct_reply(
     llm: ChatLLM,
     on_text: Callable[[str], Awaitable[None]] | None = None,
     history: list[Turn] | None = None,
+    memories: str = "",
 ) -> str:
     roster = "、".join(f"{a.name}（@{a.id}）" for a in agents) or "（目前沒有村民）"
     system = (
@@ -338,6 +339,8 @@ async def direct_reply(
         f"村裡目前有這些村民可以幫忙：{roster}。"
         "如果使用者的需求村民做不到，就誠實說明，並介紹村民能做什麼。"
     )
+    if memories:
+        system += f"\n\n{memories}"
     try:
         kw = {"on_text": on_text} if on_text else {}
         msgs: list[ChatMessage] = []

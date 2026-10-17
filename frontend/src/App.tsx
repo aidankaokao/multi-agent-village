@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { AccountsPanel, DeleteAccountModal, PasswordModal } from "./accounts/AccountsPanel";
 import { auth, conversations, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type ConversationRow, type Me } from "./api";
 import { LoginPage } from "./auth/LoginPage";
+import { MemoryPanel } from "./memory/MemoryPanel";
 import { ChatPanel } from "./chat/ChatPanel";
 import { initialRuns, runsReducer } from "./chat/runs";
 import { useVillageEvents } from "./events";
@@ -12,11 +13,12 @@ import { VillagerManager } from "./villagers/VillagerManager";
 import { VillageCanvas, type VillageHandle } from "./village/VillageCanvas";
 import type { VillagerInfo } from "./village/VillageScene";
 
-type Page = "villagers" | "traces" | "rules" | "accounts" | "llm";
+type Page = "villagers" | "traces" | "memories" | "rules" | "accounts" | "llm";
 
 const PAGES: { id: Page; icon: string; label: string; admin?: boolean }[] = [
   { id: "villagers", icon: "🧑‍🌾", label: "村民", admin: true },
   { id: "traces", icon: "📜", label: "紀錄" },
+  { id: "memories", icon: "📝", label: "記憶" },
   { id: "rules", icon: "⚖️", label: "村規", admin: true },
   { id: "accounts", icon: "👥", label: "帳號", admin: true },
   { id: "llm", icon: "🧠", label: "LLM 設定" }, // 每個人管理自己的 LLM（自己的 API key 與額度）
@@ -252,6 +254,7 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
           <div className="drawer-body">
             {page === "villagers" && <VillagerManager />}
             {page === "traces" && <TracePanel agents={agents} openId={traceId} onOpened={clearTraceId} refreshKey={traceTick} />}
+            {page === "memories" && <MemoryPanel />}
             {page === "rules" && <RulesPanel />}
             {page === "accounts" && <AccountsPanel me={me} />}
             {page === "llm" && <LlmSettings />}

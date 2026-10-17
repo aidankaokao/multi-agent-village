@@ -3,7 +3,7 @@
 像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者在問答框的任務。
 
 - 架構：`docs/ARCHITECTURE.md`
-- 階段規劃：`docs/ROADMAP.md`（目前：Phase 5 進行中——5A 帳號、5B 對話與多輪上下文完成，接著 5C 長期記憶）
+- 階段規劃：`docs/ROADMAP.md`（目前：Phase 5 帳號、對話、長期記憶完成，下一步 Phase 6 台灣史 remote agent）
 - 素材規格：`docs/SPRITES.md`
 
 ## 原則
@@ -11,7 +11,7 @@
 - 一律用繁體中文溝通與撰寫文件。
 - LLM 可能是雲端，也可能是本地弱模型（Ollama）。任何依賴 LLM 的流程都要有結構化輸出約束、失敗重試與非 LLM 的退路。
 - 規劃（LLM）與執行（程式碼）分開：村長只產生 Plan JSON，Executor 負責執行。
-- 使用者是「介面使用者」：新增 / 編輯 / 測試村民一律在前端「村民」分頁完成，存 DB（`agents` 表），不要求使用者改檔案或後端程式。`agents/<id>/agent.yaml` 只是第一次啟動時匯入的內建範例（DB 沒有該 id 才匯入；刪除的內建範例不會自動回來）。`mayor`、`craftsman`（工匠，`core/workshop.py`：對話打造村民草稿）、`reviewer`（審核員，`core/reviewer.py`）是保留名稱。
+- 使用者是「介面使用者」：新增 / 編輯 / 測試村民一律在前端「村民」分頁完成，存 DB（`agents` 表），不要求使用者改檔案或後端程式。`agents/<id>/agent.yaml` 只是第一次啟動時匯入的內建範例（DB 沒有該 id 才匯入；刪除的內建範例不會自動回來）。`mayor`、`craftsman`（工匠，`core/workshop.py`：對話打造村民草稿）、`reviewer`（審核員，`core/reviewer.py`）、`scribe`（書記，`core/scribe.py`：長期記憶）是保留名稱。
 - 核心流程在 `backend/village/core/`：`orchestrator.py`（村長規劃與退路）、`executor.py`（執行、平行、逾時、取消、事件、寫紀錄）、`harness.py`（輸出檢查）、`reviewer.py`（審核員）。
 - 工具型村民：工具（可靠的程式碼）在 `backend/village/tools/`，使用者在介面挑工具；LLM 只整理參數，計算交給程式，並有不靠 LLM 的退路。
 - 全域行為（審核員、逾時、平行、紀錄保留）是「村規」，存 `settings` 表、在前端「村規」分頁調整，不寫進設定檔。

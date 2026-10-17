@@ -17,6 +17,7 @@ from village.core.context import PREV, Turn
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan
 from village.core.registry import AgentRegistry
+from village.core.scribe import render_memories
 from village.core.reviewer import REVIEWER_ID, Leaf, Review, review
 from village.events import EventBus
 from village.llm.base import ChatMessage, LLMError, TextCallback
@@ -81,6 +82,8 @@ def render_context(
     step: Step, results: dict[str, StepResult], registry: AgentRegistry, previous: str = ""
 ) -> str:
     parts = []
+    if memories := _MEMORIES.get():
+        parts.append(memories)
     if PREV in step.use and previous:
         parts.append(f"參考資料（上一輪的回答）：\n{previous}")
     for ref in step.use:
@@ -116,6 +119,7 @@ def compose_answer(plan: Plan, results: dict[str, StepResult], registry: AgentRe
 
 # 上一輪的回答：Runner 是全村共用的，同時有好幾個人在問答，所以放 context variable（每個問答 task 各自一份）
 _PREVIOUS: ContextVar[str] = ContextVar("previous_answer", default="")
+_MEMORIES: ContextVar[str] = ContextVar("memories", default="")  # 書記記下的長期記憶（已排成文字）
 
 DEFAULT_RULES = VillageRules(reviewer_enabled=False, parallel=False)  # 沒接 DB 時（測試）維持最單純的行為
 
@@ -139,12 +143,13 @@ class Runner:
 
     async def run(
         self, run_id: str, message: str, traced: bool = False, user_id: str | None = None,
-        history: list[Turn] | None = None,
+        history: list[Turn] | None = None, memories: list[str] | None = None,
     ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。"""
         self.bus.claim(run_id, user_id)
         try:
             with llm_user(user_id):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
+                _MEMORIES.set(render_memories(memories) if memories else "")
                 return await self._run(run_id, message, traced, user_id, history or [])
         finally:
             self.bus.release(run_id)
@@ -185,7 +190,9 @@ class Runner:
             if not plan.steps:
                 await emit("agent.started", run_id=run_id, step_id=None, agent=MAYOR, instruction=message)
                 on_text = DeltaEmitter(self.bus, run_id=run_id, step_id=None, agent=MAYOR)
-                answer = await direct_reply(message, agents, self.llm, on_text=on_text, history=history)
+                answer = await direct_reply(
+                    message, agents, self.llm, on_text=on_text, history=history, memories=_MEMORIES.get()
+                )
                 await emit("agent.finished", run_id=run_id, step_id=None, agent=MAYOR, output=answer)
                 await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[], reviews=[])
                 await record("done", answer=answer)
