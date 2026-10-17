@@ -1,6 +1,6 @@
 # 文件彙整師：規劃與進度
 
-> 最後更新：2026-10-17（R0 規劃完成）。每完成一步就更新這份文件（勾選、補上實際做法與決定）。
+> 最後更新：2026-10-17（R1 完成，等使用者部署實測）。每完成一步就更新這份文件（勾選、補上實際做法與決定）。
 
 把使用者上傳的文件（Excel、CSV、txt、PDF，最多 3 份）整理成一份彙整報告，輸出成 PDF 讓人下載。
 在村子裡是駐村專家「文件彙整師」。
@@ -56,15 +56,24 @@ extra-agents/report-maker/
 - [x] 建立資料夾、寫下規劃與決定
 
 ### R1：專家本體（獨立可用）
-- [ ] 讀檔：xlsx（openpyxl，唯讀模式、多工作表）、csv、txt（編碼判斷）、pdf（文字與簡單表格；掃描檔偵測）
-- [ ] 上限與惡意檔防護
-- [ ] 整理：文件概要 → LLM 報告 JSON（長文件先逐份摘要）；沒有 LLM / 失敗時的統計報告
-- [ ] PDF 樣板與產生（中文字型、表格、頁首頁尾、頁碼）
-- [ ] HTTP 服務：`/health`、agent card、`POST /report`（multipart 上傳，給測試網頁）、`/a2a`（`message/send`、`message/stream`）
-- [ ] 指令（`uv run rmk …`，不用 rm 以免和刪除指令混淆）：`report 檔案… --question`（本機直接產 PDF）、`serve`、`gen-token`
-- [ ] 簡易測試網頁
-- [ ] Dockerfile、docker-compose（127.0.0.1:8101）、`build.sh`（自動產生存取 token）
-- [ ] 單元測試、本機實測（qwen3.5:9b 與雲端模型）
+- [x] 讀檔（`app/readers.py`）：xlsx（openpyxl 唯讀、多工作表、公式取存檔時的值、開頭空白列自動略過）、csv（自動判斷分隔符號）、
+      txt（UTF-8 / BOM / UTF-16 / Big5 自動判斷）、pdf（pdfplumber 逐頁取文字；平均每頁不到 20 字且有圖片 = 掃描檔，直接告知）
+- [x] 表格統計由程式算：欄位類型（數字 / 日期 / 文字）、總和 / 平均 / 最小 / 最大、文字欄最常見的值；
+      **分組小計**（不同值 2～12 個的文字欄，例如部門、品項 → 加總數字欄；LLM 自己加總一定會錯）
+- [x] 上限與惡意檔防護：份數、每份 / 合計大小、每表列數、工作表數、PDF 頁數、xlsx 解壓後大小；
+      `/a2a` 邊收邊算大小（超過立刻 413）；同時處理數上限（其餘排隊）；不提供 multipart 上傳（框架會把大檔寫進暫存檔）
+- [x] 整理（`app/report.py`）：文件摘要（統計＋前 20 列＋內文）→ 太長的內文先分段摘要（最多 12 段、3 段平行）→
+      LLM 依骨架輸出 JSON（送 json_schema 約束，不支援就拿掉；解析失敗重試一次）→ 檔名對回實際檔案、
+      **重點數字和原始資料核對**（對不上的移除並註明）→ 失敗時退路是「統計版」報告
+- [x] PDF（`app/render.py`、`app/templates/report.html`）：WeasyPrint、A4、頁首標題、頁碼「第 N / M 頁」、
+      重點數字卡片、附錄（欄位統計表、分組小計表，由程式產生）；容器用 Noto Sans CJK TC（已實測中文正常）
+- [x] HTTP 服務（`app/main.py`）：`/health`、agent card（`skills[].inputModes`、`x-file-limits`、`x-llm-headers`）、
+      `/a2a`（`message/send`、`message/stream`：進度用 status-update 送，結果是 text / file（PDF）/ data 三個 artifact）
+- [x] 指令（`uv run rmk …`，不用 rm 以免和刪除指令混淆）：`read`、`report`、`serve`、`gen-token`
+- [x] 簡易測試網頁：拖放 / 選檔、重點方向、進度、下載 / 預覽 PDF、聊天短版；連線設定與加密保存沿用台灣史專家
+- [x] Dockerfile（Pango、fonts-noto-cjk、非 root）、docker-compose（127.0.0.1:8101、根目錄唯讀、/tmp 用記憶體、記憶體上限 2g）、
+      `build.sh`（自動產生存取 token）；image 約 530 MB（大部分是中文字型）
+- [x] 單元測試 24 個（不需要 WeasyPrint、不連 LLM）；本機實測 qwen3.5:9b：3 份範例檔約 2 分半，數字都正確
 - [ ] 使用者部署實測
 
 ### R2：村子附檔（主專案）

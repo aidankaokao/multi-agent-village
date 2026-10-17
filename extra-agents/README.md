@@ -11,4 +11,4 @@
 | 資料夾 | 狀態 | 說明 |
 |---|---|---|
 | [taiwan-history](taiwan-history/) | ✅ 完成（村子裡叫駐村專家） | 台灣史專家：以維基百科等公開資料做 RAG，回答附引用來源 |
-| [report-maker](report-maker/) | 規劃中 | 文件彙整師：上傳 Excel / CSV / txt / PDF（最多 3 份）→ 彙整報告 PDF |
+| [report-maker](report-maker/) | R1 完成（專家本體），待接回村子 | 文件彙整師：上傳 Excel / CSV / txt / PDF（最多 3 份）→ 彙整報告 PDF |

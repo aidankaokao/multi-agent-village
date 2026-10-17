@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>{{ r.title }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 18mm 20mm;
+    @top-left { content: string(title); font-size: 8pt; color: #888; }
+    @top-right { content: "文件彙整師"; font-size: 8pt; color: #888; }
+    @bottom-center { content: "第 " counter(page) " / " counter(pages) " 頁"; font-size: 8pt; color: #888; }
+  }
+  @page :first { @top-left { content: none; } @top-right { content: none; } }
+  html { font-family: "Noto Sans CJK TC", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; font-size: 10.5pt; color: #222; line-height: 1.7; }
+  h1 { font-size: 20pt; margin: 0 0 4pt; color: #1d3557; string-set: title content(); }
+  h2 { font-size: 13pt; color: #1d3557; border-bottom: 1.5pt solid #1d3557; padding-bottom: 2pt; margin: 18pt 0 8pt; break-after: avoid; }
+  h3 { font-size: 11pt; margin: 12pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 6pt; }
+  ul { margin: 0 0 6pt; padding-left: 16pt; }
+  li { margin-bottom: 2pt; }
+  .meta { color: #666; font-size: 9pt; margin-bottom: 12pt; }
+  .meta div { margin-bottom: 1pt; }
+  .ask { background: #f1f4f9; border-left: 3pt solid #457b9d; padding: 6pt 10pt; margin: 8pt 0 4pt; font-size: 9.5pt; }
+  .figures { display: flex; flex-wrap: wrap; gap: 6pt; margin-bottom: 4pt; }
+  .figure { border: 0.8pt solid #ccd5e0; border-radius: 3pt; padding: 5pt 8pt; width: 48%; box-sizing: border-box; break-inside: avoid; }
+  .figure .v { font-size: 13pt; font-weight: bold; color: #1d3557; }
+  .figure .l { font-size: 9pt; }
+  .figure .s { font-size: 7.5pt; color: #888; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.5pt; margin: 4pt 0 10pt; }
+  th, td { border: 0.6pt solid #ccd5e0; padding: 2pt 5pt; text-align: left; vertical-align: top; word-break: break-all; }
+  th { background: #eef2f7; }
+  table.keep { break-inside: avoid; }
+  tr { break-inside: avoid; }
+  td.n { text-align: right; white-space: nowrap; }
+  .note { color: #8a5a00; font-size: 9pt; }
+  .warn { color: #b00020; font-size: 9pt; }
+  .appendix { break-before: page; }
+</style>
+</head>
+<body>
+  <h1>{{ r.title }}</h1>
+  <div class="meta">
+    <div>產生時間：{{ r.generated_at }}{% if r.model %}　整理模型：{{ r.model }}{% endif %}</div>
+    <div>來源檔案：{% for d in r.docs %}{{ d.name }}{% if not loop.last %}、{% endif %}{% endfor %}</div>
+  </div>
+  <div class="ask">要求：{{ r.question }}</div>
+  {% for n in r.notes %}<div class="note">※ {{ n }}</div>{% endfor %}
+  {% if r.llm_error %}<div class="warn">※ 沒有用 LLM 整理（{{ r.llm_error }}），以下只有程式統計的內容。</div>{% endif %}
+  {% for f in r.failed %}<div class="warn">※ 沒有讀到：{{ f.error }}</div>{% endfor %}
+
+  <h2>一、總結</h2>
+  {% for p in paragraphs %}<p>{{ p }}</p>{% endfor %}
+
+  {% if r.key_figures %}
+  <h2>二、重點數字</h2>
+  <div class="figures">
+    {% for k in r.key_figures %}
+    <div class="figure"><div class="v">{{ k.value }}</div><div class="l">{{ k.label }}</div>{% if k.source %}<div class="s">出自 {{ k.source }}</div>{% endif %}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% set sec = namespace(n=3 if r.key_figures else 2) %}
+  {% set nums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"] %}
+  <h2>{{ nums[sec.n] }}、各檔重點</h2>{% set sec.n = sec.n + 1 %}
+  {% for f in r.files %}
+  <h3>{{ loop.index }}. {{ f.name }}</h3>
+  {% if f.points %}<ul>{% for p in f.points %}<li>{{ p }}</li>{% endfor %}</ul>{% else %}<p class="note">（沒有整理出重點）</p>{% endif %}
+  {% endfor %}
+
+  {% if r.comparison %}
+  <h2>{{ nums[sec.n] }}、跨檔比較</h2>{% set sec.n = sec.n + 1 %}
+  <ul>{% for c in r.comparison %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if r.conclusions %}
+  <h2>{{ nums[sec.n] }}、結論</h2>{% set sec.n = sec.n + 1 %}
+  <ul>{% for c in r.conclusions %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if r.recommendations %}
+  <h2>{{ nums[sec.n] }}、建議</h2>{% set sec.n = sec.n + 1 %}
+  <ul>{% for c in r.recommendations %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <div class="appendix">
+    <h2>附錄：來源檔案與欄位統計</h2>
+    <p class="note">本附錄由程式直接讀檔計算，沒有經過 LLM。</p>
+    {% for d in r.docs %}
+    <h3>{{ loop.index }}. {{ d.name }}</h3>
+    <p>{{ d.info() }}</p>
+    {% for x in d.notes %}<div class="note">※ {{ x }}</div>{% endfor %}
+    {% for t in d.tables %}
+    <p><strong>表格「{{ t.name }}」</strong>：{{ "{:,}".format(t.rows) }} 列、{{ t.columns | length }} 欄{% if t.truncated %}（超過上限，後面沒有讀）{% endif %}</p>
+    <table>
+      <tr><th>欄位</th><th>類型</th><th>有值</th><th>總和</th><th>平均</th><th>最小</th><th>最大</th></tr>
+      {% for c in t.columns[:40] %}
+      <tr>
+        <td>{{ c.name }}</td>
+        {% if c.numeric %}
+        <td>數字</td><td class="n">{{ c.filled | num }}</td><td class="n">{{ c.numeric.sum | num }}</td><td class="n">{{ c.numeric.mean | num }}</td><td class="n">{{ c.numeric.min | num }}</td><td class="n">{{ c.numeric.max | num }}</td>
+        {% elif c.dates %}
+        <td>日期</td><td class="n">{{ c.filled | num }}</td><td colspan="4">{{ c.dates.min }} ～ {{ c.dates.max }}</td>
+        {% elif c.top %}
+        <td>文字</td><td class="n">{{ c.filled | num }}</td><td colspan="4">最常見：{% for v, k in c.top[:3] %}{{ v }}（{{ k }}）{% if not loop.last %}、{% endif %}{% endfor %}</td>
+        {% else %}
+        <td>空白</td><td class="n">0</td><td colspan="4"></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+    {% for g in t.groups %}
+    <table class="keep">
+      <tr><th>依「{{ g.by }}」分組</th><th>列數</th>{% for n in g.sums %}<th>{{ n }} 小計</th>{% endfor %}</tr>
+      {% for x in g.groups %}
+      <tr><td>{{ x.key }}</td><td class="n">{{ x.count | num }}</td>{% for v in x.sums %}<td class="n">{{ v | num }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </table>
+    {% endfor %}
+    {% if t.columns | length > 40 %}<p class="note">（還有 {{ t.columns | length - 40 }} 欄沒有列出）</p>{% endif %}
+    {% endfor %}
+    {% endfor %}
+    {% if r.failed %}
+    <h3>沒有讀到的檔案</h3>
+    <ul>{% for f in r.failed %}<li>{{ f.error }}</li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+</body>
+</html>

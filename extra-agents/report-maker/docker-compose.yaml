@@ -1,0 +1,33 @@
+# 文件彙整師：獨立部署（和 Multi-Agent Village 分開）
+#   cp .env.example .env → ./build.sh → docker-compose up -d → 打開 http://localhost:${RM_PORT}
+services:
+  report-maker:
+    image: ${IMAGE_REGISTRY:-}${IMAGE_NAME:-report-maker-agent}:${IMAGE_TAG:-0.1.0}
+    build:
+      context: .
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+        UV_VERSION: ${UV_VERSION:-0.6.14}
+    restart: unless-stopped
+    ports:
+      # 預設只開給本機：呼叫時 header 裡有 LLM 的 API key、訊息裡有文件，跨機器要走 HTTPS 才安全
+      - "${RM_BIND:-127.0.0.1}:${RM_PORT:-8101}:8101"
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      RM_ACCESS_TOKENS: ${RM_ACCESS_TOKENS:-}
+      RM_PUBLIC_URL: ${RM_PUBLIC_URL:-http://localhost:8101}
+      RM_ALLOWED_LLM_HOSTS: ${RM_ALLOWED_LLM_HOSTS:-}
+      RM_MAX_FILES: ${RM_MAX_FILES:-3}
+      RM_MAX_FILE_MB: ${RM_MAX_FILE_MB:-10}
+      RM_MAX_TOTAL_MB: ${RM_MAX_TOTAL_MB:-20}
+      RM_MAX_ROWS: ${RM_MAX_ROWS:-50000}
+      RM_MAX_PAGES: ${RM_MAX_PAGES:-100}
+      RM_DOC_CHARS: ${RM_DOC_CHARS:-8000}
+      RM_MAX_CONCURRENT: ${RM_MAX_CONCURRENT:-2}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Linux 也能連主機上的 Ollama
+    # 檔案只在記憶體處理；根目錄唯讀，/tmp 用記憶體
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: ${RM_MEM_LIMIT:-2g}
