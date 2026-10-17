@@ -117,7 +117,7 @@ async def test_openai_compat_sends_images_as_content_parts():
     msgs = bodies[0]["messages"]
     assert msgs[0]["content"] == "前一輪"  # 沒圖片的維持純文字
     assert msgs[1]["content"] == [
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD", "detail": "high"}},
         {"type": "text", "text": "看這張"},
     ]
     await client.aclose()

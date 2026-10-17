@@ -99,10 +99,13 @@ def _usage(u) -> dict:
 
 
 def _content(m: ChatMessage) -> str | list[dict]:
-    """有圖片時改用多段內容（OpenAI / OpenRouter / Ollama 都收這個格式）；圖片放在文字前面。"""
+    """有圖片時改用多段內容（OpenAI / OpenRouter / Ollama 都收這個格式）；圖片放在文字前面。
+
+    detail=high：OpenAI 預設 auto 可能用低解析度看，菜單、收據這類小字容易看錯（Ollama 會忽略這個欄位）。
+    """
     if not m.images:
         return m.content
-    parts: list[dict] = [{"type": "image_url", "image_url": {"url": img.data_url}} for img in m.images]
+    parts: list[dict] = [{"type": "image_url", "image_url": {"url": img.data_url, "detail": "high"}} for img in m.images]
     return [*parts, {"type": "text", "text": m.content}]
 
 
