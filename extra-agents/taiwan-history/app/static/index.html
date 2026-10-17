@@ -30,6 +30,7 @@
   .source .text { white-space: pre-wrap; display: none; margin-top: 4px; }
   .source.open .text { display: block; }
   .q { font-weight: 600; margin-bottom: 6px; }
+  .outside { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); background: #faf8f3; }
   .check { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
   .check input { width: auto; }
 </style>
@@ -209,7 +210,9 @@ function render(q, data, kind) {
       .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
       .replace(/^\s*[*-]\s+/gm, "• ")
       .replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>")
-      .replace(/\[(\d{1,2})\]/g, '<a href="#" class="cite" data-n="$1">[$1]</a>');
+      .replace(/\[(\d{1,2})\]/g, '<a href="#" class="cite" data-n="$1">[$1]</a>')
+      // 資料以外的補充（模型自己的知識）：另外框起來，和有出處的內容分開
+      .replace(/(以下非資料內容：[\s\S]*)$/, '<div class="outside">$1</div>');
     html += `<div class="answer">${answer}</div>`;
     const meta = [data.model && `模型：${esc(data.model)}`, data.timings?.retrieve_ms != null && `檢索 ${data.timings.retrieve_ms} ms`,
                   data.timings?.answer_ms != null && `回答 ${(data.timings.answer_ms / 1000).toFixed(1)} 秒`].filter(Boolean).join("・");

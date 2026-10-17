@@ -123,6 +123,35 @@ async def test_incremental_index_and_hybrid_search(corpus):
     assert hits[0].doc_title == "霧社事件" and hits[0].vector_rank and hits[0].keyword_rank
 
 
+def test_prompt_marks_outside_knowledge():
+    from app.answer import SYSTEM
+
+    assert "以下非資料內容：" in SYSTEM and "不標任何引用編號" in SYSTEM and "資料中沒有提到" not in SYSTEM
+
+
+def test_clean_outside_removes_citations_after_marker():
+    from app.answer import _cited, clean_outside
+
+    text = "霧社事件發生於1930年[1]。\n\n以下非資料內容：\n後來還有續集[2][3]。"
+    cleaned = clean_outside(text)
+    assert cleaned == "霧社事件發生於1930年[1]。\n\n以下非資料內容：\n後來還有續集。"
+    sources = [{"n": i, "title": f"t{i}"} for i in (1, 2, 3)]
+    assert [c["n"] for c in _cited(text, sources)] == [1]  # 補充段的編號不算引用
+    assert clean_outside("沒有補充[1]") == "沒有補充[1]"
+
+
+async def test_stream_sends_corrected_text_at_the_end(corpus, monkeypatch):
+    from app.answer import ask_stream
+
+    store, emb = await _indexed(corpus)
+    _mock_llm(monkeypatch, lambda r: httpx.Response(200, text=_sse_llm(["答案[1]。", "\n\n以下非資料內容：補充[2]"]),
+                                                    headers={"content-type": "text/event-stream"}))
+    events = [e async for e in ask_stream("霧社事件", store, emb, LLMConfig("https://openrouter.ai/api/v1", "m", "k"), k=3)]
+    kinds = [k for k, _ in events]
+    assert kinds == ["delta", "delta", "replace", "done"]
+    assert events[2][1] == "答案[1]。\n\n以下非資料內容：補充" and events[3][1].answer == events[2][1]
+
+
 def test_llm_url_allowlist():
     hosts = ["openrouter.ai", "localhost"]
     check_url("https://openrouter.ai/api/v1", hosts)

@@ -168,6 +168,8 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
                 if kind == "delta":
                     yield sse(text(str(value), append=not first))
                     first = False
+                elif kind == "replace":  # 送完整修正版（append=False = 取代前面送的文字）
+                    yield sse(text(str(value), append=False))
                 else:
                     yield sse(data(a2a.answer_data(value.to_dict())))
             yield sse(done())
