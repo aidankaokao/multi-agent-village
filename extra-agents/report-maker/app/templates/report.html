@@ -30,9 +30,11 @@
   table { border-collapse: collapse; width: 100%; font-size: 8.5pt; margin: 4pt 0 10pt; }
   th, td { border: 0.6pt solid #ccd5e0; padding: 2pt 5pt; text-align: left; vertical-align: top; word-break: break-all; }
   th { background: #eef2f7; }
-  table.keep { break-inside: avoid; }
+  table.keep { break-inside: avoid; font-size: 7.5pt; }
+  table.keep th, table.keep td { word-break: keep-all; padding: 2pt 3pt; }
   tr { break-inside: avoid; }
   td.n { text-align: right; white-space: nowrap; }
+  .sub { color: #888; font-size: 7.5pt; font-weight: normal; }
   .note { color: #8a5a00; font-size: 9pt; }
   .warn { color: #b00020; font-size: 9pt; }
   .appendix { break-before: page; }
@@ -112,9 +114,9 @@
     </table>
     {% for g in t.groups %}
     <table class="keep">
-      <tr><th>依「{{ g.by }}」分組</th><th>列數</th>{% for n in g.sums %}<th>{{ n }} 小計</th>{% endfor %}</tr>
+      <tr><th>依「{{ g.by }}」分組</th><th>列數</th>{% for n in g.sums %}<th>{{ n }}<br><span class="sub">合計／平均</span></th>{% endfor %}</tr>
       {% for x in g.groups %}
-      <tr><td>{{ x.key }}</td><td class="n">{{ x.count | num }}</td>{% for v in x.sums %}<td class="n">{{ v | num }}</td>{% endfor %}</tr>
+      <tr><td>{{ x.key }}</td><td class="n">{{ x.count | num }}</td>{% for v in x.sums %}<td class="n">{{ v | num }}<br><span class="sub">{{ x.means[loop.index0] | num }}</span></td>{% endfor %}</tr>
       {% endfor %}
     </table>
     {% endfor %}

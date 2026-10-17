@@ -20,7 +20,8 @@ def test_xlsx_stats_and_groups(sales_xlsx):
     assert cols["日期"].dates == {"min": "2025-01-05", "max": "2025-04-02"}
     assert cols["部門"].top == [("業務部", 2), ("研發部", 2)]
     assert t.groups == [{"by": "部門", "sums": ["金額"], "groups": [
-        {"key": "業務部", "count": 2, "sums": [3500]}, {"key": "研發部", "count": 2, "sums": [4500]}]}]
+        {"key": "業務部", "count": 2, "sums": [3500], "means": [1750]},
+        {"key": "研發部", "count": 2, "sums": [4500], "means": [2250]}]}]
 
 
 def test_xlsx_row_limit(sales_xlsx):

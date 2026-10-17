@@ -22,7 +22,7 @@ docker-compose up -d  # 自己執行
 
 1. 展開「⚙️ 連線設定」，存取 token 填 `.env` 裡的 `RM_ACCESS_TOKENS`
 2. LLM：按「填入 OpenRouter」再填模型與 key，或「填入本機 Ollama」（不填 LLM 也可以，會產生統計版報告）
-3. 按「套用」→ 選檔案（或拖進來）→ 填重點方向（選填）→「產生報告」→ 下載 PDF
+3. 按「套用」→ 選檔案（或拖進來；`samples/` 有三份互相關聯的範例檔）→ 填重點方向（選填）→「產生報告」→ 下載 PDF
 
 設定都在 `.env`（範本 `.env.example`）：port、存取 token、LLM 網址允許清單、上傳限制、同時處理數。
 

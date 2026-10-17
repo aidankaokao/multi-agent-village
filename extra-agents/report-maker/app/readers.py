@@ -20,7 +20,7 @@ SAMPLE_ROWS = 20  # 每個表格給 LLM 看前幾列
 TOP_VALUES = 5  # 文字欄列出最常見的幾個值
 GROUP_MAX_KEYS = 12  # 文字欄的不同值不超過這個數，才拿來做分組小計（例如部門、品項）
 GROUP_BY_COLS = 2  # 最多用幾個文字欄分組
-GROUP_SUM_COLS = 4  # 每組最多加總幾個數字欄
+GROUP_SUM_COLS = 8  # 每組最多統計幾個數字欄
 
 
 class ReadError(ValueError):
@@ -46,7 +46,8 @@ class Table:
     rows: int  # 實際讀到的資料列數（不含標題列）
     sample: list[list[str]]
     truncated: bool = False  # 超過列數上限，後面沒讀
-    # 分組小計：[{by: 欄名, sums: [欄名…], groups: [{key, count, sums: [數值…]}]}]（程式算好，報告裡的小計以這裡為準）
+    # 分組小計：[{by: 欄名, sums: [欄名…], groups: [{key, count, sums: [合計…], means: [平均…]}]}]
+    # （程式算好，報告裡的小計以這裡為準；客單價、比率這類欄位看平均，合計沒有意義）
     groups: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -250,7 +251,7 @@ def _table(name: str, rows, limits: Limits) -> Table | None:
 
 
 def _groups(columns: list[Column], stats: list["_ColumnStats"], rows: list[list]) -> list[dict]:
-    """用不同值不多的文字欄（部門、品項…）分組，加總數字欄。"""
+    """用不同值不多的文字欄（部門、品項…）分組，算數字欄的合計與平均。"""
     nums = [i for i, c in enumerate(columns) if c.numeric][:GROUP_SUM_COLS]
     keys = [i for i, c in enumerate(columns)
             if c.top and 2 <= stats[i].distinct <= GROUP_MAX_KEYS and stats[i].filled >= len(rows) * 0.8
@@ -262,14 +263,16 @@ def _groups(columns: list[Column], stats: list["_ColumnStats"], rows: list[list]
             key = _cell(r[k]) if k < len(r) else ""
             if not key:
                 continue
-            g = acc.setdefault(key[:40], [0, [0.0] * len(nums)])
+            g = acc.setdefault(key[:40], [0, [0.0] * len(nums), [0] * len(nums)])
             g[0] += 1
             for j, n in enumerate(nums):
                 v = _number(r[n]) if n < len(r) else None
                 if v is not None:
                     g[1][j] += v
-        groups = [{"key": key, "count": c, "sums": [_round(x) for x in sums]}
-                  for key, (c, sums) in sorted(acc.items(), key=lambda kv: -kv[1][0])]
+                    g[2][j] += 1
+        groups = [{"key": key, "count": c, "sums": [_round(x) for x in sums],
+                   "means": [_round(x / k) if k else 0 for x, k in zip(sums, counts, strict=True)]}
+                  for key, (c, sums, counts) in sorted(acc.items(), key=lambda kv: -kv[1][0])]
         out.append({"by": columns[k].name, "sums": [columns[n].name for n in nums], "groups": groups})
     return out
 

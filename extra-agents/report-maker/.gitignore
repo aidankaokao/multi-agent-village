@@ -2,6 +2,6 @@
 data/
 out/
 *.pdf
-!tests/fixtures/*.pdf
+!samples/*.pdf
 # 本機設定與 key
 .env
