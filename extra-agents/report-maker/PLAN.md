@@ -61,7 +61,7 @@ extra-agents/report-maker/
 - [ ] 整理：文件概要 → LLM 報告 JSON（長文件先逐份摘要）；沒有 LLM / 失敗時的統計報告
 - [ ] PDF 樣板與產生（中文字型、表格、頁首頁尾、頁碼）
 - [ ] HTTP 服務：`/health`、agent card、`POST /report`（multipart 上傳，給測試網頁）、`/a2a`（`message/send`、`message/stream`）
-- [ ] 指令（`uv run rm …`）：`report 檔案… --question`（本機直接產 PDF）、`serve`、`gen-token`
+- [ ] 指令（`uv run rmk …`，不用 rm 以免和刪除指令混淆）：`report 檔案… --question`（本機直接產 PDF）、`serve`、`gen-token`
 - [ ] 簡易測試網頁
 - [ ] Dockerfile、docker-compose（127.0.0.1:8101）、`build.sh`（自動產生存取 token）
 - [ ] 單元測試、本機實測（qwen3.5:9b 與雲端模型）
