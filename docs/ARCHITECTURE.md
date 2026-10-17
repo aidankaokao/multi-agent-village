@@ -288,7 +288,13 @@ session token 放 httpOnly + SameSite=Lax cookie，DB 只存 SHA-256；密碼 sc
 
 **資料庫遷移（已完成，`store/migrate.py`、`store/migrations/`）**：Alembic，由程式呼叫（不需 alembic.ini），啟動時 upgrade head。
 
-**記憶與對話（規劃中）**：
+**對話與多輪上下文（已完成，`store/conversations.py`、`core/context.py`、`api/conversations.py`）**：
+`POST /api/chat` 帶 `conversation_id`（沒帶就開新對話），先存使用者訊息、讀最近 `context_turns` 輪當 history，
+問答結束後把回答（含附件、審核結果）存成 assistant 訊息。history 交給村長（system prompt 的「最近的對話」與 `prev` 規則）、
+村長直接回覆（當成真的對話）、審核員（上一輪）；Executor 把 `use: ["prev"]` 換成「參考資料（上一輪的回答）」。
+上一輪的回答放 context variable（Runner 全村共用，同時有多人問答）。
+
+**長期記憶（規劃中）**：
 
 - `users`、`conversations`、`messages`：對話紀錄（短期記憶）
 - `memories`：長期記憶（使用者偏好、事實），由一個 `memory` 背景 agent 從對話中萃取，問答前檢索相關記憶塞進 context

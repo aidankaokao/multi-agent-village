@@ -1287,3 +1287,48 @@ a.link {
 .user-menu button.danger-text {
   color: var(--danger);
 }
+
+/* ---------------------------------------------------------------- 對話紀錄 */
+
+.conv-toggle {
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.conv-list {
+  max-height: 45%;
+  overflow-y: auto;
+  border-bottom: 2px solid var(--line);
+  background: var(--card);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: fab-drop 160ms ease-out;
+}
+
+.conv-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.conv-row.active .conv-open {
+  border-color: var(--accent);
+}
+
+button.conv-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: none;
+}

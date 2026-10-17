@@ -11,6 +11,7 @@ from village.api.auth import users_router
 from village.api.chat import router as chat_router
 from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
+from village.api.conversations import router as conversations_router
 from village.api.runs import router as runs_router
 from village.api.workshop import router as workshop_router
 from village.config import Settings
@@ -23,6 +24,7 @@ from village.security.crypto import SecretBox, load_keyring
 from village.security.redact import install_log_redaction
 from village.store.agents import load_registry, seed_builtin
 from village.store.db import init_db, make_engine, make_sessionmaker
+from village.store.conversations import ConversationStore
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore
 
@@ -41,6 +43,7 @@ class AppContext:
     runner: Runner
     rules: RulesStore
     trace: TraceStore
+    conversations: ConversationStore
     tasks: set[asyncio.Task] = field(default_factory=set)
     active: dict[str, asyncio.Task] = field(default_factory=dict)  # run_id → 執行中的問答（取消用）
     owners: dict[str, str] = field(default_factory=dict)  # run_id → 提問者 user_id
@@ -81,6 +84,7 @@ def create_app(
             runner=Runner(registry, llm, bus, handoff_delay=handoff_delay, rules=rules, trace=trace),
             rules=rules,
             trace=trace,
+            conversations=ConversationStore(sm),
         )
         yield
         for t in list(app.state.ctx.tasks):
@@ -95,6 +99,7 @@ def create_app(
     app.include_router(villagers_router)
     app.include_router(workshop_router)
     app.include_router(runs_router)
+    app.include_router(conversations_router)
 
     @app.get("/api/health")
     async def health():

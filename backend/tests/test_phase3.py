@@ -200,7 +200,7 @@ async def test_cancel_and_interrupted(app_env, monkeypatch):
     c, app = app_env
     ctx = app.state.ctx
 
-    async def slow_run(run_id, message, traced=False, user_id=None):
+    async def slow_run(run_id, message, **kw):
         try:
             await asyncio.sleep(10)
         except asyncio.CancelledError:

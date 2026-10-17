@@ -9,9 +9,11 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 
 from village.core.card import AgentSpec
+from village.core.context import PREV, Turn
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan
 from village.core.registry import AgentRegistry
@@ -75,8 +77,12 @@ class StepResult:
     tool_args: dict | None = None  # 工具型村民：LLM（或退路）整理出的參數
 
 
-def render_context(step: Step, results: dict[str, StepResult], registry: AgentRegistry) -> str:
+def render_context(
+    step: Step, results: dict[str, StepResult], registry: AgentRegistry, previous: str = ""
+) -> str:
     parts = []
+    if PREV in step.use and previous:
+        parts.append(f"參考資料（上一輪的回答）：\n{previous}")
     for ref in step.use:
         r = results.get(ref)
         if r and r.output:
@@ -108,6 +114,9 @@ def compose_answer(plan: Plan, results: dict[str, StepResult], registry: AgentRe
     return "\n\n".join(blocks), ok
 
 
+# 上一輪的回答：Runner 是全村共用的，同時有好幾個人在問答，所以放 context variable（每個問答 task 各自一份）
+_PREVIOUS: ContextVar[str] = ContextVar("previous_answer", default="")
+
 DEFAULT_RULES = VillageRules(reviewer_enabled=False, parallel=False)  # 沒接 DB 時（測試）維持最單純的行為
 
 
@@ -128,16 +137,20 @@ class Runner:
         self.rules = rules
         self.trace = trace
 
-    async def run(self, run_id: str, message: str, traced: bool = False, user_id: str | None = None) -> dict:
+    async def run(
+        self, run_id: str, message: str, traced: bool = False, user_id: str | None = None,
+        history: list[Turn] | None = None,
+    ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。"""
         self.bus.claim(run_id, user_id)
         try:
             with llm_user(user_id):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
-                return await self._run(run_id, message, traced, user_id)
+                return await self._run(run_id, message, traced, user_id, history or [])
         finally:
             self.bus.release(run_id)
 
-    async def _run(self, run_id: str, message: str, traced: bool, user_id: str | None) -> dict:
+    async def _run(self, run_id: str, message: str, traced: bool, user_id: str | None, history: list[Turn]) -> dict:
+        _PREVIOUS.set(history[-1].answer if history else "")  # use 裡的 "prev" 指這個（每次問答各自一份）
         emit = self.bus.publish
         rules = self.rules.current if self.rules else DEFAULT_RULES
         agents = self.registry.all()
@@ -166,13 +179,13 @@ class Runner:
             async def on_note(note: str) -> None:
                 await emit("plan.note", run_id=run_id, agent=MAYOR, note=note)
 
-            plan = await make_plan(message, agents, self.llm, on_note=on_note)
+            plan = await make_plan(message, agents, self.llm, on_note=on_note, history=history)
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:
                 await emit("agent.started", run_id=run_id, step_id=None, agent=MAYOR, instruction=message)
                 on_text = DeltaEmitter(self.bus, run_id=run_id, step_id=None, agent=MAYOR)
-                answer = await direct_reply(message, agents, self.llm, on_text=on_text)
+                answer = await direct_reply(message, agents, self.llm, on_text=on_text, history=history)
                 await emit("agent.finished", run_id=run_id, step_id=None, agent=MAYOR, output=answer)
                 await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[], reviews=[])
                 await record("done", answer=answer)
@@ -182,7 +195,7 @@ class Runner:
             await self._execute(run_id, plan, results, rules)
             answer, ok = compose_answer(plan, results, self.registry)
             if ok and rules.reviewer_enabled:
-                await self._review_loop(run_id, message, plan, results, reviews, rules)
+                await self._review_loop(run_id, message, plan, results, reviews, rules, history)
                 answer, ok = compose_answer(plan, results, self.registry)
 
             steps = [asdict(r) for r in results.values()]
@@ -207,7 +220,7 @@ class Runner:
         sem = asyncio.Semaphore(rules.max_parallel if rules.parallel else 1)
         remaining = list(plan.steps)
         while remaining:
-            ready = [s for s in remaining if all(results[u].status != "pending" for u in s.use)]
+            ready = [s for s in remaining if all(results[u].status != "pending" for u in s.use if u != PREV)]
             if not ready:  # 理論上不會發生（use 只能引用前面的步驟）
                 break
             remaining = [s for s in remaining if s not in ready]
@@ -224,7 +237,7 @@ class Runner:
 
     async def _start_step(self, run_id: str, step: Step, results: dict[str, StepResult], rules: VillageRules) -> None:
         r = results[step.id]
-        deps = [results[u] for u in step.use]
+        deps = [results[u] for u in step.use if u != PREV]  # prev = 上一輪的回答，不是這次的步驟
         if any(d.status != "done" for d in deps):
             r.status, r.error = "error", "前一步失敗，略過"
             await self.bus.publish("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
@@ -234,7 +247,8 @@ class Runner:
                 await self.bus.publish("agent.handoff", run_id=run_id, from_agent=d.agent, to_agent=step.agent)
         if deps and self.handoff_delay:
             await asyncio.sleep(self.handoff_delay)
-        await self._run_step(run_id, step, r, rules, step.instruction, render_context(step, results, self.registry))
+        context = render_context(step, results, self.registry, _PREVIOUS.get())
+        await self._run_step(run_id, step, r, rules, step.instruction, context)
 
     async def _run_step(
         self, run_id: str, step: Step, r: StepResult, rules: VillageRules, instruction: str, context: str
@@ -275,7 +289,7 @@ class Runner:
 
     async def _review_loop(
         self, run_id: str, message: str, plan: Plan, results: dict[str, StepResult], reviews: list[Review],
-        rules: VillageRules,
+        rules: VillageRules, history: list[Turn] | None = None,
     ) -> None:
         """審核員檢查最終成果；不合格就把理由交給負責的村民重做（最多 review_redo 次），之後照實交出。"""
         emit = self.bus.publish
@@ -285,7 +299,7 @@ class Runner:
                 Leaf(s.id, self._name(s.agent), s.instruction, results[s.id].output) for s in leaf_steps(plan)
             ]
             await emit("review.started", run_id=run_id, agent=REVIEWER_ID, round=round_ + 1)
-            rv = await review(self.llm, message, leaves, rules.reviewer_target)
+            rv = await review(self.llm, message, leaves, rules.reviewer_target, history[-1:] if history else None)
             if rv is None:
                 await emit("review.finished", run_id=run_id, agent=REVIEWER_ID, skipped=True, reason="審核員無法使用，略過審核")
                 return
@@ -298,7 +312,7 @@ class Runner:
             await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=f"審核員退回：{rv.reason}")
             await emit("agent.handoff", run_id=run_id, from_agent=REVIEWER_ID, to_agent=step.agent)
             instruction = f"{step.instruction}\n\n審核員退回了你上一次的成果。原因：{rv.reason}\n請這樣修正：{rv.fix or rv.reason}"
-            context = render_context(step, results, self.registry)
+            context = render_context(step, results, self.registry, _PREVIOUS.get())
             context = f"{context}\n\n你上一次的成果（被退回）：\n{r.output}".strip()
             await self._run_step(run_id, step, r, rules, instruction, context)
             if r.status != "done":

@@ -1,4 +1,4 @@
-import type { Attachment } from "../api";
+import type { Attachment, MessageRow } from "../api";
 import type { VillageEvent } from "../events";
 
 export type StepStatus = "pending" | "running" | "done" | "error";
@@ -34,6 +34,7 @@ export interface RunView {
   id: string;
   message: string;
   status: "planning" | "running" | "done" | "failed" | "cancelled";
+  fromHistory?: boolean; // 從對話紀錄載入（沒有執行過程，只有結果）
   reviewing?: boolean; // 審核員檢查中
   reviews: ReviewView[];
   source?: PlanSource;
@@ -53,6 +54,7 @@ export type RunsState = { order: string[]; byId: Record<string, RunView> };
 export const initialRuns: RunsState = { order: [], byId: {} };
 
 type Action =
+  | { type: "load"; messages: MessageRow[] } // 切換對話 / 重新整理：用存起來的訊息重建畫面
   | { type: "local"; run_id: string; message: string }
   | { type: "event"; event: VillageEvent }
   | { type: "reset" };
@@ -66,8 +68,37 @@ function patchStep(run: RunView, stepId: unknown, patch: (s: StepView) => StepVi
 }
 
 /** 把後端事件累積成每一次問答的狀態；事件可能比 POST 回應早到，所以兩邊都能建立 run */
+/** 存起來的訊息（user / assistant 成對）→ 已完成的問答；沒有執行過程，但有回答、圖片、審核結果與紀錄連結 */
+export function runsFromMessages(messages: MessageRow[]): RunsState {
+  const state: RunsState = { order: [], byId: {} };
+  for (let i = 0; i < messages.length; i++) {
+    const q = messages[i];
+    if (q.role !== "user") continue;
+    const a = messages[i + 1]?.role === "assistant" ? messages[++i] : undefined;
+    const id = a?.run_id ?? q.id;
+    const t0 = Date.parse(q.created_at);
+    const run: RunView = {
+      ...newRun(id, q.content),
+      startedAt: t0,
+      finishedAt: a ? Date.parse(a.created_at) : t0,
+      fromHistory: true,
+      status: !a ? "failed" : a.status === "done" ? "done" : a.status === "cancelled" ? "cancelled" : "done",
+      ok: a?.status === "done",
+      answer: a?.status === "done" ? a.content : undefined,
+      error: !a ? "這一輪沒有回答（可能還在處理或已中斷）" : a.status === "error" ? a.content || "執行失敗" : undefined,
+      attachments: a?.meta?.attachments ?? [],
+      reviews: a?.meta?.review != null ? [{ passed: a.meta.review, reason: "" }] : [],
+    };
+    if (a?.status === "error") run.status = "failed";
+    state.order.push(id);
+    state.byId[id] = run;
+  }
+  return state;
+}
+
 export function runsReducer(state: RunsState, action: Action): RunsState {
   if (action.type === "reset") return initialRuns;
+  if (action.type === "load") return runsFromMessages(action.messages);
   if (action.type === "local") {
     if (state.byId[action.run_id]) return state;
     const run = newRun(action.run_id, action.message);

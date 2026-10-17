@@ -110,7 +110,8 @@ export interface AgentInfo {
 
 export const village = {
   agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
-  chat: (message: string) => api<{ run_id: string }>("/api/chat", { method: "POST", json: { message } }),
+  chat: (message: string, conversation_id: string | null) =>
+    api<{ run_id: string; conversation_id: string }>("/api/chat", { method: "POST", json: { message, conversation_id } }),
   cancel: (runId: string) => api<{ ok: boolean }>(`/api/chat/${runId}/cancel`, { method: "POST" }),
 };
 
@@ -174,6 +175,7 @@ export interface RunDetail extends RunSummary {
 
 export interface VillageRules {
   allow_registration: boolean;
+  context_turns: number;
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -355,4 +357,31 @@ export const users = {
   update: (id: string, body: Partial<{ display_name: string; role: Role; enabled: boolean; password: string }>) =>
     api<UserRow>(`/api/users/${id}`, { method: "PATCH", json: body }),
   remove: (id: string) => api<void>(`/api/users/${id}`, { method: "DELETE" }),
+};
+
+// ---------------------------------------------------------------- 對話紀錄
+
+export interface ConversationRow {
+  id: string;
+  title: string;
+  messages: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MessageRow {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  run_id: string | null;
+  status: "done" | "error" | "cancelled";
+  meta: { attachments?: Attachment[]; agents?: string[]; review?: boolean | null } | null;
+  created_at: string;
+}
+
+export const conversations = {
+  list: () => api<ConversationRow[]>("/api/conversations"),
+  messages: (id: string) => api<MessageRow[]>(`/api/conversations/${id}/messages`),
+  rename: (id: string, title: string) => api<{ id: string; title: string }>(`/api/conversations/${id}`, { method: "PATCH", json: { title } }),
+  remove: (id: string) => api<void>(`/api/conversations/${id}`, { method: "DELETE" }),
 };

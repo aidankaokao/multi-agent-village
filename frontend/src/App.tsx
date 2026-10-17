@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AccountsPanel, DeleteAccountModal, PasswordModal } from "./accounts/AccountsPanel";
-import { auth, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type Me } from "./api";
+import { auth, conversations, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type ConversationRow, type Me } from "./api";
 import { LoginPage } from "./auth/LoginPage";
 import { ChatPanel } from "./chat/ChatPanel";
 import { initialRuns, runsReducer } from "./chat/runs";
@@ -139,9 +139,37 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
 
   const clearTraceId = useCallback(() => setTraceId(null), []);
 
+  // ---------------------------------------------------------------- 對話
+  const [convs, setConvs] = useState<ConversationRow[]>([]);
+  const [convId, setConvId] = useState<string | null>(null);
+  const loadConvs = useCallback(() => conversations.list().then(setConvs).catch(() => []), []);
+
+  const openConversation = useCallback(async (id: string | null) => {
+    setConvId(id);
+    if (!id) return dispatch({ type: "reset" });
+    try {
+      dispatch({ type: "load", messages: await conversations.messages(id) });
+    } catch {
+      dispatch({ type: "reset" });
+    }
+  }, []);
+
+  // 進村子時接回最近的對話（重新整理也不會不見）
+  useEffect(() => {
+    conversations
+      .list()
+      .then((list) => {
+        setConvs(list);
+        if (list[0]) openConversation(list[0].id);
+      })
+      .catch(() => {});
+  }, [openConversation]);
+
   const send = async (message: string) => {
-    const { run_id } = await village.chat(message);
+    const { run_id, conversation_id } = await village.chat(message, convId);
+    if (conversation_id !== convId) setConvId(conversation_id);
     dispatch({ type: "local", run_id, message });
+    loadConvs();
   };
 
   const current = pages.find((p) => p.id === page);
@@ -244,7 +272,19 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
           runs={runs}
           agents={agents}
           onSend={send}
-          onReset={() => dispatch({ type: "reset" })}
+          onReset={() => openConversation(null)}
+          conversations={convs}
+          currentConversation={convId}
+          onOpenConversation={openConversation}
+          onRenameConversation={async (id, title) => {
+            await conversations.rename(id, title);
+            loadConvs();
+          }}
+          onDeleteConversation={async (id) => {
+            await conversations.remove(id);
+            if (id === convId) openConversation(null);
+            loadConvs();
+          }}
           onCancel={async (id) => void (await village.cancel(id))}
           onOpenTrace={(id) => {
             setTraceId(id);

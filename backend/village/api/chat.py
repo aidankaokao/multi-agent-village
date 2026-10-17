@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api", tags=["chat"], dependencies=[Depends(require_u
 
 class ChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    conversation_id: str | None = None  # 接著哪段對話；不填 = 開新對話
 
 
 class AgentOut(BaseModel):
@@ -54,15 +55,35 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
         raise HTTPException(status.HTTP_409_CONFLICT, NOT_CONFIGURED)  # 用自己的 LLM：還沒設定就先提醒
     run_id = uuid.uuid4().hex[:12]
     message = body.message.strip()
+    conv_id = await ctx.conversations.start_turn(me.id, body.conversation_id, message)
+    history = await ctx.conversations.recent_turns(conv_id, ctx.rules.current.context_turns)
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
     ctx.bus.claim(run_id, me.id)  # 在 task 開始前就認領，第一個事件也只送給提問者
-    task = asyncio.create_task(ctx.runner.run(run_id, message, traced=True, user_id=me.id))
+
+    async def job():
+        """執行問答，結束（含失敗、取消）後把回答存回對話。"""
+        try:
+            out = await ctx.runner.run(run_id, message, traced=True, user_id=me.id, history=history)
+        except asyncio.CancelledError:
+            await ctx.conversations.finish_turn(conv_id, run_id, "", "cancelled")
+            raise
+        reviews = out.get("reviews") or []
+        meta = {
+            "attachments": out.get("attachments") or [],
+            "agents": [st["agent"] for st in out.get("steps") or []],
+            "review": reviews[-1].get("passed") if reviews else None,
+        }
+        status_ = "done" if out.get("ok") else "error"
+        await ctx.conversations.finish_turn(conv_id, run_id, out.get("answer") or out.get("error") or "", status_, meta)
+        return out
+
+    task = asyncio.create_task(job())
     ctx.owners[run_id] = me.id
     ctx.tasks.add(task)  # 保留參考，避免 task 被 GC
     ctx.active[run_id] = task
     task.add_done_callback(ctx.tasks.discard)
     task.add_done_callback(lambda _: (ctx.active.pop(run_id, None), ctx.owners.pop(run_id, None)))
-    return {"run_id": run_id}
+    return {"run_id": run_id, "conversation_id": conv_id}
 
 
 @router.post("/chat/{run_id}/cancel", status_code=status.HTTP_202_ACCEPTED)

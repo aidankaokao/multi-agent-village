@@ -3,7 +3,7 @@
 像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者在問答框的任務。
 
 - 架構：`docs/ARCHITECTURE.md`
-- 階段規劃：`docs/ROADMAP.md`（目前：Phase 5 進行中——5A 帳號與資料庫遷移完成，接著 5B 對話與多輪上下文、5C 長期記憶）
+- 階段規劃：`docs/ROADMAP.md`（目前：Phase 5 進行中——5A 帳號、5B 對話與多輪上下文完成，接著 5C 長期記憶）
 - 素材規格：`docs/SPRITES.md`
 
 ## 原則

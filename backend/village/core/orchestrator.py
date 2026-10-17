@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
 
 from village.core.card import AgentSpec
+from village.core.context import PREV, Turn, refers_back, render_history
 from village.llm.base import ChatMessage, ChatResult, LLMError
 
 log = logging.getLogger("village.mayor")
@@ -129,12 +130,23 @@ def plan_schema(agent_ids: list[str]) -> dict:
     }
 
 
-def planner_system_prompt(agents: list[AgentSpec]) -> str:
+def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = None) -> str:
     lines = []
     for a in agents:
         examples = "；".join(e for s in a.card.skills for e in s.examples[:3])
         lines.append(f"- {a.id}（{a.name}）：{a.card.description}" + (f" 例：{examples}" if examples else ""))
     roster = "\n".join(lines)
+    history_rule = history_block = ""
+    if history:
+        history_rule = (
+            f"\n8. 請求如果是在說前面的內容（它、這個、剛剛、上面、再把…），那一步的 use 填 \"{PREV}\"（代表上一輪的回答），"
+            "instruction 寫清楚要對它做什麼；請求沒提到前面的內容就不要用。"
+        )
+        history_block = (
+            f"\n\n請求：（上一輪回答是一首詩）再把它翻成英文\n"
+            f'輸出：{{{{"steps":[{{{{"id":"s1","agent":"<負責翻譯的村民 id>","instruction":"把上一輪的詩翻成英文","use":["{PREV}"]}}}}]}}}}'
+            f"\n\n最近的對話（舊 → 新）：\n{render_history(history)}"
+        )
     return f"""你是村長，負責把使用者的請求分派給適合的村民（agent）。
 
 可用的村民：
@@ -147,7 +159,7 @@ def planner_system_prompt(agents: list[AgentSpec]) -> str:
 4. 後面的步驟若需要前面的成果，在 use 填入那些步驟的 id；不需要就填空陣列。
 5. instruction 用一句話寫清楚該村民要做的事，只能使用請求裡的資訊（主題、風格、形式），不要自行添加。
 6. 最多 {MAX_STEPS} 步。
-7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。
+7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。{history_rule}
 只輸出 JSON，不要任何說明。
 
 範例
@@ -158,7 +170,7 @@ def planner_system_prompt(agents: list[AgentSpec]) -> str:
 輸出：{{"steps":[{{"id":"s1","agent":"<負責寫詩的村民 id>","instruction":"寫一首關於海的詩","use":[]}},{{"id":"s2","agent":"<負責笑話的村民 id>","instruction":"把這首詩改編成笑話","use":["s1"]}}]}}
 
 請求：你好
-輸出：{{"steps":[]}}"""
+輸出：{{"steps":[]}}{history_block}"""
 
 
 def _extract_json(text: str) -> dict:
@@ -174,7 +186,7 @@ def _extract_json(text: str) -> dict:
         raise PlanError(f"JSON 格式錯誤：{e.msg}") from None
 
 
-def parse_plan(text: str, agents: dict[str, AgentSpec]) -> list[Step]:
+def parse_plan(text: str, agents: dict[str, AgentSpec], allow_prev: bool = False) -> list[Step]:
     data = _extract_json(text)
     raw = data.get("steps")
     if not isinstance(raw, list):
@@ -196,8 +208,9 @@ def parse_plan(text: str, agents: dict[str, AgentSpec]) -> list[Step]:
             raise PlanError(f"{sid} 缺少 instruction")
         if sid in seen:
             raise PlanError(f"步驟 id「{sid}」重複")
-        if not isinstance(use, list) or any(u not in seen for u in use):
-            raise PlanError(f"{sid} 的 use 只能引用前面的步驟：{sorted(seen) or '（無）'}")
+        ok_refs = seen | ({PREV} if allow_prev else set())
+        if not isinstance(use, list) or any(u not in ok_refs for u in use):
+            raise PlanError(f"{sid} 的 use 只能引用前面的步驟：{sorted(ok_refs) or '（無）'}")
         seen.add(sid)
         steps.append(Step(id=sid, agent=agent, instruction=instruction, use=[str(u) for u in use]))
     return steps
@@ -229,7 +242,9 @@ def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSp
     return steps
 
 
-async def plan_with_llm(message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes) -> list[Step] | None:
+async def plan_with_llm(
+    message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes, history: list[Turn] | None = None
+) -> list[Step] | None:
     by_id = {a.id: a for a in agents}
     messages = [ChatMessage("user", f"請求：{message}")]
     for attempt in range(PLAN_RETRIES + 1):
@@ -237,7 +252,7 @@ async def plan_with_llm(message: str, agents: list[AgentSpec], llm: ChatLLM, not
             r = await llm.chat(
                 "tier:large",
                 messages,
-                system=planner_system_prompt(agents),
+                system=planner_system_prompt(agents, history),
                 json_schema=plan_schema(list(by_id)),
                 max_tokens=1024,
             )
@@ -245,7 +260,7 @@ async def plan_with_llm(message: str, agents: list[AgentSpec], llm: ChatLLM, not
             await notes.add(f"LLM 規劃無法使用：{e}")
             return None
         try:
-            return prune_unrequested(parse_plan(r.text, by_id), message, by_id, notes)
+            return prune_unrequested(parse_plan(r.text, by_id, allow_prev=bool(history)), message, by_id, notes)
         except PlanError as e:
             await notes.add(f"第 {attempt + 1} 次規劃無效：{e}，請村長重新規劃")
             messages += [
@@ -276,29 +291,46 @@ def plan_from_keywords(message: str, agents: list[AgentSpec]) -> list[Step]:
 # ---------------------------------------------------------------- 入口
 
 
+def _link_previous(steps: list[Step], message: str, history: list[Turn] | None, notes: list[str]) -> None:
+    """不經 LLM 的規劃（@指名、關鍵字）：請求在指前面的內容時，第一步自動帶上一輪的回答。"""
+    if history and steps and not steps[0].use and refers_back(message):
+        steps[0].use = [PREV]
+        notes.append("請求提到前面的內容，帶入上一輪的回答")
+
+
 async def make_plan(
-    message: str, agents: list[AgentSpec], llm: ChatLLM, on_note: NoteCallback | None = None
+    message: str,
+    agents: list[AgentSpec],
+    llm: ChatLLM,
+    on_note: NoteCallback | None = None,
+    history: list[Turn] | None = None,
 ) -> Plan:
     by_id = {a.id: a for a in agents}
     if plan := plan_from_mentions(message, by_id):
+        _link_previous(plan.steps, message, history, plan.notes)
         return plan
     if not agents:
         return Plan(steps=[], source="direct", notes=["村裡還沒有任何村民"])
 
     notes = Notes(on_note)
-    steps = await plan_with_llm(message, agents, llm, notes)
+    steps = await plan_with_llm(message, agents, llm, notes, history)
     if steps is not None:
         return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes))
 
     steps = plan_from_keywords(message, agents)
     if steps:
         await notes.add("改用關鍵字備援規劃")
+        _link_previous(steps, message, history, notes)
         return Plan(steps=steps, source="keyword", notes=list(notes))
     return Plan(steps=[], source="direct", notes=list(notes))
 
 
 async def direct_reply(
-    message: str, agents: list[AgentSpec], llm: ChatLLM, on_text: Callable[[str], Awaitable[None]] | None = None
+    message: str,
+    agents: list[AgentSpec],
+    llm: ChatLLM,
+    on_text: Callable[[str], Awaitable[None]] | None = None,
+    history: list[Turn] | None = None,
 ) -> str:
     roster = "、".join(f"{a.name}（@{a.id}）" for a in agents) or "（目前沒有村民）"
     system = (
@@ -308,7 +340,11 @@ async def direct_reply(
     )
     try:
         kw = {"on_text": on_text} if on_text else {}
-        r = await llm.chat("tier:large", [ChatMessage("user", message)], system=system, max_tokens=400, **kw)
+        msgs: list[ChatMessage] = []
+        for t in history or []:  # 前幾輪當成真的對話，村長才能回答「我剛剛問了什麼」
+            msgs += [ChatMessage("user", t.user), ChatMessage("assistant", t.answer)]
+        msgs.append(ChatMessage("user", message))
+        r = await llm.chat("tier:large", msgs, system=system, max_tokens=400, **kw)
         if text := re.sub(r"<think>.*?</think>", "", r.text, flags=re.S).strip():
             return text
     except LLMError as e:

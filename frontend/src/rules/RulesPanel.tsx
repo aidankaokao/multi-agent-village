@@ -87,6 +87,13 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>💬 對話</h3>
+        <Field label="問答時帶入前幾輪對話" hint="村長、村民與審核員會看到同一段對話的前幾輪，才聽得懂「再把它翻成英文」這類接續的話。0 = 每次都當成新問題；越多越懂前文，但每次用的 token 也越多">
+          <NumInput value={draft.context_turns} min={0} max={10} onChange={(v) => set({ context_turns: v ?? 3 })} />
+        </Field>
+      </section>
+
+      <section>
         <h3>📜 執行紀錄</h3>
         <Field label="保留最近幾筆" hint="超過的舊紀錄會自動刪除；10～10000">
           <NumInput value={draft.keep_runs} min={10} max={10000} step={100} onChange={(v) => set({ keep_runs: v ?? 500 })} />

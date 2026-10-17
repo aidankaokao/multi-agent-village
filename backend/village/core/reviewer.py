@@ -9,6 +9,7 @@ import logging
 import time
 from dataclasses import asdict, dataclass
 
+from village.core.context import Turn, render_history
 from village.core.orchestrator import ChatLLM, PlanError, _extract_json
 from village.llm.base import ChatMessage, LLMError
 
@@ -72,21 +73,26 @@ SYSTEM = """你是村子裡的審核員，在答案交給使用者之前做最�
 用繁體中文。只輸出 JSON：{"pass": true 或 false, "reason": "...", "fix": "...", "step": "..."}"""
 
 
-def render(message: str, leaves: list[Leaf]) -> str:
-    parts = [f"使用者的請求：{message}", ""]
+def render(message: str, leaves: list[Leaf], history: list[Turn] | None = None) -> str:
+    parts = []
+    if history:  # 「再把它翻成英文」這種接續的請求，要知道「它」是什麼
+        parts += ["前一輪的對話（參考用）：", render_history(history), ""]
+    parts += [f"使用者的請求：{message}", ""]
     for lf in leaves:
         out = lf.output if len(lf.output) <= MAX_ANSWER_CHARS else lf.output[:MAX_ANSWER_CHARS] + "\n…（後略）"
         parts += [f"【{lf.step_id}｜{lf.agent_name}】任務：{lf.instruction}", "成果：", out, ""]
     return "\n".join(parts).strip()
 
 
-async def review(llm: ChatLLM, message: str, leaves: list[Leaf], target: str = "tier:large") -> Review | None:
+async def review(
+    llm: ChatLLM, message: str, leaves: list[Leaf], target: str = "tier:large", history: list[Turn] | None = None
+) -> Review | None:
     """回傳 None 代表沒辦法審核（LLM 不能用或輸出無法解析），呼叫端應直接放行。"""
     ids = [lf.step_id for lf in leaves]
     t0 = time.monotonic()
     try:
         r = await llm.chat(
-            target, [ChatMessage("user", render(message, leaves))], system=SYSTEM,
+            target, [ChatMessage("user", render(message, leaves, history))], system=SYSTEM,
             json_schema=review_schema(ids), max_tokens=1024, fallback="tier:large",
         )
         data = _extract_json(r.text)

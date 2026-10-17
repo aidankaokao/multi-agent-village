@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentInfo } from "../api";
+import type { AgentInfo, ConversationRow } from "../api";
 import { Attachments } from "../ui/Attachments";
 import { leafIds, type RunsState, type RunView, type StepView } from "./runs";
 
@@ -32,9 +32,29 @@ interface Props {
   onCancel: (runId: string) => Promise<void>;
   onOpenTrace: (runId: string) => void;
   onOpenLlm: () => void;
+  conversations: ConversationRow[];
+  currentConversation: string | null;
+  onOpenConversation: (id: string) => void;
+  onRenameConversation: (id: string, title: string) => Promise<void>;
+  onDeleteConversation: (id: string) => Promise<void>;
 }
 
-export function ChatPanel({ runs, agents, onSend, onReset, onCancel, onOpenTrace, onOpenLlm }: Props) {
+export function ChatPanel({
+  runs,
+  agents,
+  onSend,
+  onReset,
+  onCancel,
+  onOpenTrace,
+  onOpenLlm,
+  conversations,
+  currentConversation,
+  onOpenConversation,
+  onRenameConversation,
+  onDeleteConversation,
+}: Props) {
+  const [listOpen, setListOpen] = useState(false);
+  const current = conversations.find((c) => c.id === currentConversation);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -74,16 +94,60 @@ export function ChatPanel({ runs, agents, onSend, onReset, onCancel, onOpenTrace
   return (
     <div className="chat">
       <div className="chat-bar">
-        <span className="muted">{runs.order.length ? `${runs.order.length} 則問答` : "新對話"}</span>
+        <button className="link conv-toggle" onClick={() => setListOpen(!listOpen)} title="對話紀錄">
+          {listOpen ? "▾" : "▸"} 📂 {current ? current.title : "新對話"}
+        </button>
+        <span style={{ flex: 1 }} />
         <button
           className="link"
-          onClick={reset}
-          disabled={runs.order.length === 0}
-          title="清空畫面重新開始（目前每次提問彼此獨立，村長還不會記得前面的對話）"
+          onClick={() => {
+            reset();
+            setListOpen(false);
+          }}
+          disabled={!currentConversation && runs.order.length === 0}
+          title="開始新的對話（村長會記得同一段對話裡前幾輪的內容）"
         >
           ＋ 新對話
         </button>
       </div>
+      {listOpen && (
+        <div className="conv-list">
+          {conversations.length === 0 && <div className="muted">還沒有對話紀錄。</div>}
+          {conversations.map((c) => (
+            <div key={c.id} className={`conv-row ${c.id === currentConversation ? "active" : ""}`}>
+              <button
+                className="conv-open"
+                onClick={() => {
+                  onOpenConversation(c.id);
+                  setListOpen(false);
+                }}
+              >
+                <span className="clamp">{c.title}</span>
+                <span className="muted">
+                  {Math.ceil(c.messages / 2)} 輪・{new Date(c.updated_at).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </button>
+              <button
+                className="link"
+                title="改名"
+                onClick={() => {
+                  const t = prompt("對話名稱", c.title);
+                  if (t?.trim()) onRenameConversation(c.id, t.trim()).catch((e) => setError(e.message));
+                }}
+              >
+                ✏️
+              </button>
+              <button
+                className="link danger"
+                title="刪除這段對話"
+                onClick={() => confirm(`刪除對話「${c.title}」？（執行紀錄會保留）`) && onDeleteConversation(c.id).catch((e) => setError(e.message))}
+              >
+                🗑
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div
         className="chat-log"
@@ -182,7 +246,7 @@ function statusText(run: RunView, names: Record<string, string>): string {
   if (run.status === "planning") return "正在想要請誰幫忙…";
   if (run.status === "failed") return "失敗";
   if (run.status === "cancelled") return "已停止";
-  if (run.status === "done") return run.ok === false ? "部分失敗" : "完成";
+  if (run.status === "done") return run.fromHistory ? "" : run.ok === false ? "部分失敗" : "完成";
   if (run.reviewing) return "審核員檢查中…";
   if (run.source === "direct") return "回覆中…";
   const working = run.steps.filter((s) => s.status === "running");
@@ -217,7 +281,7 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
           <strong>村長</strong>
           {run.source && <span className="tag">{SOURCE_LABEL[run.source] ?? run.source}</span>}
           <span className={finished ? "muted" : "status-live"}>{statusText(run, names)}</span>
-          <span className="muted elapsed">{secs((run.finishedAt ?? now) - run.startedAt)}</span>
+          {!run.fromHistory && <span className="muted elapsed">{secs((run.finishedAt ?? now) - run.startedAt)}</span>}
         </div>
 
         {hasProcess && (
@@ -266,9 +330,12 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
               </span>
             )}
             <span style={{ flex: 1 }} />
-            <button className="link" onClick={onOpenTrace} title="查看每一步的輸入、輸出、耗時與 token">
-              📜 紀錄
-            </button>
+            {/* 從紀錄載入但當時沒有回答的那一輪，id 是訊息 id，沒有對應的執行紀錄 */}
+            {!(run.fromHistory && !/^[0-9a-f]{12}$/.test(run.id)) && (
+              <button className="link" onClick={onOpenTrace} title="查看每一步的輸入、輸出、耗時與 token">
+                📜 紀錄
+              </button>
+            )}
           </div>
         )}
       </div>
