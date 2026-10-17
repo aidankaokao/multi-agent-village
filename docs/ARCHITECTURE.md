@@ -273,7 +273,8 @@ class BaseAgent(Protocol):
   `{prompt（英文）, aspect_ratio, title}` → `core/painter.py` 的 `PaintEnv.paint` 檢查村規上限（`paint_per_run`、
   最近 24 小時 `paint_per_day`）→ `tier:image` 生圖 → 只收點陣圖 → 存成畫作 → 附件 `{kind: "image", url: "/api/images/{id}"}`。
   `PaintEnv` 放 context variable `PAINT_ENV`（api/chat.py、api/villagers.py 試打各自設定）。LLM 不能用時用請求原話畫。
-  工具 `costly = True`：審核員退件時不重畫，避免重複計費。
+  工具 `costly = True`：審核員退件時不重畫，避免重複計費；村長名冊會註明「每次都要花錢」，
+  `prune_unrequested` 也會移除重複、而且不是請求原話的畫家步驟。
 
 #### 資料表
 

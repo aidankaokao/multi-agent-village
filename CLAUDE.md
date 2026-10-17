@@ -11,10 +11,13 @@
 Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
 帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0008。
 
-**Phase 5V 視覺模型完成**（`docs/ROADMAP.md`）：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、`chat_images` 表、
-`/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（追問時重看原圖）。
-**Phase 6G 生圖完成**：生圖模型註冊、`image` 分級、生圖測驗、畫家村民（`tools/painter.py` + `core/painter.py`）、畫作 14 天過期。
-使用者會自己部署實測，有問題再回報。之後可能：修圖（附圖當參考圖）、Phase 6（台灣史 remote agent，暫緩）。Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
+**Phase 5V 視覺模型完成**（使用者已實測）：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、小圖放大、`chat_images` 表、
+`/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（清單類一律完整抄寫、追問時重看原圖）。
+**Phase 6G 生圖完成**（使用者已實測 10 個步驟）：生圖模型只接 OpenRouter（`POST /images`）、`image` 分級、生圖測驗、
+畫家村民（`tools/painter.py` + `core/painter.py`）、村規張數上限、畫作 14 天過期。
+
+**之後可能的方向**（使用者還沒決定）：修圖（附圖當參考圖，`input_references`）；本機生圖（見「踩過的坑」：Ollama 目前不支援）；
+Phase 6（台灣史 remote agent，獨立容器 RAG，暫緩）。
 
 ## 使用者偏好（重要）
 
@@ -83,3 +86,11 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
   避免填到隱藏的元素；CDP 取陣列要 `JSON.stringify`。
 - 本機 Ollama 有 qwen3.5:9b（e2e 用，思考強度設 none）；使用者的容器用 gpt-5、gpt-4o-mini、DeepSeek（OpenRouter）。
   OpenRouter 的 GLM 5.3 線路不穩（JSON 約束下吐空白、無約束時偶爾亂碼），建議不要放 large 第一位。
+- 使用者的 OpenRouter key 有總額度上限（已從 5 美元調到 10 美元）。出現 403「Key limit exceeded」是額度用完，不是程式問題；
+  要排查時進容器看執行紀錄（`docker-compose exec -T backend python`，DB 在 `/data/village.db`，`runs` 表的 plan / steps）。
+- gpt-4o-mini 讀中文小字（菜單）會看錯字，換一次結果就不同；需要準確時把 gpt-5 或 Qwen VL 排在 vision 分級前面。
+- Ollama 生圖：2026/1 曾在 macOS 推出實驗性生圖（x/flux2-klein、x/z-image-turbo，只有 CLI），但 2026/10 的原始碼
+  （`server/routes.go`、`cmd/cmd.go`）會拒絕生圖模型（「image generation models are not currently supported」），
+  本機 0.40.5 也沒有 `/v1/images/generations`。使用者決定先只用 OpenRouter；Ollama 恢復支援再寫轉接（`LLMClient.generate_image`）。
+- 村長規劃的「移除沒要求的步驟」（`prune_unrequested`）：除了關鍵字，也比對指示是不是請求的原話（字的兩兩組合六成以上）；
+  會花錢的村民（畫家）重複出現且不是原話的步驟會被移除。

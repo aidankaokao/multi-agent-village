@@ -184,7 +184,11 @@ LLM 只負責把請求整理成工具的參數（JSON schema），計算由程�
 - [x] B：畫家村民（工具 `painter`：small 分級整理英文提示詞 → image 分級畫圖；整理失敗用原話畫）、
       回答裡顯示畫作（放大 / 下載 / 過期提示）、村規上限（`paint_per_run` 每次 1 張、`paint_per_day` 每人 24 小時 20 張）、
       審核員退件不重畫（工具 `costly`）、角色 sprite
+- [x] 實測修正：村長規劃不再誤刪「原話要求」的步驟（例如「畫一隻狗，再畫一隻兔子」）；
+      重複的畫家步驟（把鑑定結果又畫一次）會被移除；名冊註明畫家每次都要花錢
 - [ ] 之後：修圖（附圖當參考圖，`input_references`）
+- [ ] 之後：本機生圖。評估過 Ollama（x/flux2-klein:4b）：2026/10 的版本不支援生圖模型（API 與 CLI 都拒絕），
+      使用者決定先只用 OpenRouter；Ollama 恢復支援、或改接 ComfyUI / Draw Things 這類有 HTTP API 的工具時再做
 
 ---
 
