@@ -97,7 +97,7 @@
 
 ## 踩過的坑
 
-- `cryptography` 釘在 `<47`：47+ 的 aarch64 wheel 在本機 Docker VM 會 SIGILL（exit 132）。
+- `cryptography` 釘在 `<47`：47+ 的 aarch64 wheel 在本機 Docker VM 會 SIGILL（exit 132）。extra-agents 也一樣（間接依賴也算，例如 pdfminer）；容器莫名重啟先看 `docker inspect` 的結束碼。
 - 不要用 `npx prettier`：專案沒裝，npx 會停下來等安裝確認而卡住；也會把檔案改成 80 字寬，跟專案風格不同。
 - 背景問答在關閉時要先等收尾再 dispose DB（`main.py` lifespan），否則被取消的問答寫 DB 會卡住整個程序（測試偶發卡住也是這個）。
 - e2e 截圖：scratchpad 有 CDP 腳本（shot_*.py）；用 `uv run --with websockets python …`；填問答框要指定 `.workshop` / `.chat-input` 等範圍，
