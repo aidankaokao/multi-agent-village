@@ -187,7 +187,7 @@ async def test_input_references_sent_as_data_urls():
     client = OpenAICompatClient("http://x/v1", None)
     client._http = httpx.AsyncClient(base_url="http://x/v1/", transport=httpx.MockTransport(handler))
     await client.generate_image("m", "pixel art", references=[ImagePart("image/jpeg", "QUJD")])
-    assert seen[0]["input_references"] == ["data:image/jpeg;base64,QUJD"]
+    assert seen[0]["input_references"] == [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}}]
     await client.generate_image("m", "a cat")
     assert "input_references" not in seen[1]
     await client.aclose()
@@ -197,21 +197,18 @@ async def test_last_painting_and_reference_choice(env):
     from village.api.chat import _references
 
     c, app, _, _ = env
-    ctx = app.state.ctx
-    store = ctx.conversations
+    store = app.state.ctx.conversations
     me = (await c.get("/api/auth/status")).json()["user"]["id"]
     conv = (await store.start_turn(me, None, "畫一隻貓")).conversation_id
     [pid] = await store.save_generated(me, conv, [("image/png", PNG)])
     await store.finish_turn(conv, "r1", "畫好了", "done", {"attachments": [{"kind": "image", "url": f"/api/images/{pid}"}]})
-    assert await store.last_painting(conv, me) == ("image/png", PNG)
+    painting = await store.last_painting(conv, me)
+    assert painting == ("image/png", PNG)
     assert await store.last_painting(conv, "someone-else") is None
 
     upload = [("image/jpeg", b"\xff\xd8\xff")]
-    refs = await _references(ctx, me, conv, conv, "把它改成像素風", upload, [])
-    assert [r.source for r in refs] == ["upload"]  # 這次有附圖：用附圖
-    refs = await _references(ctx, me, conv, conv, "背景再亮一點", [], [])
+    assert [r.source for r in _references(upload, painting, [])] == ["upload"]  # 這次有附圖：用附圖
+    refs = _references([], painting, upload)
     assert [r.source for r in refs] == ["painting"] and refs[0].data == PNG  # 修改上一張畫
-    assert await _references(ctx, me, conv, conv, "講個笑話", [], []) == []  # 跟修圖無關
-    assert await _references(ctx, me, None, conv, "再亮一點", [], []) == []  # 新對話沒有上一張
-    refs = await _references(ctx, me, conv, conv, "講個笑話", [], upload)
-    assert [r.source for r in refs] == ["upload"]  # 鑑定師重看的圖
+    assert [r.source for r in _references([], None, upload)] == ["upload"]  # 鑑定師重看的圖
+    assert _references([], None, []) == []

@@ -56,6 +56,11 @@ class Painter(Tool):
         if env is None or not env.references:
             return "這次沒有參考圖：use_reference 填 false。"
         refs = "、".join(r.describe() for r in env.references)
+        if any(r.source == "painting" for r in env.references):
+            return (
+                f"這次有參考圖：{refs}。使用者這句話看起來是要修改上一張畫作："
+                "除非使用者明確說要重新畫一張新的，use_reference 填 true，prompt 只寫要怎麼改（其他保持不變）。"
+            )
         return f"這次有參考圖：{refs}。使用者要修改它時 use_reference 填 true。"
 
     def _check(self, args: dict[str, Any]) -> tuple[str, str, str]:

@@ -81,10 +81,14 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     started = await ctx.conversations.start_turn(me.id, body.conversation_id, message, images)
     conv_id = started.conversation_id
     history = await ctx.conversations.recent_turns(conv_id, rules.context_turns)
+    # 修改上一張畫作（「背景改成夜晚」）：畫家以那張畫為底，鑑定師不用去重看更早附的照片
+    painting = None
+    if not images and body.conversation_id and (_EDIT.search(message) or refers_back(message)):
+        painting = await ctx.conversations.last_painting(conv_id, me.id)
     # 鑑定師要看的圖：這次附的；沒附但前幾輪有圖、而且問題像在問那張圖 → 重看原圖
     relook = False
     look = images
-    if not look and body.conversation_id and appraiser.wants_relook(message):
+    if not look and not painting and body.conversation_id and appraiser.wants_relook(message):
         look = await ctx.conversations.recent_images(conv_id, rules.context_turns)
         relook = bool(look)
         if relook and not await ctx.llm.has_vision(me.id):
@@ -92,7 +96,7 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     parts = [ImagePart(mime, base64.b64encode(data).decode()) for mime, data in look]
     paint = PaintEnv(
         ctx.llm, ctx.conversations, me.id, conv_id, rules.paint_per_run, rules.paint_per_day,
-        references=await _references(ctx, me.id, body.conversation_id, conv_id, message, images, look),
+        references=_references(images, painting, look),
     )
     memories = [m.content for m in await ctx.memories.relevant(me.id, message, rules.memory_max)] if rules.memory_enabled else []
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
@@ -129,16 +133,14 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     return {"run_id": run_id, "conversation_id": conv_id, "image_ids": started.image_ids}
 
 
-async def _references(
-    ctx, user_id: str, asked_conv: str | None, conv_id: str, message: str,
-    images: list[tuple[str, bytes]], look: list[tuple[str, bytes]],
+def _references(
+    images: list[tuple[str, bytes]], painting: tuple[str, bytes] | None, look: list[tuple[str, bytes]]
 ) -> list[Reference]:
     """畫家可以當底圖的參考圖：這次附的圖 → 上一輪的畫作（像在說要修改它時）→ 鑑定師重看的前幾輪附圖。"""
     if images:
         return [Reference(m, d, "upload") for m, d in images]
-    if asked_conv and (_EDIT.search(message) or refers_back(message)):
-        if last := await ctx.conversations.last_painting(conv_id, user_id):
-            return [Reference(*last, "painting")]
+    if painting:
+        return [Reference(*painting, "painting")]
     return [Reference(m, d, "upload") for m, d in look]
 
 

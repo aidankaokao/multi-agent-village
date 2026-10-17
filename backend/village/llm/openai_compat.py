@@ -227,13 +227,14 @@ class OpenAICompatClient(LLMClient):
     async def generate_image(self, model, prompt, *, aspect_ratio=None, references=None):
         """OpenRouter 的生圖 API：POST /images，回傳 data[].b64_json。生圖比較慢，逾時放寬到 3 分鐘。
 
-        references（參考圖）用 input_references 送 data URL；不支援參考圖的模型會回 400。
+        references（參考圖）用 input_references 送：[{"type": "image_url", "image_url": {"url": data URL}}]；
+        不支援參考圖的模型會回 400。
         """
         body: dict = {"model": model, "prompt": prompt, "n": 1}
         if aspect_ratio:
             body["aspect_ratio"] = aspect_ratio
         if references:
-            body["input_references"] = [img.data_url for img in references]
+            body["input_references"] = [{"type": "image_url", "image_url": {"url": img.data_url}} for img in references]
         data = await self._request("POST", "images", json=body, timeout=IMAGE_TIMEOUT)
         images: list[GeneratedImage] = []
         for item in data.get("data") or []:

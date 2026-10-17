@@ -189,6 +189,7 @@ async def test_model_without_reference_support_repaints_from_text():
 
     e = env(images=FakeImages(no_refs=True), refs=[Reference("image/png", _png(10, 10), "painting")])
     with painting(e):
+        assert "要修改上一張畫作" in TOOLS["painter"].context()
         res = await TOOLS["painter"].arun({**ARGS, "use_reference": True})
     assert e.llm.refs[0] and e.llm.refs[1] is None  # 先帶參考圖失敗（400），再只依描述畫
     assert "不收參考圖" in res.text and e.used == 1 and len(e.store.saved) == 1
