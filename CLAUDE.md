@@ -89,7 +89,7 @@
 - 主金鑰輪替：`village rotate-key`（API key 與駐村專家的存取 token 一起重新加密）
 - 台灣史專家（`extra-agents/taiwan-history/`）：`uv run th index | search | ask | serve | gen-token`、`uv run pytest`；
   部署 `./build.sh` → 使用者自己 `docker-compose up -d`（在那個資料夾）。兩邊都要更新時：**先部署專家、再部署村子**
-- 重新產生 sprites（角色、裝飾、manifest）：`uv run --with pillow python scripts/gen_placeholder_sprites.py`
+- 重新產生 sprites（角色、裝飾、manifest）：`uv run --with pillow python scripts/gen_placeholder_sprites.py`；頁籤 icon：`scripts/gen_favicon.py`（同樣用法）
 - 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh` → 使用者自己 `docker-compose up -d`；前端綁 0.0.0.0
 - DB 結構用 Alembic（`backend/village/store/migrations/`），啟動時自動 upgrade head；create_all 時代的舊 DB 先標記 0001 再升級。
   改 models 後：`cd backend && uv run python -m village.store.migrate revision -m "說明"`（外鍵要命名；SQLite 用 batch 模式）。

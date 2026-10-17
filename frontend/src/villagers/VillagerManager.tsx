@@ -17,6 +17,27 @@ const BLANK: AgentSpec = {
   tests: [],
 };
 
+const PAGE_SIZE = 8;
+
+type Kind = "all" | "prompt" | "tool" | "remote" | "disabled";
+const KIND_LABEL: Record<Kind, string> = { all: "全部", prompt: "💬 對話型", tool: "🔧 工具型", remote: "🧳 駐村專家", disabled: "停用中" };
+
+function matchKind(v: Villager, kind: Kind): boolean {
+  if (kind === "all") return true;
+  if (kind === "disabled") return !v.enabled;
+  return v.spec.kind === kind;
+}
+
+function matchQuery(v: Villager, q: string): boolean {
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const s = v.spec;
+  const text = [v.id, s.card.name, s.card.description, ...s.card.tags, ...s.card.skills.map((k) => k.description), ...s["x-village"].keywords]
+    .join(" ")
+    .toLowerCase();
+  return words.every((w) => text.includes(w.replace(/^@/, "")));
+}
+
 // saved = null 代表新村民；fromWorkshop：工匠做的草稿，建立前可以回工坊繼續聊
 type Editing = { spec: AgentSpec; saved: AgentSpec | null; nonce: number; fromWorkshop?: boolean };
 
@@ -36,6 +57,13 @@ export function VillagerManager() {
   const [residentList, setResidentList] = useState<Resident[]>([]);
   const [inviting, setInviting] = useState(false);
   const [managing, setManaging] = useState<string | null>(null); // 駐村專家 id
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState<Kind>("all");
+  const [page, setPage] = useState(0);
+
+  const shown = useMemo(() => list.filter((v) => matchKind(v, kind) && matchQuery(v, q)), [list, kind, q]);
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const at = Math.min(page, pages - 1); // 刪除 / 篩選後頁數變少時不會停在空白頁
 
   const reload = useCallback(async () => {
     try {
@@ -168,7 +196,33 @@ export function VillagerManager() {
         </form>
       )}
 
-      {list.map((v) => {
+      {list.length > 0 && (
+        <div className="row villager-filter">
+          <input
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(0);
+            }}
+            placeholder={`搜尋名字、@id、說明、關鍵字（共 ${list.length} 位）`}
+          />
+          <select
+            value={kind}
+            onChange={(e) => {
+              setKind(e.target.value as Kind);
+              setPage(0);
+            }}
+          >
+            {Object.entries(KIND_LABEL).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {shown.slice(at * PAGE_SIZE, (at + 1) * PAGE_SIZE).map((v) => {
         const s = v.spec;
         const res = s.kind === "remote" ? residentList.find((r) => r.id === v.id) : undefined;
         const openIt = () => (s.kind === "remote" ? setManaging(v.id) : setEditing(open(s, s)));
@@ -213,6 +267,20 @@ export function VillagerManager() {
         );
       })}
       {list.length === 0 && <p className="hint">村裡還沒有村民，按「✨ 跟工匠聊聊」開始。</p>}
+      {list.length > 0 && shown.length === 0 && <p className="hint">沒有符合的村民。</p>}
+      {pages > 1 && (
+        <div className="row pager">
+          <button type="button" className="link" disabled={at === 0} onClick={() => setPage(at - 1)}>
+            ← 上一頁
+          </button>
+          <span className="muted">
+            第 {at + 1} / {pages} 頁（{shown.length} 位）
+          </span>
+          <button type="button" className="link" disabled={at >= pages - 1} onClick={() => setPage(at + 1)}>
+            下一頁 →
+          </button>
+        </div>
+      )}
       {inviting && (
         <InviteResident
           manifest={manifest}

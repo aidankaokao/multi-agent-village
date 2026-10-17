@@ -1462,3 +1462,11 @@ button.conv-open {
   background: var(--card);
   font-size: 13px;
 }
+
+.villager-filter select {
+  flex: 0 0 auto;
+}
+
+.pager {
+  justify-content: center;
+}
