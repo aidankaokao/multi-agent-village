@@ -44,6 +44,7 @@ class Tool:
     keywords: list[str] = []  # 新建村民時的預設關鍵字
     examples: list[str] = []
     costly = False  # 每次執行都要花錢（例如生圖）：審核員退件時不重做，避免重複計費
+    planner_hint = ""  # 附在村長名冊裡的能力說明（不受管理員改村民說明影響）
 
     def schema(self) -> dict:
         """LLM 輸出參數的 JSON schema（strict：所有欄位必填、不允許多餘欄位）。"""

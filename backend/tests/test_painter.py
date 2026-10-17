@@ -12,21 +12,25 @@ from village.llm.base import GeneratedImage, ImageResult, LLMError
 from village.tools import TOOLS
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
-ARGS = {"prompt": "a cat sleeping under the moon, watercolor", "aspect_ratio": "16:9", "title": "月下貓"}
+ARGS = {"prompt": "a cat sleeping under the moon, watercolor", "aspect_ratio": "16:9", "title": "月下貓", "use_reference": False}
 
 
 class FakeImages:
     """假的 LLMService.generate_image：記錄提示詞。"""
 
-    def __init__(self, data=PNG, fail=False):
+    def __init__(self, data=PNG, fail=False, no_refs=False):
         self.prompts: list[tuple[str, str | None]] = []
-        self.data, self.fail = data, fail
+        self.refs: list = []
+        self.data, self.fail, self.no_refs = data, fail, no_refs
 
-    async def generate_image(self, target, prompt, *, aspect_ratio=None):
+    async def generate_image(self, target, prompt, *, aspect_ratio=None, references=None):
         assert target == "tier:image"
         self.prompts.append((prompt, aspect_ratio))
+        self.refs.append(references)
         if self.fail:
             raise LLMError("你還沒有設定生圖模型")
+        if references and self.no_refs:
+            raise LLMError("img-model: HTTP 400: input_references not supported")
         return ImageResult(images=[GeneratedImage("image/png", self.data)], model="img-model", cost=0.04)
 
 
@@ -44,8 +48,8 @@ class FakeStore:
         return [f"img{len(self.saved)}"]
 
 
-def env(images=None, store=None, per_run=1, per_day=20):
-    return PaintEnv(images or FakeImages(), store or FakeStore(), "u1", "c1", per_run, per_day)
+def env(images=None, store=None, per_run=1, per_day=20, refs=None):
+    return PaintEnv(images or FakeImages(), store or FakeStore(), "u1", "c1", per_run, per_day, references=refs or [])
 
 
 async def test_painter_tool_paints_and_returns_url():
@@ -135,4 +139,69 @@ def test_prune_keeps_requested_paintings_and_drops_extra_ones(registry):  # noqa
     # 詩人 + 畫家：照常保留
     steps = [Step("s1", "poet", "寫一首關於海的短詩"), Step("s2", "painter", "幫這首詩配一張插圖", ["s1"])]
     assert len(prune_unrequested(steps, "寫一首關於海的短詩，再幫它配一張插圖", agents, [])) == 2
-    assert "每次都要花錢" in planner_system_prompt(registry.all())
+    roster = planner_system_prompt(registry.all())
+    assert "每次都要花錢" in roster and "上一張畫作為底修改" in roster
+
+
+# ---------------------------------------------------------------- 修圖
+
+
+def _png(w, h):
+    return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + w.to_bytes(4, "big") + h.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
+
+
+def _jpeg(w, h):
+    sof = b"\xff\xc0\x00\x11\x08" + h.to_bytes(2, "big") + w.to_bytes(2, "big") + b"\x03" + b"\x00" * 9
+    return b"\xff\xd8" + b"\xff\xe0\x00\x04\x00\x00" + sof + b"\xff\xd9"
+
+
+def test_dimensions():
+    from village.core.imagefmt import dimensions
+
+    assert dimensions(_png(800, 600)) == (800, 600)
+    assert dimensions(_jpeg(1035, 1300)) == (1035, 1300)
+    assert dimensions(b"GIF89a") is None
+
+
+async def test_edit_uses_reference_and_tells_the_painter():
+    from village.core.painter import Reference
+
+    ref = Reference("image/jpeg", _jpeg(1300, 975), "upload")
+    e = env(refs=[ref])
+    p = TOOLS["painter"]
+    with painting(e):
+        assert "使用者附的圖（1300×975，橫的）" in p.context()
+        res = await p.arun({**ARGS, "prompt": "Turn this photo into pixel art", "use_reference": True})
+    [refs] = e.llm.refs
+    assert len(refs) == 1 and refs[0].mime == "image/jpeg"
+    assert "依參考圖改好了" in res.text
+    # LLM 說 false（只參考內容另外畫）：不送參考圖
+    e = env(refs=[ref])
+    with painting(e):
+        res = await p.arun(ARGS)
+    assert e.llm.refs == [None] and "畫好了" in res.text
+    with painting(env()):
+        assert "沒有參考圖" in p.context()
+
+
+async def test_model_without_reference_support_repaints_from_text():
+    from village.core.painter import Reference
+
+    e = env(images=FakeImages(no_refs=True), refs=[Reference("image/png", _png(10, 10), "painting")])
+    with painting(e):
+        res = await TOOLS["painter"].arun({**ARGS, "use_reference": True})
+    assert e.llm.refs[0] and e.llm.refs[1] is None  # 先帶參考圖失敗（400），再只依描述畫
+    assert "不收參考圖" in res.text and e.used == 1 and len(e.store.saved) == 1
+
+
+async def test_fallback_uses_reference_when_present(registry):  # noqa: F811
+    from village.core.painter import Reference
+
+    def down(t, m, kw):
+        raise LLMError("no llm")
+
+    e = env(refs=[Reference("image/png", _png(10, 10), "upload")])
+    r = StepResult(id="s1", agent="painter", instruction="改成像素風", use=[])
+    with painting(e):
+        await run_agent(FakeLLM(down), registry.get("painter"), "改成像素風", "", r)
+    assert e.llm.refs[0] and r.tool_args["use_reference"] is True

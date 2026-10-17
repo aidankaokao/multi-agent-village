@@ -141,7 +141,9 @@ def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = 
     for a in agents:
         examples = "；".join(e for s in a.card.skills for e in s.examples[:3])
         costly = "【每次都要花錢：使用者沒有明確要求畫好幾張時，只安排一個步驟】" if is_costly(a) else ""
-        lines.append(f"- {a.id}（{a.name}）：{a.card.description}{costly}" + (f" 例：{examples}" if examples else ""))
+        tool = TOOLS.get(a.tool.id) if a.kind == "tool" and a.tool else None
+        hint = f"（{tool.planner_hint}）" if tool and tool.planner_hint else ""
+        lines.append(f"- {a.id}（{a.name}）：{a.card.description}{hint}{costly}" + (f" 例：{examples}" if examples else ""))
     roster = "\n".join(lines)
     history_rule = history_block = ""
     if history:

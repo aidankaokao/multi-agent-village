@@ -113,6 +113,20 @@ class ConversationStore:
             await s.commit()
         return n or 0
 
+    async def last_painting(self, conversation_id: str, user_id: str) -> tuple[str, bytes] | None:
+        """上一輪回答裡的畫作（修圖追問「再改亮一點」用它當底圖）；過期或沒有就回 None。"""
+        async with self._sm() as s:
+            msg = await s.scalar(
+                select(Message).where(Message.conversation_id == conversation_id, Message.role == "assistant")
+                .order_by(Message.created_at.desc()).limit(1)
+            )
+        urls = [a.get("url") or "" for a in ((msg.meta or {}).get("attachments") or []) if a.get("kind") == "image"] if msg else []
+        for url in reversed(urls):
+            img = await self.get_image(url.rsplit("/", 1)[-1], user_id)
+            if img is not None:
+                return img.mime, img.data
+        return None
+
     async def get_image(self, image_id: str, user_id: str) -> ChatImage | None:
         """只有本人拿得到（管理員也一樣）；過期的畫作即使還沒被清掉也當作不存在。"""
         async with self._sm() as s:

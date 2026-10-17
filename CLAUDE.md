@@ -15,9 +15,10 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 `/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（清單類一律完整抄寫、追問時重看原圖）。
 **Phase 6G 生圖完成**（使用者已實測 10 個步驟）：生圖模型只接 OpenRouter（`POST /images`）、`image` 分級、生圖測驗、
 畫家村民（`tools/painter.py` + `core/painter.py`）、村規張數上限、畫作 14 天過期。
+**修圖**剛做完、等使用者實測：附圖或上一張畫作當參考圖（`input_references`），畫家判斷 `use_reference`。
 
-**之後可能的方向**（使用者還沒決定）：修圖（附圖當參考圖，`input_references`）；本機生圖（見「踩過的坑」：Ollama 目前不支援）；
-Phase 6（台灣史 remote agent，獨立容器 RAG，暫緩）。
+**下一個話題**：Phase 6 台灣史專家（remote agent，獨立容器 RAG）。使用者有些地方要先討論，**先聽使用者的想法再提方案**。
+本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
 

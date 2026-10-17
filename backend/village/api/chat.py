@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,7 +11,8 @@ from pydantic import BaseModel, Field
 
 from village.api import images as image_api
 from village.core import appraiser, scribe
-from village.core.painter import PaintEnv
+from village.core.context import refers_back
+from village.core.painter import PaintEnv, Reference
 from village.llm.base import ImagePart
 from village.llm.service import NO_VISION, NOT_CONFIGURED, llm_user
 from village.security.auth import CurrentUser, require_user
@@ -20,6 +22,9 @@ log = logging.getLogger("village.chat")
 
 
 DEFAULT_IMAGE_QUESTION = "這張圖片裡有什麼？"
+
+# 追問時像在「修改上一張畫」：改、調、換、加上、去掉、再…一點、背景、顏色、風格…
+_EDIT = re.compile(r"改|調|換|修|加上|加一|去掉|拿掉|刪掉|移除|再.{0,6}(一點|一些|些)|背景|顏色|色調|風格|畫風|更亮|更暗|放大|縮小")
 
 
 class ChatBody(BaseModel):
@@ -85,7 +90,10 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
         if relook and not await ctx.llm.has_vision(me.id):
             look, relook = [], False  # 視覺模型被拿掉了：照一般問答處理
     parts = [ImagePart(mime, base64.b64encode(data).decode()) for mime, data in look]
-    paint = PaintEnv(ctx.llm, ctx.conversations, me.id, conv_id, rules.paint_per_run, rules.paint_per_day)
+    paint = PaintEnv(
+        ctx.llm, ctx.conversations, me.id, conv_id, rules.paint_per_run, rules.paint_per_day,
+        references=await _references(ctx, me.id, body.conversation_id, conv_id, message, images, look),
+    )
     memories = [m.content for m in await ctx.memories.relevant(me.id, message, rules.memory_max)] if rules.memory_enabled else []
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
     ctx.bus.claim(run_id, me.id)  # 在 task 開始前就認領，第一個事件也只送給提問者
@@ -119,6 +127,19 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     task.add_done_callback(ctx.tasks.discard)
     task.add_done_callback(lambda _: (ctx.active.pop(run_id, None), ctx.owners.pop(run_id, None)))
     return {"run_id": run_id, "conversation_id": conv_id, "image_ids": started.image_ids}
+
+
+async def _references(
+    ctx, user_id: str, asked_conv: str | None, conv_id: str, message: str,
+    images: list[tuple[str, bytes]], look: list[tuple[str, bytes]],
+) -> list[Reference]:
+    """畫家可以當底圖的參考圖：這次附的圖 → 上一輪的畫作（像在說要修改它時）→ 鑑定師重看的前幾輪附圖。"""
+    if images:
+        return [Reference(m, d, "upload") for m, d in images]
+    if asked_conv and (_EDIT.search(message) or refers_back(message)):
+        if last := await ctx.conversations.last_painting(conv_id, user_id):
+            return [Reference(*last, "painting")]
+    return [Reference(m, d, "upload") for m, d in look]
 
 
 async def take_notes_after(ctx, user_id: str, run_id: str, message: str) -> None:

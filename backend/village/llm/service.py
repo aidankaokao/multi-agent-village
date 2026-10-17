@@ -15,7 +15,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from village.llm.anthropic_client import AnthropicClient
-from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, ChatResult, ImageResult, LLMClient, LLMError, TextCallback
+from village.llm.base import (
+    DEFAULT_BASE_URLS,
+    ChatMessage,
+    ChatResult,
+    ImagePart,
+    ImageResult,
+    LLMClient,
+    LLMError,
+    TextCallback,
+)
 from village.llm.openai_compat import OpenAICompatClient
 from village.security.crypto import SecretBox
 from village.security.redact import register_secret
@@ -118,8 +127,10 @@ class LLMService:
     async def has_image(self, user_id: str) -> bool:
         return bool(await self.candidates(f"tier:{IMAGE}", user_id))
 
-    async def generate_image(self, target: str, prompt: str, *, aspect_ratio: str | None = None) -> ImageResult:
-        """文字生圖：依 image 分級的順序試，失敗換下一個（target 也可以是模型 id，生圖測驗用）。"""
+    async def generate_image(
+        self, target: str, prompt: str, *, aspect_ratio: str | None = None, references: list[ImagePart] | None = None
+    ) -> ImageResult:
+        """生圖：依 image 分級的順序試，失敗換下一個（target 也可以是模型 id，生圖測驗用）。references = 修圖的參考圖。"""
         user_id = LLM_USER.get()
         if user_id is None:
             raise LLMError("沒有指定要用哪個帳號的 LLM")
@@ -130,7 +141,7 @@ class LLMService:
         for m in models:
             client = self.client_for(m.provider)
             try:
-                return await client.generate_image(m.model, prompt, aspect_ratio=aspect_ratio)
+                return await client.generate_image(m.model, prompt, aspect_ratio=aspect_ratio, references=references)
             except LLMError as e:
                 log.warning("image model %s failed, trying next: %s", m.model, e)
                 errors.append(f"{m.model}: {e}")

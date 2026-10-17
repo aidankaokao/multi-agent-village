@@ -224,11 +224,16 @@ class OpenAICompatClient(LLMClient):
         items = data.get("data", data) if isinstance(data, dict) else data
         return [RemoteModel(id=m["id"], display_name=m.get("name")) for m in items or [] if isinstance(m, dict) and m.get("id")]
 
-    async def generate_image(self, model, prompt, *, aspect_ratio=None):
-        """OpenRouter 的生圖 API：POST /images，回傳 data[].b64_json。生圖比較慢，逾時放寬到 3 分鐘。"""
+    async def generate_image(self, model, prompt, *, aspect_ratio=None, references=None):
+        """OpenRouter 的生圖 API：POST /images，回傳 data[].b64_json。生圖比較慢，逾時放寬到 3 分鐘。
+
+        references（參考圖）用 input_references 送 data URL；不支援參考圖的模型會回 400。
+        """
         body: dict = {"model": model, "prompt": prompt, "n": 1}
         if aspect_ratio:
             body["aspect_ratio"] = aspect_ratio
+        if references:
+            body["input_references"] = [img.data_url for img in references]
         data = await self._request("POST", "images", json=body, timeout=IMAGE_TIMEOUT)
         images: list[GeneratedImage] = []
         for item in data.get("data") or []:

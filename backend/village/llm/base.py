@@ -93,8 +93,10 @@ class LLMClient(ABC):
     @abstractmethod
     async def list_models(self) -> list[RemoteModel]: ...
 
-    async def generate_image(self, model: str, prompt: str, *, aspect_ratio: str | None = None) -> ImageResult:
-        """文字生圖。目前只有 OpenRouter 的 /images API（OpenAI 相容 client）支援。"""
+    async def generate_image(
+        self, model: str, prompt: str, *, aspect_ratio: str | None = None, references: list[ImagePart] | None = None
+    ) -> ImageResult:
+        """文字生圖；references = 參考圖（修圖時以它為底）。目前只有 OpenRouter 的 /images API（OpenAI 相容 client）支援。"""
         raise LLMError("這個供應商不支援生圖（目前只支援 OpenRouter）")
 
     async def list_image_models(self) -> list[RemoteModel]:

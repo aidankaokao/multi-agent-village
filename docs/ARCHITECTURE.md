@@ -275,6 +275,10 @@ class BaseAgent(Protocol):
   `PaintEnv` 放 context variable `PAINT_ENV`（api/chat.py、api/villagers.py 試打各自設定）。LLM 不能用時用請求原話畫。
   工具 `costly = True`：審核員退件時不重畫，避免重複計費；村長名冊會註明「每次都要花錢」，
   `prune_unrequested` 也會移除重複、而且不是請求原話的畫家步驟。
+- 修圖：`PaintEnv.references`（`Reference`：mime、data、來源 upload / painting）由 api/chat.py `_references` 決定——
+  這次附的圖 → 追問像在修改時用上一輪的畫作（`ConversationStore.last_painting`）→ 鑑定師重看的前幾輪附圖。
+  工具 `context()` 告訴畫家有沒有參考圖與寬高（`imagefmt.dimensions`），畫家用 `use_reference` 決定是否以它為底；
+  送出時 `input_references` = data URL。模型回 400（不收參考圖）時改成只依描述重畫並在結果註明。
 
 #### 資料表
 
