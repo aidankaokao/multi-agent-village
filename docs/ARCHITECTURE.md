@@ -8,32 +8,29 @@
 
 ```
 ┌──────────────────────────── Browser ─────────────────────────────┐
-│  Village View (Phaser 3, 像素地圖+角色)   │  Chat Panel (React)   │
-│  - 角色閒晃 / 頭頂狀態泡泡 / 交接動畫      │  - 問答、執行軌跡      │
-└───────────────▲──────────────────────────┴──────────▲────────────┘
-                │ WebSocket: 事件流 (agent.started …)  │ POST /chat
-┌───────────────┴──────────────────────────────────────┴────────────┐
+│ 登入頁：示範村落（劇本驅動）＋ 登入 / 註冊                          │
+│ 村子：Phaser 3 像素地圖滿版（村民閒晃、頭頂泡泡、交接動畫）          │
+│   右上 ⚙️ → 右側抽屜：村民 / 紀錄 / 記憶 / 村規 / 帳號 / LLM 設定    │
+│   右下 💬 → 問答視窗（對話列表、執行過程、停止、圖片放大）           │
+└───────────────▲─────────────────────────────────────▲────────────┘
+                │ WebSocket：事件流（只有自己的內容）    │ REST（cookie session）
+┌───────────────┴─────────────────────────────────────┴────────────┐
 │ Backend (Python / FastAPI)                                        │
 │                                                                   │
-│  Gateway ──► Harness(輸入守門) ──► Orchestrator(村長)              │
-│                                     │ 1. 讀 Agent Cards           │
-│                                     │ 2. 產生 Plan (DAG/JSON)     │
-│                                     │ 3. 依序/平行執行步驟          │
+│  帳號 / 權限 ─► 對話 + 長期記憶 ─► 村長（規劃，含 @指名 / 關鍵字退路）│
+│                                     │ Plan（steps + use + prev）  │
 │                                     ▼                             │
-│                         Agent Registry（市集）                     │
-│        ┌──────────────┬──────────────┬──────────────────┐         │
-│        │ PromptAgent  │ ToolAgent    │ RemoteAgent      │         │
-│        │ (yaml+prompt)│ (python 類別) │ (A2A over HTTP)  │         │
-│        └──────┬───────┴──────┬───────┴────────┬─────────┘         │
-│               ▼              ▼                │                   │
-│          LLM Provider 抽象層 (cloud / local)   │                   │
-│                                                │                   │
-│  Harness(輸出守門+審核員) ◄── 每步結果          │                   │
-│  Event Bus ──► WebSocket                       │                   │
-│  Store: SQLite → Postgres/TimescaleDB          │                   │
-└────────────────────────────────────────────────┼───────────────────┘
-                                                 ▼
-                              獨立容器：台灣史專家 (RAG / GraphRAG …)
+│  Executor：依相依關係分批（可平行）、逾時、取消、寫執行紀錄           │
+│        ┌──────────────────┬──────────────────┬──────────────┐     │
+│        │ 對話型（prompt）  │ 工具型（tool）     │ remote（Phase 6）│
+│        │ 工作守則 + LLM    │ LLM 整理參數 → 程式 │ 獨立容器        │
+│        └────────┬─────────┴────────┬─────────┴──────────────┘     │
+│                 ▼                  ▼                              │
+│   Harness（輸出檢查、重做）→ 審核員 → 回答；書記在背景記下長期記憶     │
+│   LLMService：每個帳號自己的模型與 API key（加密），large / small 備援 │
+│   系統角色：村長、工匠、審核員、書記                                  │
+│   Store：SQLite（Alembic；可切 Postgres）                           │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ## 2. 技術選型（建議）
@@ -218,6 +215,8 @@ class BaseAgent(Protocol):
 | `review.started` / `review.finished` | 審核員出動；finished 帶 `passed`、`reason`、`fix`、`step`（或 `skipped`） |
 | `run.cancelled` | 使用者按停止，所有忙碌的村民收工 |
 | `workshop.started` / `workshop.finished` / `workshop.error` | 工匠（`agent: craftsman`）追問或打造村民時的動態 |
+| `memory.started` / `memory.finished` | 書記（`agent: scribe`）在問答後記錄；finished 帶 `added`、`forgot` |
+| `agents.changed` | 村民名冊有變動，村子裡的角色登場 / 換裝 / 離開 |
 | `run.finished` | 聊天框出現最終答案 |
 
 ```json
@@ -230,7 +229,8 @@ class BaseAgent(Protocol):
 
 ### 3.7 LLM 註冊與 API Key 加密
 
-**不使用設定檔管理模型**，一律在前端「LLM 設定」頁註冊，資料存在 DB。
+**不使用設定檔管理模型**，一律在前端「LLM 設定」頁註冊，資料存在 DB，而且**屬於各個帳號**：每個人註冊自己的
+供應商與 API key、排自己的 large / small 分級，問答時用提問者自己的設定與額度（見 3.8）。
 
 #### 註冊流程（UI）
 
@@ -238,21 +238,21 @@ class BaseAgent(Protocol):
 2. 按「測試連線」：後端用該設定呼叫 `/v1/models`（Ollama 用 `/api/tags`）列出可用模型
 3. 勾選要註冊的模型，可設顯示名稱、是否支援 JSON schema 輸出、context 長度
 4. 在「模型分級」把模型拖進 `large` / `small`，排出備援順序
-5. 個別 agent 可以在 `agent.yaml` 寫 `model.tier`，也可以在 UI 指定某個模型覆寫
+5. 村民設定裡選 `small` / `large` 分級，也可以指定某個模型（只對指定的人有效，其他人改用分級）
 
 #### 資料表
 
 | 表 | 主要欄位 |
 |---|---|
-| `llm_providers` | id, name, kind, base_url, `api_key_ct`, `api_key_nonce`, `key_version`, `api_key_hint`(如 `sk-…a1b2`), enabled, created_at, updated_at |
+| `llm_providers` | id, **user_id**, name（同一人不可重複）, kind, base_url, `api_key_ct`, `api_key_nonce`, `key_version`, `api_key_hint`(如 `sk-…a1b2`), enabled, created_at, updated_at |
 | `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, enabled |
-| `model_tiers` | tier(`large`/`small`), position, model_id |
+| `model_tiers` | **user_id**, tier(`large`/`small`), position, model_id |
 
 #### 加密設計（信封加密的簡化版）
 
 ```
 主金鑰 (KEK, 32 bytes)  ──不進 DB、不進 git──
-   │  AES-256-GCM(nonce=隨機 12 bytes, AAD="llm_provider:{id}:api_key")
+   │  AES-256-GCM(nonce=隨機 12 bytes, AAD="llm_provider:{user_id}:{id}:api_key")
    ▼
 api_key_ct + api_key_nonce  ──存 SQLite/Postgres──
 ```
@@ -263,8 +263,8 @@ api_key_ct + api_key_nonce  ──存 SQLite/Postgres──
   2. 金鑰檔 `~/.config/multi-agent-village/master.key`（權限 600，**放在專案資料夾外**）；開發環境第一次啟動自動產生
 - **只寫不讀**：API 永遠不回傳明文 key，只回 `api_key_hint`；UI 上是「已設定 / 重新輸入」。更新時沒填 key 就保留原值
 - **用時才解密**：只在發出 LLM 請求的當下解密，存在記憶體；log、trace、錯誤訊息都經過遮罩（redaction），不會印出 key
-- **輪替**：`uv run village secrets rotate`，用新主金鑰重新加密所有列，`key_version` +1
-- **存取控制**：帳號系統（Phase 5）完成前，設定頁 API 預設不驗證；設定 `VILLAGE_ADMIN_TOKEN` 後才要求 Bearer token。即使不驗證，API 也拿不到明文 key（只寫不讀）
+- **輪替**：`village rotate-key`，用新主金鑰版本重新加密所有列，`key_version` +1
+- **存取控制**：每個人只看得到、改得到自己的 provider / 模型（別人的 id 一律 404）；密文的 AAD 綁定擁有者，搬到別人名下解不開
 - **git 防線**：`.gitignore` 排除 `*.db`、`data/`、`.env`、`*.key`；另可加 pre-commit 的 secret 掃描（gitleaks）
 
 #### 這個設計擋得住什麼
@@ -301,47 +301,50 @@ session token 放 httpOnly + SameSite=Lax cookie，DB 只存 SHA-256；密碼 sc
 
 **以後（規劃中）**：
 
-- `users`、`conversations`、`messages`：對話紀錄（短期記憶）
-- `memories`：長期記憶（使用者偏好、事實），由一個 `memory` 背景 agent 從對話中萃取，問答前檢索相關記憶塞進 context
-- `runs`、`steps`、`events`：執行軌跡（日後適合放 TimescaleDB 的 hypertable）
-- 一開始 SQLite；用 SQLAlchemy + Alembic，之後切 Postgres 只改 `DATABASE_URL`；向量檢索改用 pgvector
+- 切 Postgres（已加 asyncpg，只改 `DATABASE_URL`）；記憶多了改用 pgvector 向量檢索
+- `runs` 執行軌跡日後適合放 TimescaleDB 的 hypertable
+- 全局預設的本地 LLM，給還沒設定自己 LLM 的人使用
 
-## 4. 目錄結構（規劃）
+## 4. 目錄結構
 
 ```
 multi-agent-village/
 ├── backend/
-│   ├── pyproject.toml
+│   ├── pyproject.toml / uv.lock
+│   ├── tests/                   # pytest（uv run pytest）
 │   └── village/
-│       ├── main.py              # FastAPI 入口、/chat、/ws
-│       ├── config.py            # 環境變數（DATABASE_URL、主金鑰位置、bind host）
-│       ├── llm/                 # LLMProvider：openai_compat.py, anthropic.py；registry.py（從 DB 載入）
-│       ├── security/            # crypto.py（AES-256-GCM 加解密、主金鑰載入、輪替）
+│       ├── main.py              # FastAPI 入口、AppContext、/ws、啟動與關閉
+│       ├── cli.py               # village serve / rotate-key / reset-password / create-admin
+│       ├── config.py            # 環境變數（DATABASE_URL、config_dir、agents_dir）
+│       ├── events.py            # Event bus；claim / for_viewer（事件只給提問者）
+│       ├── api/                 # auth、chat、conversations、memories、runs（含村規）、villagers、workshop、llm
 │       ├── core/
-│       │   ├── card.py          # AgentCard pydantic 模型
-│       │   ├── base.py          # BaseAgent / Task / RunContext / AgentResult
-│       │   ├── registry.py      # 記憶體中的村民名冊（資料來自 DB）
-│       │   ├── prompt_agent.py  # kind=prompt 的通用實作
-│       │   ├── remote_agent.py  # kind=remote（A2A client）
-│       │   ├── orchestrator.py  # 村長：規劃
-│       │   ├── workshop.py      # 工匠：對話打造村民草稿
-│       │   ├── reviewer.py      # 審核員：最終答案檢查
-│       │   └── executor.py      # DAG 執行 + retry
-│       ├── harness/             # input_guard, validators, content_guard
-│       ├── events.py            # Event bus
-│       └── store/               # SQLAlchemy models
-├── agents/                      # 內建範例村民（第一次啟動匯入 DB）
-│   ├── poet/agent.yaml
-│   ├── jester/agent.yaml
-│   ├── reviewer/agent.yaml
-├── services/
-│   └── taiwan-history/          # Phase 6：獨立容器的 remote agent
+│       │   ├── card.py          # 村民定義（AgentSpec：prompt / tool）
+│       │   ├── registry.py      # 記憶體中的村民名冊；保留名稱
+│       │   ├── orchestrator.py  # 村長：@指名 → LLM 規劃 → 關鍵字備援 → 直接回覆
+│       │   ├── executor.py      # 執行、平行、逾時、取消、審核迴圈、工具型村民、事件、紀錄
+│       │   ├── harness.py       # 輸出清理與檢查、髒話、測試題條件
+│       │   ├── reviewer.py      # 審核員
+│       │   ├── workshop.py      # 工匠：對話打造村民
+│       │   ├── scribe.py        # 書記：長期記憶
+│       │   └── context.py       # 多輪上下文（Turn、prev、指稱判斷）
+│       ├── tools/               # 工具箱：calculator、chart（SVG）、clock
+│       ├── llm/                 # openai_compat、anthropic_client、service（每個帳號的模型 + 備援）
+│       ├── security/            # crypto（AES-256-GCM、主金鑰）、auth（帳號 / session / 權限）、redact
+│       └── store/               # models、migrations（Alembic）、agents、runs、settings（村規）、conversations、memories
+├── agents/                      # 內建範例村民（第一次啟動匯入 DB）：poet、jester、calculator、chart
 ├── frontend/
-│   ├── public/assets/sprites/   # ★ 角色四向圖、UI 泡泡、manifest.json
-│   ├── public/assets/maps/      # Tiled 地圖
-│   └── src/ (village/, chat/)
+│   ├── public/assets/sprites/   # 角色四向圖、裝飾（deco/）、UI 泡泡、manifest.json
+│   └── src/
+│       ├── App.tsx              # 登入閘門、滿版村子、⚙️ 選單、抽屜、💬 問答視窗
+│       ├── auth/                # 登入頁（示範村落劇本 demo.ts）
+│       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色）
+│       ├── chat/                # 問答面板、事件 reducer
+│       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊
+│       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定
+│       └── ui/                  # Modal、Attachments（圖片放大）
 ├── scripts/gen_placeholder_sprites.py
-├── .env.example                 # 只放非機密設定的範例；真正的 .env 不進 git
-├── docker-compose.yml
-└── docs/
+├── build.sh                     # 只 build image；部署由使用者執行 docker-compose up -d
+├── docker-compose.yaml / .env.example
+└── docs/                        # ARCHITECTURE、ROADMAP、SPRITES
 ```

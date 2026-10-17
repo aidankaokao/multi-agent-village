@@ -161,7 +161,14 @@ LLM 只負責把請求整理成工具的參數（JSON schema），計算由程�
 
 ---
 
-## Phase 6 — Remote agent：台灣史專家（獨立容器）
+## 待討論：視覺模型與生圖模型
+
+使用者想討論：讓村民看得懂圖片（視覺模型），以及產生圖片（OpenRouter 或其他雲端生圖模型）。
+Phase 6 先暫緩，討論結果再決定排在哪裡。
+
+---
+
+## Phase 6 — Remote agent：台灣史專家（獨立容器）（暫緩）
 
 - [ ] `services/taiwan-history/`：獨立 FastAPI 服務，實作 A2A（`/.well-known/agent-card.json` + `message/send`）
 - [ ] 先做基本 RAG（資料切塊 + 向量檢索 + 引用來源），再進化到 GraphRAG / agentic RAG
