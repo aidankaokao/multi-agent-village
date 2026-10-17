@@ -8,10 +8,11 @@
 
 import re
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from app.embedder import Embedder
-from app.llm import LLMConfig, LLMError, chat
+from app.llm import LLMConfig, LLMError, chat, chat_stream
 from app.store import Hit, Store
 
 SYSTEM = """你是台灣史專家，根據下方提供的「資料」回答使用者關於台灣歷史的問題。
@@ -55,24 +56,68 @@ def fallback_answer(hits: list[Hit], reason: str) -> str:
     return "\n".join(lines)
 
 
-async def ask(question: str, store: Store, embedder: Embedder, llm: LLMConfig | None, k: int = 8) -> Answer:
+async def _retrieve(question: str, store: Store, embedder: Embedder, k: int) -> tuple[list[Hit], list[dict], dict]:
     t0 = time.monotonic()
     qv = (await embedder.embed([question]))[0]
     hits = store.search(question, qv, k=k)
-    t1 = time.monotonic()
     sources = [{"n": i, **h.to_dict()} for i, h in enumerate(hits, 1)]
-    timings = {"retrieve_ms": int((t1 - t0) * 1000)}
+    return hits, sources, {"retrieve_ms": int((time.monotonic() - t0) * 1000)}
+
+
+def _cited(text: str, sources: list[dict]) -> list[dict]:
+    used = sorted({int(n) for n in _CITE.findall(text) if 1 <= int(n) <= len(sources)})
+    return [sources[n - 1] for n in used]
+
+
+def _prompt(question: str, hits: list[Hit]) -> str:
+    return f"資料：\n\n{render_sources(hits)}\n\n問題：{question}"
+
+
+async def ask(question: str, store: Store, embedder: Embedder, llm: LLMConfig | None, k: int = 8) -> Answer:
+    hits, sources, timings = await _retrieve(question, store, embedder, k)
     if not hits:
         return Answer(question, "資料中沒有找到相關內容。", [], [], timings=timings)
     if llm is None:
         return Answer(question, fallback_answer(hits, "沒有提供 LLM 設定"), [], sources, llm_error="沒有提供 LLM 設定", timings=timings)
-    user = f"資料：\n\n{render_sources(hits)}\n\n問題：{question}"
+    t1 = time.monotonic()
     try:
-        text, model = await chat(llm, SYSTEM, user)
+        text, model = await chat(llm, SYSTEM, _prompt(question, hits))
     except LLMError as e:
         timings["answer_ms"] = int((time.monotonic() - t1) * 1000)
         return Answer(question, fallback_answer(hits, str(e)), [], sources, llm_error=str(e), timings=timings)
     timings["answer_ms"] = int((time.monotonic() - t1) * 1000)
-    used = sorted({int(n) for n in _CITE.findall(text) if 1 <= int(n) <= len(hits)})
-    citations = [sources[n - 1] for n in used]
-    return Answer(question, text, citations, sources, model=model, timings=timings)
+    return Answer(question, text, _cited(text, sources), sources, model=model, timings=timings)
+
+
+async def ask_stream(
+    question: str, store: Store, embedder: Embedder, llm: LLMConfig | None, k: int = 8
+) -> AsyncIterator[tuple[str, object]]:
+    """串流版：先產出 ("delta", 文字片段)…，最後 ("done", Answer)。LLM 不能用時整段產出找到的資料。"""
+    hits, sources, timings = await _retrieve(question, store, embedder, k)
+    if not hits:
+        text = "資料中沒有找到相關內容。"
+        yield "delta", text
+        yield "done", Answer(question, text, [], [], timings=timings)
+        return
+    if llm is None:
+        text = fallback_answer(hits, "沒有提供 LLM 設定")
+        yield "delta", text
+        yield "done", Answer(question, text, [], sources, llm_error="沒有提供 LLM 設定", timings=timings)
+        return
+    t1 = time.monotonic()
+    meta: dict = {}
+    parts: list[str] = []
+    error = None
+    try:
+        async for piece in chat_stream(llm, SYSTEM, _prompt(question, hits), meta=meta):
+            parts.append(piece)
+            yield "delta", piece
+    except LLMError as e:
+        error = str(e)
+        tail = fallback_answer(hits, error) if not parts else f"\n\n（回答中斷：{error}）"
+        parts.append(tail)
+        yield "delta", tail
+    timings["answer_ms"] = int((time.monotonic() - t1) * 1000)
+    text = "".join(parts).strip()
+    cited = [] if error and len(parts) == 1 else _cited(text, sources)
+    yield "done", Answer(question, text, cited, sources, model=meta.get("model"), llm_error=error, timings=timings)

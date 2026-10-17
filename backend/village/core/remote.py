@@ -9,6 +9,7 @@
 所以一律用「管理員填的網址」加上 card 裡的路徑去呼叫。
 """
 
+import json
 import re
 import uuid
 from collections.abc import Iterator
@@ -22,7 +23,7 @@ import httpx
 from sqlalchemy import select
 
 from village.core.card import AgentSpec
-from village.llm.base import LLMError
+from village.llm.base import LLMError, TextCallback
 from village.security.redact import register_secret
 
 CARD_PATH = "/.well-known/agent-card.json"
@@ -235,12 +236,10 @@ def parse_reply(body: Any) -> tuple[str, dict]:
     return text, data
 
 
-async def call(spec, instruction: str, context: str) -> tuple[str, dict, list[str]]:
-    """呼叫駐村專家；回傳 (成果文字, data part, 警告)。"""
-    env = REMOTE_ENV.get()
-    if env is None or spec.remote is None:
-        raise LLMError("駐村專家只能在問答或村民試打裡呼叫")
-    warnings: list[str] = []
+_NO_STREAM: set[str] = set()  # 回過「不支援 message/stream」的 A2A 網址：之後直接用 message/send
+
+
+async def _headers(env: RemoteEnv, spec, warnings: list[str]) -> dict:
     headers = {"Content-Type": "application/json"}
     if token := await env.directory.token(spec.id):
         headers["Authorization"] = f"Bearer {token}"
@@ -256,26 +255,109 @@ async def call(spec, instruction: str, context: str) -> tuple[str, dict, list[st
                 headers["X-LLM-Reasoning-Effort"] = cfg["reasoning_effort"]
         else:
             warnings.append("你的 large 分級沒有 OpenAI 相容的模型（Anthropic 不行），沒有提供 LLM 給駐村專家")
+    return headers
+
+
+def _rpc(method: str, instruction: str, context: str) -> dict:
     message = {
         "kind": "message", "role": "user", "messageId": uuid.uuid4().hex,
         "parts": [{"kind": "text", "text": render_message(instruction, context)}],
     }
-    rpc = {"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": "message/send", "params": {"message": message}}
-    url = spec.remote.url.rstrip("/") + spec.remote.a2a_path
-    try:
-        async with _client(CALL_TIMEOUT) as http:
-            r = await http.post(url, json=rpc, headers=headers)
-    except httpx.HTTPError as e:
-        raise LLMError(f"連不上駐村專家（{url}）：{type(e).__name__}") from None
-    if r.status_code == 401:
+    return {"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": method, "params": {"message": message}}
+
+
+def _check_status(status: int, detail: str) -> None:
+    if status == 401:
         raise LLMError("駐村專家拒絕了存取 token（到村民頁 → 管理，確認 token）")
-    if r.status_code >= 400:
-        raise LLMError(f"駐村專家回傳 HTTP {r.status_code}：{r.text[:300]}")
+    if status >= 400:
+        raise LLMError(f"駐村專家回傳 HTTP {status}：{detail[:300]}")
+
+
+async def _send(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict) -> tuple[str, dict]:
+    r = await http.post(url, json=rpc, headers=headers)
+    _check_status(r.status_code, r.text)
     try:
         body = r.json()
     except ValueError:
         raise LLMError("駐村專家的回覆不是 JSON") from None
-    text, data = parse_reply(body)
+    return parse_reply(body)
+
+
+class _NotStreaming(Exception):
+    """對方不支援 message/stream（回 -32601）：改用 message/send。"""
+
+
+async def _stream(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict, on_text: TextCallback) -> tuple[str, dict]:
+    """A2A message/stream（SSE）：文字一段一段累積，每次把「目前為止的完整文字」交給 on_text。"""
+    text, data = "", {}
+    async with http.stream("POST", url, json=rpc, headers={**headers, "Accept": "text/event-stream"}) as r:
+        if r.status_code >= 400:
+            _check_status(r.status_code, (await r.aread()).decode(errors="replace"))
+        if not r.headers.get("content-type", "").startswith("text/event-stream"):
+            try:
+                body = json.loads(await r.aread())
+            except ValueError:
+                raise LLMError("駐村專家的回覆不是 JSON") from None
+            if isinstance(body, dict) and (body.get("error") or {}).get("code") == -32601:
+                raise _NotStreaming
+            return parse_reply(body)  # 對方沒有串流、直接回完整結果
+        async for line in r.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            try:
+                event = json.loads(line[5:])
+            except json.JSONDecodeError:
+                continue
+            if err := event.get("error"):
+                raise LLMError(f"駐村專家回報錯誤：{err.get('message') if isinstance(err, dict) else err}")
+            result = event.get("result") or {}
+            kind = result.get("kind")
+            if kind == "artifact-update":
+                for part in (result.get("artifact") or {}).get("parts") or []:
+                    if part.get("kind") == "text":
+                        text = text + part.get("text", "") if result.get("append") else part.get("text", "")
+                        await on_text(text)
+                    elif part.get("kind") == "data" and isinstance(part.get("data"), dict):
+                        data.update(part["data"])
+            elif kind == "message":  # 有些 agent 最後直接送完整的 Message
+                text, more = parse_reply({"result": result})
+                data.update(more)
+                await on_text(text)
+            elif kind == "status-update":
+                state = (result.get("status") or {}).get("state")
+                if state in ("failed", "rejected", "canceled"):
+                    raise LLMError(f"駐村專家的任務沒有完成（{state}）")
+                if result.get("final"):
+                    break
+    if not text.strip():
+        raise LLMError("駐村專家沒有回答內容")
+    return text.strip(), data
+
+
+async def call(spec, instruction: str, context: str, on_text: TextCallback | None = None) -> tuple[str, dict, list[str]]:
+    """呼叫駐村專家；回傳 (成果文字, data part, 警告)。
+
+    有 on_text 時先試 message/stream（邊收邊顯示）；對方不支援就改用 message/send，並記住這個網址。
+    """
+    env = REMOTE_ENV.get()
+    if env is None or spec.remote is None:
+        raise LLMError("駐村專家只能在問答或村民試打裡呼叫")
+    warnings: list[str] = []
+    headers = await _headers(env, spec, warnings)
+    url = spec.remote.url.rstrip("/") + spec.remote.a2a_path
+    try:
+        async with _client(CALL_TIMEOUT) as http:
+            result = None
+            if on_text and url not in _NO_STREAM:
+                try:
+                    result = await _stream(http, url, _rpc("message/stream", instruction, context), headers, on_text)
+                except _NotStreaming:
+                    _NO_STREAM.add(url)
+            if result is None:
+                result = await _send(http, url, _rpc("message/send", instruction, context), headers)
+    except httpx.HTTPError as e:
+        raise LLMError(f"連不上駐村專家（{url}）：{type(e).__name__}") from None
+    text, data = result
     if data.get("llm_error"):
         warnings.append(f"駐村專家沒有用 LLM 整理回答（{data['llm_error']}），只列出找到的資料")
         if not spec.remote.share_llm:

@@ -252,3 +252,64 @@ async def test_a2a(corpus, monkeypatch):
             assert r["error"]["code"] == -32601
             r = (await c.post("/a2a", json={**rpc, "params": {"message": {"parts": []}}}, headers=auth)).json()
             assert r["error"]["code"] == -32602
+
+
+# ---------------------------------------------------------------- 串流（A2A message/stream）
+
+
+def _sse_llm(pieces, model="m-stream"):
+    """模擬 OpenAI 相容的串流回應。"""
+    lines = [f"data: {json.dumps({'model': model, 'choices': [{'delta': {'content': p}}]})}" for p in pieces]
+    return "\n\n".join(lines + ["data: [DONE]"]) + "\n\n"
+
+
+async def test_ask_stream_yields_pieces_and_citations(corpus, monkeypatch):
+    from app.answer import ask_stream
+
+    store, emb = await _indexed(corpus)
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, text=_sse_llm(["霧社事件", "發生於1930年", "[1]。"]),
+                              headers={"content-type": "text/event-stream"})
+
+    _mock_llm(monkeypatch, handler)
+    events = [e async for e in ask_stream("霧社事件", store, emb, LLMConfig("https://openrouter.ai/api/v1", "m", "k"), k=3)]
+    assert seen["body"]["stream"] is True
+    assert [v for k, v in events if k == "delta"] == ["霧社事件", "發生於1930年", "[1]。"]
+    kind, a = events[-1]
+    assert kind == "done" and a.answer == "霧社事件發生於1930年[1]。" and a.model == "m-stream"
+    assert [c["title"] for c in a.citations] == ["霧社事件"]
+
+
+async def test_ask_stream_falls_back_when_llm_fails(corpus, monkeypatch):
+    from app.answer import ask_stream
+
+    store, emb = await _indexed(corpus)
+    _mock_llm(monkeypatch, lambda r: httpx.Response(401, text="bad key"))
+    events = [e async for e in ask_stream("霧社事件", store, emb, LLMConfig("https://openrouter.ai/api/v1", "m", "k"), k=3)]
+    assert "LLM 無法使用" in events[0][1] and events[-1][1].llm_error
+
+
+async def test_a2a_message_stream(corpus, monkeypatch):
+    app = await _client(corpus, monkeypatch)
+    _mock_llm(monkeypatch, lambda r: httpx.Response(200, text=_sse_llm(["鄭成功", "於1661年攻臺[1]。"]),
+                                                    headers={"content-type": "text/event-stream"}))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    msg = {"role": "user", "messageId": "m1", "parts": [{"kind": "text", "text": "鄭成功何時攻臺？"}]}
+    rpc = {"jsonrpc": "2.0", "id": 9, "method": "message/stream", "params": {"message": msg}}
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            assert (await c.get("/.well-known/agent-card.json")).json()["capabilities"]["streaming"] is True
+            r = await c.post("/a2a", json=rpc, headers={**auth, **LLM_HEADERS})
+            assert r.headers["content-type"].startswith("text/event-stream")
+            events = [json.loads(line[5:]) for line in r.text.splitlines() if line.startswith("data:")]
+    results = [e["result"] for e in events]
+    assert [x["kind"] for x in results] == ["task", "artifact-update", "artifact-update", "artifact-update", "status-update"]
+    texts = [x["artifact"]["parts"][0]["text"] for x in results[1:3]]
+    assert texts == ["鄭成功", "於1661年攻臺[1]。"] and results[1]["append"] is False and results[2]["append"] is True
+    data = results[3]["artifact"]["parts"][0]["data"]
+    assert results[3]["lastChunk"] is True and data["citations"][0]["title"] == "鄭成功"
+    assert results[4]["final"] is True and results[4]["status"]["state"] == "completed"
+    assert all(e["id"] == 9 for e in events) and "sk-secret" not in r.text

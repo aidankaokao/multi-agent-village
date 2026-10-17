@@ -404,13 +404,13 @@ async def run_remote_agent(
     """駐村專家：用 A2A 把指示（＋前一步成果）交給對方，回答附上引用來源。對方自己處理檢索與 LLM。"""
     r.attempts += 1
     r.input = remote.render_message(instruction, context)  # 執行紀錄只記訊息內容；token、key 只在 header
-    text, data, warnings = await remote.call(spec, instruction, context)
+    text, data, warnings = await remote.call(spec, instruction, context, on_text=on_text)  # 支援的話邊收邊顯示
     sources = remote.render_citations(data)
     r.output = f"{text}\n\n{sources}" if sources else text
     r.model = f"{data['model']}（{spec.name}）" if data.get("model") else spec.name
     r.warnings += warnings
     if on_text:
-        await on_text(r.output)
+        await on_text(r.output)  # 最後補上資料來源
 
 
 TOOL_RETRIES = 2  # 參數不合法時帶錯誤訊息請 LLM 重新整理的次數

@@ -185,6 +185,20 @@ REPLY = {
 }
 
 
+def _sse(*results):
+    return "".join(f"data: {json.dumps({'jsonrpc': '2.0', 'id': 'x', 'result': r}, ensure_ascii=False)}\n\n" for r in results)
+
+
+_DATA = REPLY["result"]["parts"][1]["data"]
+SSE_REPLY = _sse(
+    {"kind": "task", "id": "t", "contextId": "c", "status": {"state": "working"}},
+    {"kind": "artifact-update", "append": False, "artifact": {"artifactId": "answer", "parts": [{"kind": "text", "text": "霧社事件的導火線"}]}},
+    {"kind": "artifact-update", "append": True, "artifact": {"artifactId": "answer", "parts": [{"kind": "text", "text": "是敬酒風波[1]。"}]}},
+    {"kind": "artifact-update", "append": False, "lastChunk": True, "artifact": {"artifactId": "answer-data", "parts": [{"kind": "data", "data": _DATA}]}},
+    {"kind": "status-update", "status": {"state": "completed"}, "final": True},
+)
+
+
 class PlannerClient(LLMClient):
     """村子這邊的 LLM：規劃時把問題交給駐村專家 th。"""
 
@@ -214,7 +228,13 @@ async def village(tmp_path, monkeypatch):
             agent.requests.append(request)
             if agent.health == 401:
                 return httpx.Response(401, json={"detail": "bad token"})
-            return httpx.Response(200, json=agent.card.get("_reply", REPLY))
+            method = json.loads(request.content)["method"]
+            mode = agent.card.get("_mode", "json")
+            if method == "message/stream" and mode == "sse":
+                return httpx.Response(200, text=SSE_REPLY, headers={"content-type": "text/event-stream"})
+            if method == "message/stream" and mode == "nostream":
+                return httpx.Response(200, json={"jsonrpc": "2.0", "id": "x", "error": {"code": -32601, "message": "不支援"}})
+            return httpx.Response(200, json=REPLY)
         return agent.handler(request)
 
     monkeypatch.setattr(remote, "_client", lambda timeout=10: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -256,7 +276,7 @@ async def test_dispatch_to_resident_without_sharing_llm(village):
     assert req.headers["authorization"] == f"Bearer {TOKEN}"
     assert "x-llm-api-key" not in req.headers and "x-llm-base-url" not in req.headers  # 開關預設關閉：不交出 LLM
     body = json.loads(req.content)
-    assert body["method"] == "message/send" and body["params"]["message"]["parts"][0]["text"] == "說明霧社事件的起因"
+    assert body["method"] == "message/stream" and body["params"]["message"]["parts"][0]["text"] == "說明霧社事件的起因"
     step = trace["steps"][0]
     assert step["agent"] == "th" and step["model"].startswith("deepseek/deepseek-v4-flash（")
     assert TOKEN not in json.dumps(trace) and USER_KEY not in json.dumps(trace)
@@ -304,3 +324,39 @@ def test_parse_reply_variants():
     out = remote.render_citations({"citations": [{"n": 2, "title": "李登輝", "section": "李登輝 › 生平",
                                                   "url": "https://zh.wikipedia.org/zh-tw/%E6%9D%8E%E7%99%BB%E8%BC%9D"}]})
     assert out == "資料來源：\n[2] 《李登輝》生平　https://zh.wikipedia.org/zh-tw/李登輝"
+
+
+
+async def test_streaming_reply_is_shown_piece_by_piece(village):
+    c, app, agent = village
+    agent.card["_mode"] = "sse"
+    q = app.state.ctx.bus.subscribe()
+    msg, trace = await _ask(c)
+    assert msg["content"].startswith("霧社事件的導火線是敬酒風波[1]。") and "資料來源：" in msg["content"]
+    deltas = []
+    while not q.empty():
+        e = q.get_nowait()
+        if e["type"] == "agent.delta" and e.get("agent") == "th":
+            deltas.append(e["text"])
+    # 收到串流片段（顯示事件有節流，太快的片段會合併；完整答案與資料來源由 agent.finished 送到畫面）
+    assert deltas and deltas[0] == "霧社事件的導火線"
+    assert trace["steps"][0]["model"].startswith("deepseek/deepseek-v4-flash")
+
+
+async def test_falls_back_to_send_and_remembers(village):
+    c, app, agent = village
+    remote._NO_STREAM.clear()
+    agent.card["_mode"] = "nostream"
+    msg, _ = await _ask(c)
+    assert "敬酒風波" in msg["content"]
+    assert [json.loads(r.content)["method"] for r in a2a_calls(agent)] == ["message/stream", "message/send"]
+    await _ask(c)  # 第二次直接用 message/send
+    assert [json.loads(r.content)["method"] for r in a2a_calls(agent)][2:] == ["message/send"]
+    remote._NO_STREAM.clear()
+
+
+async def test_stream_request_answered_with_plain_json(village):
+    c, app, agent = village
+    agent.card["_mode"] = "json"  # 對方不串流、直接回完整 Message：照樣接受
+    msg, _ = await _ask(c)
+    assert "敬酒風波" in msg["content"] and len(a2a_calls(agent)) == 1

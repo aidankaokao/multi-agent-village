@@ -8,23 +8,25 @@
 需要存取 token（Authorization: Bearer …）：
 - GET  /search?q=…      只檢索、不回答（不需要 LLM）
 - POST /ask             問答：body {question, top_k?}
-- POST /a2a             A2A JSON-RPC（message/send）
+- POST /a2a             A2A JSON-RPC（message/send；message/stream 用 SSE 串流）
 
 回答用的 LLM 由呼叫端在 header 帶進來：X-LLM-Base-URL、X-LLM-Model、X-LLM-API-Key（本機 Ollama 可省略）、
 X-LLM-Reasoning-Effort（可省略）。沒帶 LLM 時只回傳找到的資料。
 """
 
 import asyncio
+import json
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import a2a, auth
-from app.answer import ask
+from app.answer import ask, ask_stream
 from app.config import Settings
 from app.embedder import EmbedError, Embedder
 from app.indexer import build_index
@@ -135,14 +137,42 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         try:
             if not isinstance(req, dict) or req.get("jsonrpc") != "2.0":
                 raise a2a.RpcError(-32600, "需要 JSON-RPC 2.0 格式")
-            if req.get("method") != "message/send":
-                raise a2a.RpcError(-32601, f"不支援的方法：{req.get('method')}（只支援 message/send）")
+            method = req.get("method")
+            if method not in ("message/send", "message/stream"):
+                raise a2a.RpcError(-32601, f"不支援的方法：{method}（支援 message/send、message/stream）")
             params = req.get("params") or {}
             question = a2a.question_from(params)
-            result = await answer(question, llm_from(request), None)
+            llm = llm_from(request)
+            if method == "message/stream":
+                return StreamingResponse(
+                    stream(rid, question, llm, params["message"].get("contextId")), media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            result = await answer(question, llm, None)
             return {"jsonrpc": "2.0", "id": rid, "result": a2a.reply(result, params["message"].get("contextId"))}
         except a2a.RpcError as e:
             return JSONResponse({"jsonrpc": "2.0", "id": rid, "error": {"code": e.code, "message": e.message}})
+
+    async def stream(rid, question: str, llm: LLMConfig | None, context_id: str | None):
+        """A2A message/stream：SSE，每個事件是一個 JSON-RPC 回應（result 是 Task / artifact-update / status-update）。"""
+        task, text, data, done = a2a.stream_events(uuid.uuid4().hex, context_id or uuid.uuid4().hex)
+
+        def sse(result: dict | None = None, error: dict | None = None) -> str:
+            body = {"jsonrpc": "2.0", "id": rid, **({"error": error} if error else {"result": result})}
+            return f"data: {json.dumps(body, ensure_ascii=False)}\n\n"
+
+        yield sse(task())
+        first = True
+        try:
+            async for kind, value in ask_stream(question, app.state.store, app.state.embedder, llm, k=settings.top_k):
+                if kind == "delta":
+                    yield sse(text(str(value), append=not first))
+                    first = False
+                else:
+                    yield sse(data(a2a.answer_data(value.to_dict())))
+            yield sse(done())
+        except EmbedError as e:
+            yield sse(error={"code": -32603, "message": str(e)})
 
     return app
 

@@ -1,7 +1,10 @@
 """A2A（Agent2Agent）介面：讓其他系統（例如 Multi-Agent Village）用標準格式呼叫這個 agent。
 
 - GET  /.well-known/agent-card.json   自我介紹（名稱、技能、怎麼呼叫、需要哪些 header）；公開
-- POST /a2a                            JSON-RPC 2.0，method = "message/send"；需要存取 token
+- POST /a2a                            JSON-RPC 2.0；需要存取 token
+    - message/send     一次回覆完整的 Message
+    - message/stream   SSE 串流：Task（working）→ artifact-update（回答文字，一段一段 append）
+                       → artifact-update（data：引用來源，lastChunk）→ status-update（completed，final）
 
 回答用的 LLM 一樣放在 HTTP header（X-LLM-Base-URL、X-LLM-Model、X-LLM-API-Key、X-LLM-Reasoning-Effort），
 不放在訊息內容裡（訊息可能被呼叫端存成紀錄，key 不該跟著被存）。
@@ -26,7 +29,7 @@ def agent_card(settings: Settings) -> dict:
         "url": settings.public_url.rstrip("/") + "/a2a",
         "preferredTransport": "JSONRPC",
         "version": "0.1.0",
-        "capabilities": {"streaming": False, "pushNotifications": False},
+        "capabilities": {"streaming": True, "pushNotifications": False},
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["text/plain", "application/json"],
         "securitySchemes": {"bearer": {"type": "http", "scheme": "bearer"}},
@@ -69,6 +72,30 @@ def question_from(params: dict) -> str:
     return question
 
 
+def answer_data(answer: dict) -> dict:
+    return {k: answer[k] for k in ("citations", "model", "llm_error", "timings")}
+
+
+def stream_events(task_id: str, context_id: str):
+    """產生串流事件（JSON-RPC result 的內容）的小工具。"""
+
+    def task() -> dict:
+        return {"kind": "task", "id": task_id, "contextId": context_id, "status": {"state": "working"}}
+
+    def text(piece: str, append: bool) -> dict:
+        return {"kind": "artifact-update", "taskId": task_id, "contextId": context_id, "append": append, "lastChunk": False,
+                "artifact": {"artifactId": "answer", "parts": [{"kind": "text", "text": piece}]}}
+
+    def data(d: dict) -> dict:
+        return {"kind": "artifact-update", "taskId": task_id, "contextId": context_id, "append": False, "lastChunk": True,
+                "artifact": {"artifactId": "answer-data", "parts": [{"kind": "data", "data": d}]}}
+
+    def done(state: str = "completed") -> dict:
+        return {"kind": "status-update", "taskId": task_id, "contextId": context_id, "status": {"state": state}, "final": True}
+
+    return task, text, data, done
+
+
 def reply(answer: dict, context_id: str | None) -> dict:
     return {
         "kind": "message",
@@ -77,6 +104,6 @@ def reply(answer: dict, context_id: str | None) -> dict:
         "contextId": context_id or uuid.uuid4().hex,
         "parts": [
             {"kind": "text", "text": answer["answer"]},
-            {"kind": "data", "data": {k: answer[k] for k in ("citations", "model", "llm_error", "timings")}},
+            {"kind": "data", "data": answer_data(answer)},
         ],
     }
