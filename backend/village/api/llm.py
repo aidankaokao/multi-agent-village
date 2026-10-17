@@ -1,11 +1,14 @@
-"""LLM 設定 API：provider / 模型註冊、模型分級、試打、看圖測驗。
+"""LLM 設定 API：provider / 模型註冊、模型分級、試打、看圖測驗、生圖測驗。
 
 每個帳號各自管理自己的 LLM（自己的 API key 與額度），只看得到、改得到自己的；
 用別人的 id 一律當作不存在（404），不透露是否存在。
 API key 只寫不讀：回應只有 has_api_key 與 api_key_hint。
 """
 
+import base64
+import time
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, SecretStr
@@ -13,7 +16,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, LLMError, ProviderKind, ReasoningEffort
+from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, ImagePart, LLMError, ProviderKind, ReasoningEffort
+from village.api.images import sniff
 from village.llm import vision_test
 from village.llm.service import ALL_TIERS, VISION, LLMService, llm_user
 from village.security.auth import CurrentUser, require_user
@@ -78,6 +82,7 @@ class RemoteModelOut(BaseModel):
 class ModelCreate(BaseModel):
     provider_id: str
     model: str = Field(min_length=1, max_length=200)
+    output: Literal["text", "image"] = "text"  # image = 生圖模型（從「列出生圖模型」註冊）
     display_name: str | None = None
     supports_json_schema: bool = True
     context_window: int | None = None
@@ -102,6 +107,8 @@ class ModelOut(BaseModel):
     context_window: int | None
     reasoning_effort: str | None
     vision_verified_at: datetime | None
+    output: str
+    image_verified_at: datetime | None
     enabled: bool
 
 
@@ -109,6 +116,17 @@ class TiersBody(BaseModel):
     large: list[str] = []
     small: list[str] = []
     vision: list[str] = []  # 只能放通過看圖測驗的模型
+    image: list[str] = []  # 只能放通過生圖測驗的生圖模型
+
+
+class ImageTestOut(BaseModel):
+    passed: bool
+    reason: str
+    image_url: str | None = None
+    elapsed_ms: int
+    cost: float | None = None  # 美元（供應商有回報才有）
+    check: str | None = None  # 鑑定師驗收（有視覺模型時）
+    model: ModelOut
 
 
 class VisionTestOut(BaseModel):
@@ -181,6 +199,8 @@ def _model_out(m: LlmModel) -> ModelOut:
         context_window=m.context_window,
         reasoning_effort=m.reasoning_effort,
         vision_verified_at=m.vision_verified_at,
+        output=m.output,
+        image_verified_at=m.image_verified_at,
         enabled=m.enabled,
     )
 
@@ -248,8 +268,10 @@ async def delete_provider(provider_id: str, request: Request, me: CurrentUser = 
 
 
 @router.get("/providers/{provider_id}/remote-models", response_model=list[RemoteModelOut])
-async def remote_models(provider_id: str, request: Request, me: CurrentUser = Me):
-    """測試連線：向 provider 查詢可用模型，並標示哪些已註冊。"""
+async def remote_models(
+    provider_id: str, request: Request, output: Literal["text", "image"] = "text", me: CurrentUser = Me
+):
+    """測試連線：向 provider 查詢可用模型，並標示哪些已註冊。output=image 列出生圖模型（OpenRouter）。"""
     async with _sm(request)() as s:
         p = await _own_provider(s, provider_id, me)
         registered = set(
@@ -257,7 +279,7 @@ async def remote_models(provider_id: str, request: Request, me: CurrentUser = Me
         )
     client = _llm(request).client_for(p)
     try:
-        models = await client.list_models()
+        models = await (client.list_image_models() if output == "image" else client.list_models())
     except LLMError as e:
         raise HTTPException(502, f"連線失敗：{e}") from None
     finally:
@@ -331,7 +353,7 @@ async def get_tiers(request: Request, me: CurrentUser = Me):
 @router.put("/tiers", response_model=TiersBody)
 async def put_tiers(body: TiersBody, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        ids = set(body.large) | set(body.small) | set(body.vision)
+        ids = set(body.large) | set(body.small) | set(body.vision) | set(body.image)
         rows = (await s.execute(
             select(LlmModel).join(LlmProvider).where(LlmModel.id.in_(ids), LlmProvider.user_id == me.id)
         )).scalars()
@@ -340,6 +362,12 @@ async def put_tiers(body: TiersBody, request: Request, me: CurrentUser = Me):
             raise HTTPException(422, f"unknown model ids: {sorted(missing)}")
         if unverified := [found[i].model for i in body.vision if found[i].vision_verified_at is None]:
             raise HTTPException(422, f"還沒通過看圖測驗，不能放進 vision 分級：{', '.join(unverified)}")
+        if wrong := [found[i].model for i in body.large + body.small + body.vision if found[i].output == "image"]:
+            raise HTTPException(422, f"生圖模型只能放進 image 分級：{', '.join(wrong)}")
+        if wrong := [found[i].model for i in body.image if found[i].output != "image"]:
+            raise HTTPException(422, f"image 分級只能放生圖模型：{', '.join(wrong)}")
+        if unverified := [found[i].model for i in body.image if found[i].image_verified_at is None]:
+            raise HTTPException(422, f"還沒通過生圖測驗，不能放進 image 分級：{', '.join(unverified)}")
         await s.execute(delete(ModelTier).where(ModelTier.user_id == me.id))
         for tier in ALL_TIERS:
             for i, mid in enumerate(dict.fromkeys(getattr(body, tier))):
@@ -389,3 +417,67 @@ async def vision_test_model(model_id: str, request: Request, me: CurrentUser = M
         passed=result.passed, reason=result.reason, answer=answer, expected_number=quiz.number,
         expected_color=quiz.color, image=quiz.image.data_url, model=out,
     )
+
+
+IMAGE_TEST_PROMPT = "A single red apple on a plain white background, simple flat illustration"
+RASTER = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+
+def check_generated(images) -> list[tuple[str, bytes]]:
+    """只收點陣圖：看檔頭判斷（不相信供應商給的 media_type）；SVG 可能帶程式碼，不收。"""
+    out = []
+    for img in images:
+        mime = sniff(img.data)
+        if mime in RASTER:
+            out.append((mime, img.data))
+    if not out:
+        kinds = ", ".join(sorted({i.mime or "未知" for i in images}))
+        raise LLMError(f"回傳的不是支援的圖片格式（{kinds}）；向量圖（SVG）模型不能用")
+    return out
+
+
+@router.post("/models/{model_id}/image-test", response_model=ImageTestOut)
+async def image_test_model(model_id: str, request: Request, me: CurrentUser = Me):
+    """生圖測驗：請模型畫一顆紅蘋果，拿得到圖片就通過（有視覺模型時再請鑑定師看一眼，只供參考）。"""
+    ctx = request.app.state.ctx
+    async with _sm(request)() as s:
+        m = await _own_model(s, model_id, me)
+        if m.output != "image":
+            raise HTTPException(422, "這不是生圖模型：請從供應商的「列出生圖模型」註冊")
+        if not (m.enabled and m.provider.enabled):
+            raise HTTPException(409, "這個模型（或它的供應商）已停用，先啟用再測驗")
+    t0 = time.monotonic()
+    url = check = None
+    cost = None
+    try:
+        with llm_user(me.id):
+            r = await _llm(request).generate_image(model_id, IMAGE_TEST_PROMPT, aspect_ratio="1:1")
+            images = check_generated(r.images)
+            cost = r.cost
+            [image_id] = await ctx.conversations.save_generated(me.id, None, images[:1])
+            url = f"/api/images/{image_id}"
+            if await _llm(request).has_vision(me.id):
+                check = await _vision_check(request, images[0])
+        passed, reason = True, "拿到圖片了，這個模型可以生圖"
+    except LLMError as e:
+        passed, reason = False, f"生圖失敗：{e}"
+    elapsed = int((time.monotonic() - t0) * 1000)
+    async with _sm(request)() as s:
+        m = await _own_model(s, model_id, me)
+        m.image_verified_at = datetime.now(UTC) if passed else None
+        await s.commit()
+        out = _model_out(m)
+    return ImageTestOut(passed=passed, reason=reason, image_url=url, elapsed_ms=elapsed, cost=cost, check=check, model=out)
+
+
+async def _vision_check(request: Request, image: tuple[str, bytes]) -> str | None:
+    """請鑑定師的模型看一眼畫出來的東西（只供參考，不影響通過與否）。"""
+    part = ImagePart(image[0], base64.b64encode(image[1]).decode())
+    try:
+        r = await _llm(request).chat(
+            f"tier:{VISION}", [ChatMessage("user", "用一句繁體中文說：圖裡主要畫了什麼？什麼顏色？", images=[part])],
+            max_tokens=200,
+        )
+        return r.text.strip()[:200] or None
+    except LLMError:
+        return None

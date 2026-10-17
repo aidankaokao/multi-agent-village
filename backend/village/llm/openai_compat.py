@@ -6,7 +6,10 @@ import re
 
 import httpx
 
-from village.llm.base import ChatMessage, ChatResult, LLMClient, LLMError, RemoteModel
+import base64
+import binascii
+
+from village.llm.base import ChatMessage, ChatResult, GeneratedImage, ImageResult, LLMClient, LLMError, RemoteModel
 from village.security.redact import redact
 
 # 各家「OpenAI 相容」API 支援的參數不一樣（例如 OpenAI 的 gpt-5 / o 系列不收 max_tokens 與 temperature）。
@@ -16,6 +19,7 @@ log = logging.getLogger("village.llm")
 # key = (base_url, model)；client 每次呼叫都會重建，所以放模組層級。
 _QUIRKS: dict[tuple[str, str], set[str]] = {}
 MAX_PARAM_RETRIES = 4
+IMAGE_TIMEOUT = 180.0
 
 
 class ParamError(LLMError):
@@ -213,6 +217,33 @@ class OpenAICompatClient(LLMClient):
     async def list_models(self) -> list[RemoteModel]:
         data = await self._request("GET", "models")
         return [RemoteModel(id=m["id"]) for m in data.get("data", [])]
+
+    async def list_image_models(self) -> list[RemoteModel]:
+        """OpenRouter：GET /images/models。"""
+        data = await self._request("GET", "images/models")
+        items = data.get("data", data) if isinstance(data, dict) else data
+        return [RemoteModel(id=m["id"], display_name=m.get("name")) for m in items or [] if isinstance(m, dict) and m.get("id")]
+
+    async def generate_image(self, model, prompt, *, aspect_ratio=None):
+        """OpenRouter 的生圖 API：POST /images，回傳 data[].b64_json。生圖比較慢，逾時放寬到 3 分鐘。"""
+        body: dict = {"model": model, "prompt": prompt, "n": 1}
+        if aspect_ratio:
+            body["aspect_ratio"] = aspect_ratio
+        data = await self._request("POST", "images", json=body, timeout=IMAGE_TIMEOUT)
+        images: list[GeneratedImage] = []
+        for item in data.get("data") or []:
+            b64 = (item or {}).get("b64_json")
+            if not b64:
+                continue
+            try:
+                raw = base64.b64decode(b64, validate=False)
+            except (binascii.Error, ValueError):
+                continue
+            images.append(GeneratedImage(mime=str(item.get("media_type") or ""), data=raw))
+        if not images:
+            raise LLMError("生圖模型沒有回傳圖片")
+        cost = (data.get("usage") or {}).get("cost")
+        return ImageResult(images=images, model=data.get("model") or model, cost=cost if isinstance(cost, int | float) else None)
 
     async def aclose(self) -> None:
         await self._http.aclose()

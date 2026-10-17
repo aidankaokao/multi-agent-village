@@ -65,6 +65,8 @@ export interface Model {
   context_window: number | null;
   reasoning_effort: ReasoningEffort | null;
   vision_verified_at: string | null; // 看圖測驗通過的時間
+  output: "text" | "image"; // image = 生圖模型（只能放 image 分級）
+  image_verified_at: string | null; // 生圖測驗通過的時間
   enabled: boolean;
 }
 
@@ -74,6 +76,17 @@ export interface Tiers {
   large: string[];
   small: string[];
   vision: string[]; // 鑑定師看圖專用，不和 large / small 互相備援
+  image: string[]; // 畫家生圖專用（生圖模型）
+}
+
+export interface ImageTestResult {
+  passed: boolean;
+  reason: string;
+  image_url: string | null;
+  elapsed_ms: number;
+  cost: number | null; // 美元
+  check: string | null; // 鑑定師驗收（有視覺模型時）
+  model: Model;
 }
 
 export interface AppraisalInfo {
@@ -106,15 +119,23 @@ export const llm = {
   updateProvider: (id: string, body: Partial<{ name: string; base_url: string; api_key: string; clear_api_key: boolean; enabled: boolean }>) =>
     api<Provider>(`/api/llm/providers/${id}`, { method: "PATCH", json: body }),
   deleteProvider: (id: string) => api<void>(`/api/llm/providers/${id}`, { method: "DELETE" }),
-  remoteModels: (id: string) => api<RemoteModel[]>(`/api/llm/providers/${id}/remote-models`),
+  remoteModels: (id: string, output: "text" | "image" = "text") =>
+    api<RemoteModel[]>(`/api/llm/providers/${id}/remote-models?output=${output}`),
   models: () => api<Model[]>("/api/llm/models"),
-  createModel: (body: { provider_id: string; model: string; display_name?: string | null; context_window?: number | null }) =>
+  createModel: (body: {
+    provider_id: string;
+    model: string;
+    display_name?: string | null;
+    context_window?: number | null;
+    output?: "text" | "image";
+  }) =>
     api<Model>("/api/llm/models", { method: "POST", json: body }),
   updateModel: (id: string, body: Partial<Pick<Model, "display_name" | "supports_json_schema" | "reasoning_effort" | "enabled">>) =>
     api<Model>(`/api/llm/models/${id}`, { method: "PATCH", json: body }),
   deleteModel: (id: string) => api<void>(`/api/llm/models/${id}`, { method: "DELETE" }),
   tiers: () => api<Tiers>("/api/llm/tiers"),
   saveTiers: (t: Tiers) => api<Tiers>("/api/llm/tiers", { method: "PUT", json: t }),
+  imageTest: (id: string) => api<ImageTestResult>(`/api/llm/models/${id}/image-test`, { method: "POST" }),
   visionTest: (id: string) => api<VisionTestResult>(`/api/llm/models/${id}/vision-test`, { method: "POST" }),
   tryModel: (target: string, prompt: string) =>
     api<{ text: string; model: string }>("/api/llm/try", { method: "POST", json: { target, prompt } }),

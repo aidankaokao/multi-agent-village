@@ -59,6 +59,9 @@ class LlmModel(Base):
     reasoning_effort: Mapped[str | None] = mapped_column(String(16))
     # 看圖測驗通過的時間；None = 沒測過或沒通過。只有通過的模型能放進 vision 分級（鑑定師專用）
     vision_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 輸出什麼：text（對話 / 看圖）或 image（生圖）。生圖模型只能放 image 分級，不能拿來對話
+    output: Mapped[str] = mapped_column(String(8), default="text", server_default="text")
+    image_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 生圖測驗通過的時間
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -155,13 +158,20 @@ class Message(Base):
 
 
 class ChatImage(Base):
-    """使用者在問答附的圖片（前端已縮圖、去掉 EXIF）。跟著對話保存，刪對話或帳號時一起刪；只有本人看得到。"""
+    """問答的圖片，只有本人看得到；刪對話或帳號時一起刪。
+
+    kind=upload：使用者附的圖（前端已縮圖、去掉 EXIF），跟著對話保存。
+    kind=generated：畫家（生圖模型）畫的圖，expires_at 到了自動清掉（很少回頭查，不用存太久）；
+    在村民試打或生圖測驗產生的沒有對話（conversation_id 為空）。
+    """
 
     __tablename__ = "chat_images"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="upload", server_default="upload")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     mime: Mapped[str] = mapped_column(String(32))
     data: Mapped[bytes] = mapped_column(LargeBinary)
     size: Mapped[int] = mapped_column(Integer)

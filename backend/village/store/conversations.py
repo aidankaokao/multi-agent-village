@@ -4,14 +4,15 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from village.core.context import Turn
 from village.store.models import ChatImage, Conversation, Message
 
+GENERATED_DAYS = 14  # 畫家畫的圖保存兩週：很少回頭查，「上週那張」還找得到
 TITLE_CHARS = 40
 TURN_CHARS = 1500  # 每則訊息帶進上下文的上限，避免很長的回答把 prompt 撐爆
 
@@ -82,11 +83,40 @@ class ConversationStore:
                     return [(imgs[i].mime, imgs[i].data) for i in ids if i in imgs]
         return []
 
+    async def save_generated(
+        self, user_id: str, conversation_id: str | None, images: list[tuple[str, bytes]]
+    ) -> list[str]:
+        """存畫家畫的圖（GENERATED_DAYS 天後自動清掉），回傳圖片 id。"""
+        expires = _now() + timedelta(days=GENERATED_DAYS)
+        rows = [
+            ChatImage(
+                user_id=user_id, conversation_id=conversation_id, mime=mime, data=data, size=len(data),
+                kind="generated", expires_at=expires,
+            )
+            for mime, data in images
+        ]
+        async with self._sm() as s:
+            s.add_all(rows)
+            await s.commit()
+            return [r.id for r in rows]
+
+    async def purge_expired(self) -> int:
+        async with self._sm() as s:
+            n = (await s.execute(delete(ChatImage).where(ChatImage.expires_at < _now()))).rowcount
+            await s.commit()
+        return n or 0
+
     async def get_image(self, image_id: str, user_id: str) -> ChatImage | None:
-        """只有上傳的人拿得到（管理員也一樣）。"""
+        """只有本人拿得到（管理員也一樣）；過期的畫作即使還沒被清掉也當作不存在。"""
         async with self._sm() as s:
             img = await s.get(ChatImage, image_id)
-        return img if img and img.user_id == user_id else None
+        if img is None or img.user_id != user_id:
+            return None
+        if img.expires_at is not None:
+            exp = img.expires_at if img.expires_at.tzinfo else img.expires_at.replace(tzinfo=UTC)  # SQLite 讀回來沒有時區
+            if exp < _now():
+                return None
+        return img
 
     async def finish_turn(
         self, conversation_id: str, run_id: str, answer: str, status: str, meta: dict | None = None

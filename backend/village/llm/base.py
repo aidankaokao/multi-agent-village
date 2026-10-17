@@ -49,6 +49,19 @@ class ChatResult:
 
 
 @dataclass
+class GeneratedImage:
+    mime: str
+    data: bytes
+
+
+@dataclass
+class ImageResult:
+    images: list[GeneratedImage]
+    model: str
+    cost: float | None = None  # 供應商回報的費用（美元），沒有就是 None
+
+
+@dataclass
 class RemoteModel:
     id: str
     display_name: str | None = None
@@ -79,6 +92,13 @@ class LLMClient(ABC):
 
     @abstractmethod
     async def list_models(self) -> list[RemoteModel]: ...
+
+    async def generate_image(self, model: str, prompt: str, *, aspect_ratio: str | None = None) -> ImageResult:
+        """文字生圖。目前只有 OpenRouter 的 /images API（OpenAI 相容 client）支援。"""
+        raise LLMError("這個供應商不支援生圖（目前只支援 OpenRouter）")
+
+    async def list_image_models(self) -> list[RemoteModel]:
+        raise LLMError("這個供應商沒有生圖模型可以列出（目前只支援 OpenRouter）")
 
     async def aclose(self) -> None:
         pass

@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
-import { llm, type Model, type Provider, type ProviderKind, type ReasoningEffort, type RemoteModel, type Tiers, type VisionTestResult } from "../api";
+import {
+  llm,
+  type ImageTestResult,
+  type Model,
+  type Provider,
+  type ProviderKind,
+  type ReasoningEffort,
+  type RemoteModel,
+  type Tiers,
+  type VisionTestResult,
+} from "../api";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
   ollama: "Ollama（本地）",
@@ -17,7 +27,7 @@ const FALLBACK_URL: Record<ProviderKind, string> = {
 export function LlmSettings() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
-  const [tiers, setTiers] = useState<Tiers>({ large: [], small: [], vision: [] });
+  const [tiers, setTiers] = useState<Tiers>({ large: [], small: [], vision: [], image: [] });
   const [error, setError] = useState("");
   const [sub, setSub] = useState<Sub | null>(null);
 
@@ -121,14 +131,16 @@ function ProviderSection({ providers, models, run }: { providers: Provider[]; mo
 
 function ProviderModal({ p, models, run, onClose }: { p: Provider; models: Model[]; run: Run; onClose: () => void }) {
   const [remote, setRemote] = useState<RemoteModel[] | string | null>(null);
+  const [output, setOutput] = useState<"text" | "image">("text"); // 列的是對話模型還是生圖模型
   const [filter, setFilter] = useState("");
   const [editingKey, setEditingKey] = useState(false);
   const registered = models.filter((m) => m.provider_id === p.id);
 
-  const listRemote = async () => {
+  const listRemote = async (kind: "text" | "image") => {
+    setOutput(kind);
     setRemote("連線中…");
     try {
-      setRemote(await llm.remoteModels(p.id));
+      setRemote(await llm.remoteModels(p.id, kind));
     } catch (e) {
       setRemote(`❌ ${(e as Error).message}`);
     }
@@ -183,9 +195,17 @@ function ProviderModal({ p, models, run, onClose }: { p: Provider; models: Model
       <div className="field">
         <span className="field-label">模型</span>
         <div className="row">
-          <button onClick={listRemote}>測試連線 / 列出模型</button>
+          <button onClick={() => listRemote("text")}>測試連線 / 列出模型</button>
+          {p.kind === "openai_compat" && (
+            <button onClick={() => listRemote("image")} title="OpenRouter 的生圖模型（給畫家用）">
+              🎨 列出生圖模型
+            </button>
+          )}
           <span className="muted">已註冊 {registered.length} 個</span>
         </div>
+        {output === "image" && Array.isArray(remote) && (
+          <span className="hint">生圖模型只能放進 image 分級給畫家用，不能拿來對話。註冊後到「模型」做生圖測驗。</span>
+        )}
         {typeof remote === "string" && <div className="muted">{remote}</div>}
         {Array.isArray(remote) && (
           <>
@@ -200,7 +220,11 @@ function ProviderModal({ p, models, run, onClose }: { p: Provider; models: Model
                   ) : (
                     <button
                       className="link"
-                      onClick={() => run(() => llm.createModel({ provider_id: p.id, model: m.id, display_name: m.display_name, context_window: m.context_window }))}
+                      onClick={() =>
+                        run(() =>
+                          llm.createModel({ provider_id: p.id, model: m.id, display_name: m.display_name, context_window: m.context_window, output }),
+                        )
+                      }
                     >
                       ＋註冊
                     </button>
@@ -295,7 +319,7 @@ const EFFORT_HELP =
   "思考型模型（qwen3.5、gpt-5、DeepSeek…）設 none 可大幅加速，也避免 token 全花在思考上。gpt-5 沒有 none 會自動改用 minimal；一定要思考的模型（GLM 5.3）會自動改用 low；不支援思考的模型（gpt-4o-mini）會自動略過。";
 
 function tierBadges(id: string, tiers: Tiers) {
-  return (["large", "small", "vision"] as const)
+  return (["large", "small", "vision", "image"] as const)
     .filter((t) => tiers[t].includes(id))
     .map((t) => `${t} #${tiers[t].indexOf(id) + 1}`);
 }
@@ -332,10 +356,12 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
                 </span>
               ))}
               {m.vision_verified_at && <span className="tag">👁️ 可看圖</span>}
+              {m.output === "image" && <span className="tag">{m.image_verified_at ? "🎨 生圖 ✓" : "🎨 生圖（未測驗）"}</span>}
             </div>
             <div className="muted">
-              {m.provider_name}・思考：{m.reasoning_effort ?? "預設"}
-              {!m.supports_json_schema && "・不送 JSON schema"}
+              {m.provider_name}
+              {m.output === "text" && `・思考：${m.reasoning_effort ?? "預設"}`}
+              {m.output === "text" && !m.supports_json_schema && "・不送 JSON schema"}
             </div>
           </div>
           <label className="toggle">
@@ -352,33 +378,37 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
             {current.context_window ? `・context ${current.context_window.toLocaleString()}` : ""}
             {tierBadges(current.id, tiers).length ? `・在分級 ${tierBadges(current.id, tiers).join("、")}` : "・還沒加入分級"}
           </div>
-          <label className="field">
-            <span className="field-label">思考強度</span>
-            <select
-              value={current.reasoning_effort ?? ""}
-              onChange={(e) => run(() => llm.updateModel(current.id, { reasoning_effort: (e.target.value || null) as ReasoningEffort | null }))}
-            >
-              <option value="">預設（由模型決定）</option>
-              <option value="none">none（不思考，最快）</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high（最慢、最貴）</option>
-            </select>
-            <span className="hint">{EFFORT_HELP}</span>
-          </label>
-          <label className="toggle">
-            <input type="checkbox" checked={current.supports_json_schema} onChange={(e) => run(() => llm.updateModel(current.id, { supports_json_schema: e.target.checked }))} />
-            支援 JSON schema
-          </label>
-          <span className="hint">
-            村長規劃、工匠、審核員、工具型村民會要求 JSON 輸出。勾選＝送出 JSON schema 約束；取消勾選＝不送約束，改靠說明文字與解析（照樣會使用這個模型）。
-            如果這個模型常出現「JSON 輸出被截斷」或「找不到 JSON 物件」（例如有些模型在約束下會一直輸出空白），就取消勾選。
-          </span>
+          {current.output === "text" && (
+            <>
+              <label className="field">
+                <span className="field-label">思考強度</span>
+                <select
+                  value={current.reasoning_effort ?? ""}
+                  onChange={(e) => run(() => llm.updateModel(current.id, { reasoning_effort: (e.target.value || null) as ReasoningEffort | null }))}
+                >
+                  <option value="">預設（由模型決定）</option>
+                  <option value="none">none（不思考，最快）</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high（最慢、最貴）</option>
+                </select>
+                <span className="hint">{EFFORT_HELP}</span>
+              </label>
+              <label className="toggle">
+                <input type="checkbox" checked={current.supports_json_schema} onChange={(e) => run(() => llm.updateModel(current.id, { supports_json_schema: e.target.checked }))} />
+                支援 JSON schema
+              </label>
+              <span className="hint">
+                村長規劃、工匠、審核員、工具型村民會要求 JSON 輸出。勾選＝送出 JSON schema 約束；取消勾選＝不送約束，改靠說明文字與解析（照樣會使用這個模型）。
+                如果這個模型常出現「JSON 輸出被截斷」或「找不到 JSON 物件」（例如有些模型在約束下會一直輸出空白），就取消勾選。
+              </span>
+            </>
+          )}
           <label className="toggle">
             <input type="checkbox" checked={current.enabled} onChange={(e) => run(() => llm.updateModel(current.id, { enabled: e.target.checked }))} />
             啟用
           </label>
-          <VisionTest key={current.id} model={current} run={run} />
+          {current.output === "image" ? <ImageTest key={current.id} model={current} run={run} /> : <VisionTest key={current.id} model={current} run={run} />}
           <div className="row modal-foot">
             <button
               className="danger"
@@ -448,13 +478,74 @@ function VisionTest({ model, run }: { model: Model; run: Run }) {
   );
 }
 
+/** 生圖測驗：請模型畫一顆紅蘋果，拿得到圖片就通過；有視覺模型時順便請鑑定師看一眼 */
+function ImageTest({ model, run }: { model: Model; run: Run }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ImageTestResult | string | null>(null);
+
+  const test = async () => {
+    setBusy(true);
+    setResult(null);
+    await run(async () => {
+      try {
+        setResult(await llm.imageTest(model.id));
+      } catch (e) {
+        setResult((e as Error).message);
+      }
+    });
+    setBusy(false);
+  };
+
+  return (
+    <div className="field">
+      <span className="field-label">生圖測驗</span>
+      <div className="row">
+        <span className={model.image_verified_at ? "" : "muted"} style={{ flex: 1 }}>
+          {model.image_verified_at ? `🎨 通過（${new Date(model.image_verified_at).toLocaleString("zh-TW")}）` : "還沒通過：不能放進 image 分級"}
+        </span>
+        <button type="button" disabled={busy} onClick={test}>
+          {busy ? "畫圖中…（約 10～60 秒）" : model.image_verified_at ? "重新測驗" : "開始測驗"}
+        </button>
+      </div>
+      <span className="hint">請模型畫一顆紅蘋果，拿得到圖片就通過。生圖比文字貴，每次大約 0.01～0.2 美元（依模型而定）。</span>
+      {typeof result === "string" && <p className="error">{result}</p>}
+      {result && typeof result !== "string" && (
+        <div className={`card vision-result ${result.passed ? "ok" : "fail"}`}>
+          {result.image_url && <img src={result.image_url} alt="測驗圖" />}
+          <div>
+            <strong>{result.passed ? "✅ 通過" : "❌ 沒通過"}</strong>
+            <div className="muted">
+              {(result.elapsed_ms / 1000).toFixed(1)} 秒{result.cost != null && `・約 $${result.cost.toFixed(3)}`}
+            </div>
+            <div className="hint">{result.reason}</div>
+            {result.check && <div className="clamp">👁️ 鑑定師看了一眼：{result.check}</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- tiers
 
 const TIER_LABEL = {
   large: "large（村長、工匠、困難任務）",
   small: "small（村民日常、備援）",
   vision: "👁️ vision（鑑定師看圖）",
+  image: "🎨 image（畫家生圖）",
 } as const;
+
+const TIER_HINT: Partial<Record<keyof Tiers, string>> = {
+  vision: "鑑定師看圖專用：村長、村民、審核員、書記都不會用到它；也不和 large / small 互相備援。",
+  image: "畫家生圖專用：只能放生圖模型（從供應商「🎨 列出生圖模型」註冊），一般問答不會用到。",
+};
+
+/** 每個分級可以加入哪些模型 */
+function poolFor(tier: keyof Tiers, models: Model[]): Model[] {
+  if (tier === "image") return models.filter((m) => m.output === "image" && m.image_verified_at);
+  const text = models.filter((m) => m.output === "text");
+  return tier === "vision" ? text.filter((m) => m.vision_verified_at) : text;
+}
 
 function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tiers; run: Run; goto: (s: Sub) => void }) {
   const [draft, setDraft] = useState<Tiers>(tiers);
@@ -486,18 +577,25 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
     <section>
       <p className="hint">村長、工匠用 large；村民依自己的設定用 large 或 small。排在前面的優先使用，失敗依序往下；兩級互為備援。</p>
       <div className="tiers">
-        {(["large", "small", "vision"] as const).map((tier) => {
-          const pool = tier === "vision" ? models.filter((m) => m.vision_verified_at) : models;
-          const untested = tier === "vision" ? models.filter((m) => !m.vision_verified_at).length : 0;
+        {(["large", "small", "vision", "image"] as const).map((tier) => {
+          const pool = poolFor(tier, models);
+          const untested =
+            tier === "vision"
+              ? models.filter((m) => m.output === "text" && !m.vision_verified_at).length
+              : tier === "image"
+                ? models.filter((m) => m.output === "image" && !m.image_verified_at).length
+                : 0;
+          const special = tier === "vision" || tier === "image";
           return (
-            <div key={tier} className={`card ${tier === "vision" ? "tier-vision" : ""}`}>
+            <div key={tier} className={`card ${special ? "tier-vision" : ""}`}>
               <strong>{TIER_LABEL[tier]}</strong>
-              {tier === "vision" && <span className="hint">鑑定師看圖專用：村長、村民、審核員、書記都不會用到它；也不和 large / small 互相備援。</span>}
+              {TIER_HINT[tier] && <span className="hint">{TIER_HINT[tier]}</span>}
               <ol>
                 {draft[tier].map((id, i) => (
                   <li key={id}>
                     <code className={byId[id]?.enabled === false ? "muted" : ""}>{byId[id]?.model ?? id}</code>
-                    {tier === "vision" && byId[id] && !byId[id].vision_verified_at && <span className="tag warn">測驗沒過，會略過</span>}
+                    {((tier === "vision" && byId[id] && !byId[id].vision_verified_at) ||
+                      (tier === "image" && byId[id] && !byId[id].image_verified_at)) && <span className="tag warn">測驗沒過，會略過</span>}
                     <button className="link" onClick={() => move(tier, i, -1)}>↑</button>
                     <button className="link" onClick={() => move(tier, i, 1)}>↓</button>
                     <button className="link danger" onClick={() => setDraft((t) => ({ ...t, [tier]: t[tier].filter((x) => x !== id) }))}>✕</button>
@@ -505,7 +603,9 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
                 ))}
               </ol>
               <select value="" onChange={(e) => e.target.value && setDraft((t) => ({ ...t, [tier]: [...t[tier], e.target.value] }))}>
-                <option value="">{tier === "vision" && pool.length === 0 ? "（還沒有通過看圖測驗的模型）" : "＋加入模型…"}</option>
+                <option value="">
+                  {special && pool.length === 0 ? (tier === "vision" ? "（還沒有通過看圖測驗的模型）" : "（還沒有通過生圖測驗的生圖模型）") : "＋加入模型…"}
+                </option>
                 {pool
                   .filter((m) => !draft[tier].includes(m.id))
                   .map((m) => (
@@ -514,6 +614,15 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
                     </option>
                   ))}
               </select>
+              {tier === "image" && untested > 0 && (
+                <span className="hint">
+                  有 {untested} 個生圖模型還沒通過測驗：到「
+                  <button className="link" onClick={() => goto("models")}>
+                    模型
+                  </button>
+                  」按「設定」→「開始測驗」。
+                </span>
+              )}
               {tier === "vision" && untested > 0 && (
                 <span className="hint">
                   只有通過看圖測驗的模型能加入。到「
@@ -553,7 +662,7 @@ function TrySection({ models }: { models: Model[] }) {
           <option value="tier:large">tier: large</option>
           <option value="tier:small">tier: small</option>
           <option value="tier:vision">tier: vision</option>
-          {models.map((m) => (
+          {models.filter((m) => m.output === "text").map((m) => (
             <option key={m.id} value={m.id}>
               {m.model}
             </option>

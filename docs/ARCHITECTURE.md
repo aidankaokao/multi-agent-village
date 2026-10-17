@@ -260,13 +260,23 @@ class BaseAgent(Protocol):
   追問（這輪沒附圖）時 `wants_relook` 判斷問題是否跟圖有關（位置、顏色、文字、它 / 那個…），是就重看 `context_turns` 輪內最近附的圖，
   並附上前一輪問答當背景。看不了圖時告訴村長「看不到，不要猜」；村長 LLM 不能用時直接交出鑑定內容。
 
+#### 生圖模型（image 分級）
+
+- OpenRouter 的生圖 API：`POST {base_url}/images`（`model`、`prompt`、`n`、`aspect_ratio`）→ `data[].b64_json`、`media_type`、
+  `usage.cost`；列出模型 `GET {base_url}/images/models`。`LLMClient.generate_image` / `list_image_models`（其他 client 預設不支援）。
+- 生圖模型註冊時標記 `llm_models.output="image"`：只能放 `image` 分級；large / small / vision 會排除它，`chat()` 也拒絕。
+- 生圖測驗（`POST /api/llm/models/{id}/image-test`）：畫一顆紅蘋果，拿到 PNG / JPEG / WebP / GIF（看檔頭）就通過，
+  記在 `image_verified_at`；有視覺模型時請它看一眼（只供參考）。SVG 不收（從我們的網址開啟可能執行程式碼）。
+- 畫作存 `chat_images`（`kind=generated`、`expires_at` = 14 天後；生圖測驗產生的沒有 conversation_id），
+  讀取時過期就當不存在，啟動時與每 6 小時清理一次。
+
 #### 資料表
 
 | 表 | 主要欄位 |
 |---|---|
 | `llm_providers` | id, **user_id**, name（同一人不可重複）, kind, base_url, `api_key_ct`, `api_key_nonce`, `key_version`, `api_key_hint`(如 `sk-…a1b2`), enabled, created_at, updated_at |
-| `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, reasoning_effort, vision_verified_at, enabled |
-| `model_tiers` | **user_id**, tier(`large`/`small`/`vision`), position, model_id |
+| `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, reasoning_effort, vision_verified_at, output(`text`/`image`), image_verified_at, enabled |
+| `model_tiers` | **user_id**, tier(`large`/`small`/`vision`/`image`), position, model_id |
 
 #### 加密設計（信封加密的簡化版）
 

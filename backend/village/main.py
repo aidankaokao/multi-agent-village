@@ -53,6 +53,20 @@ class AppContext:
     owners: dict[str, str] = field(default_factory=dict)  # run_id → 提問者 user_id
 
 
+PURGE_EVERY_S = 6 * 3600
+
+
+async def _purge_generated(conversations: ConversationStore) -> None:
+    """定期清掉過期的畫作（啟動時先清一次）。"""
+    while True:
+        try:
+            if n := await conversations.purge_expired():
+                log.info("清掉過期的畫作 %d 張", n)
+        except Exception:
+            log.exception("清理過期畫作失敗")
+        await asyncio.sleep(PURGE_EVERY_S)
+
+
 def create_app(
     settings: Settings | None = None, client_factory: ClientFactory | None = None, handoff_delay: float = 1.0
 ) -> FastAPI:
@@ -91,7 +105,9 @@ def create_app(
             conversations=ConversationStore(sm),
             memories=MemoryStore(sm),
         )
+        purger = asyncio.create_task(_purge_generated(app.state.ctx.conversations))
         yield
+        purger.cancel()
         # 關閉時：取消還在跑的問答，等它們把「已取消」寫回 DB（最多 5 秒）再關資料庫，
         # 否則收尾的 DB 寫入會卡在已關閉的連線上，整個程序關不掉
         pending = list(app.state.ctx.tasks)

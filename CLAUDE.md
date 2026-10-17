@@ -9,11 +9,11 @@
 ## 目前進度
 
 Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
-帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0007。
+帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0008。
 
 **Phase 5V 視覺模型完成**（`docs/ROADMAP.md`）：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、`chat_images` 表、
 `/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（追問時重看原圖）。
-**下一個話題**：生圖模型（OpenRouter 或其他雲端）怎麼接。Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
+**進行中：Phase 6G 生圖（畫家村民）**：A 完成（生圖模型註冊、`image` 分級、生圖測驗、畫作 14 天過期）；接著 B（畫家村民）。Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
 
 ## 使用者偏好（重要）
 
@@ -37,6 +37,9 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
   `appraiser` 鑑定師（`core/appraiser.py`，有附圖時先看圖，結果放 context variable `_APPRAISAL` 交給村長 / 村民 / 審核員）。
 - 視覺模型自成 `vision` 分級（`tier:vision`），不和 large / small 互相備援；只有通過看圖測驗（`llm/vision_test.py`，
   `llm_models.vision_verified_at`）的模型會被用到。一般 LLM 流程不可以用到視覺模型。
+- 生圖模型（`llm_models.output="image"`）只能放 `image` 分級、只能透過 `LLMService.generate_image` 使用（OpenRouter `POST /images`），
+  不能拿來對話；只有通過生圖測驗（`image_verified_at`）的會被用到。只收點陣圖（看檔頭），SVG 不收。
+  畫作存 `chat_images`（kind=generated），14 天後過期（`GENERATED_DAYS`，main.py 定期清理）。
 - 村民類型：對話型（prompt）與工具型（tool，工具在 `backend/village/tools/`；LLM 只整理參數，計算交給程式，並有退路）。
   年份 / 今天日期這類 LLM 不知道的事一律交給程式決定。
 - 驗證 / 審核 / 重試放在 harness 層，不寫進個別 agent。全域行為是「村規」（`settings` 表，「村規」分頁）。
