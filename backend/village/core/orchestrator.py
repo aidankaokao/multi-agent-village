@@ -18,6 +18,7 @@ from typing import Literal, Protocol
 from village.core.card import AgentSpec
 from village.core.context import PREV, Turn, refers_back, render_history
 from village.llm.base import ChatMessage, ChatResult, LLMError
+from village.tools import TOOLS
 
 log = logging.getLogger("village.mayor")
 
@@ -130,11 +131,17 @@ def plan_schema(agent_ids: list[str]) -> dict:
     }
 
 
+def is_costly(spec: AgentSpec | None) -> bool:
+    """每次執行都要花錢的村民（例如畫家）：規劃時特別提醒、多餘的步驟要刪掉。"""
+    return bool(spec and spec.kind == "tool" and spec.tool and spec.tool.id in TOOLS and TOOLS[spec.tool.id].costly)
+
+
 def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "") -> str:
     lines = []
     for a in agents:
         examples = "；".join(e for s in a.card.skills for e in s.examples[:3])
-        lines.append(f"- {a.id}（{a.name}）：{a.card.description}" + (f" 例：{examples}" if examples else ""))
+        costly = "【每次都要花錢：使用者沒有明確要求畫好幾張時，只安排一個步驟】" if is_costly(a) else ""
+        lines.append(f"- {a.id}（{a.name}）：{a.card.description}{costly}" + (f" 例：{examples}" if examples else ""))
     roster = "\n".join(lines)
     history_rule = history_block = ""
     if history:
@@ -227,14 +234,23 @@ def parse_plan(text: str, agents: dict[str, AgentSpec], allow_prev: bool = False
 def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSpec], notes: list[str]) -> list[Step]:
     """弱模型常會「多做」：例如只要詩卻順手加一步笑話。
 
-    移除這種步驟：該村民有設定關鍵字、但請求裡一個都沒出現，而且沒有其他步驟依賴它。
+    移除這種步驟（而且沒有其他步驟依賴它）：
+      - 該村民有設定關鍵字、但請求裡一個都沒出現，指示也不是請求裡的原話
+      - 會花錢的村民（畫家）重複出現：第二步以後的指示不是請求裡的原話（例如把鑑定結果又畫一次）
     至少保留一步；沒設定關鍵字的村民不受影響。
     """
     lower = message.lower()
 
     def unrequested(s: Step) -> bool:
+        if _mentioned(s.instruction, message):  # 「畫一隻狗，再畫一隻兔子」的兩步都是原話
+            return False
         kws = agents[s.agent].village.keywords
         return bool(kws) and not any(k.lower() in lower for k in kws)
+
+    def extra_costly(s: Step) -> bool:
+        if not is_costly(agents[s.agent]) or _mentioned(s.instruction, message):
+            return False
+        return any(o.agent == s.agent for o in steps[: steps.index(s)])
 
     steps = list(steps)
     changed = True
@@ -242,12 +258,26 @@ def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSp
         changed = False
         used = {u for s in steps for u in s.use}
         for s in reversed(steps):
-            if s.id not in used and unrequested(s):
+            if s.id not in used and (unrequested(s) or extra_costly(s)):
                 steps.remove(s)
                 notes.append(f"移除使用者沒要求的步驟：{s.id} {agents[s.agent].name}「{s.instruction}」")
                 changed = True
                 break
     return steps
+
+
+_PUNCT = re.compile(r"[\s，。、；：,.;:!?！？「」『』（）()\"'~～\-—]+")
+
+
+def _bigrams(text: str) -> set[str]:
+    t = _PUNCT.sub("", text.lower())
+    return {t[i : i + 2] for i in range(len(t) - 1)}
+
+
+def _mentioned(instruction: str, message: str) -> bool:
+    """步驟的指示是不是請求裡的原話（字的兩兩組合有六成以上出現在請求裡）。"""
+    b = _bigrams(instruction)
+    return bool(b) and len(b & _bigrams(message)) / len(b) >= 0.6
 
 
 async def plan_with_llm(

@@ -115,3 +115,24 @@ async def test_reviewer_rejection_does_not_repaint(registry):  # noqa: F811
     assert len(e.llm.prompts) == 1  # 退件但沒有重畫
     assert out["attachments"][0]["url"] == "/api/images/img1"
     assert "agent.retry" not in bus.types() and bus.types().count("review.finished") == 1
+
+
+def test_prune_keeps_requested_paintings_and_drops_extra_ones(registry):  # noqa: F811
+    from village.core.orchestrator import Step, planner_system_prompt, prune_unrequested
+
+    agents = {a.id: a for a in registry.all()}
+    # 第八步：兩張都是原話 → 保留；「合併成一幅」沒要求 → 移除
+    steps = [Step("s1", "painter", "畫一隻狗"), Step("s2", "painter", "畫一隻兔子"),
+             Step("s3", "painter", "將剛剛畫的狗和兔子合併成一幅畫", ["s1", "s2"])]
+    notes: list[str] = []
+    kept = prune_unrequested(steps, "畫一隻狗，再畫一隻兔子", agents, notes)
+    assert [s.id for s in kept] == ["s1", "s2"] and "s3" in notes[0]
+    # 第九步：把鑑定結果又畫一次 → 移除重複的畫家步驟
+    steps = [Step("s1", "painter", "把這張自然景觀的場景畫成像素風插畫"),
+             Step("s2", "painter", "畫出一條流動的河流，兩側有茂密的樹木，背景是一座高大的山峰", ["s1"])]
+    kept = prune_unrequested(steps, "把這張照片的場景畫成像素風插畫", agents, [])
+    assert [s.id for s in kept] == ["s1"]
+    # 詩人 + 畫家：照常保留
+    steps = [Step("s1", "poet", "寫一首關於海的短詩"), Step("s2", "painter", "幫這首詩配一張插圖", ["s1"])]
+    assert len(prune_unrequested(steps, "寫一首關於海的短詩，再幫它配一張插圖", agents, [])) == 2
+    assert "每次都要花錢" in planner_system_prompt(registry.all())
