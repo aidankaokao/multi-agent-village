@@ -16,13 +16,17 @@ class ToolError(ValueError):
 
 @dataclass
 class Attachment:
-    kind: str  # "svg"
+    kind: str  # "svg"（data 是 SVG 原始碼）或 "image"（存在 DB 的畫作，用 url 讀取）
     name: str
-    data: str  # svg 原始碼
+    data: str = ""
     title: str = ""
+    url: str = ""
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "name": self.name, "data": self.data, "title": self.title}
+        d = {"kind": self.kind, "name": self.name, "data": self.data, "title": self.title}
+        if self.url:
+            d["url"] = self.url
+        return d
 
 
 @dataclass
@@ -39,6 +43,7 @@ class Tool:
     default_prompt: str  # 預設的「怎麼從請求取出參數」
     keywords: list[str] = []  # 新建村民時的預設關鍵字
     examples: list[str] = []
+    costly = False  # 每次執行都要花錢（例如生圖）：審核員退件時不重做，避免重複計費
 
     def schema(self) -> dict:
         """LLM 輸出參數的 JSON schema（strict：所有欄位必填、不允許多餘欄位）。"""
@@ -46,6 +51,10 @@ class Tool:
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         raise NotImplementedError
+
+    async def arun(self, args: dict[str, Any]) -> ToolResult:
+        """需要呼叫外部服務的工具（例如生圖）覆寫這個；一般工具直接用 run。"""
+        return self.run(args)
 
     def context(self) -> str:
         """每次呼叫時附在參數整理說明後面的即時資訊（例如今天的日期）；自訂說明也會附上。"""

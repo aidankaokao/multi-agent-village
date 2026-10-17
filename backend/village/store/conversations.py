@@ -6,7 +6,7 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from village.core.context import Turn
@@ -99,6 +99,13 @@ class ConversationStore:
             s.add_all(rows)
             await s.commit()
             return [r.id for r in rows]
+
+    async def count_generated_since(self, user_id: str, since: datetime) -> int:
+        async with self._sm() as s:
+            return await s.scalar(
+                select(func.count()).select_from(ChatImage)
+                .where(ChatImage.user_id == user_id, ChatImage.kind == "generated", ChatImage.created_at >= since)
+            ) or 0
 
     async def purge_expired(self) -> int:
         async with self._sm() as s:

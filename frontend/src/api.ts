@@ -235,6 +235,8 @@ export interface VillageRules {
   memory_auto: boolean;
   memory_max: number;
   max_images: number;
+  paint_per_run: number;
+  paint_per_day: number;
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -319,10 +321,11 @@ export interface TryResult {
 
 /** 工具產生的附件（目前是 SVG 圖表） */
 export interface Attachment {
-  kind: "svg";
+  kind: "svg" | "image"; // svg：data 是 SVG 原始碼；image：畫家的畫作，用 url 讀取（保存 14 天）
   name: string;
   data: string;
   title: string;
+  url?: string;
 }
 
 /** 工具箱裡的工具 */

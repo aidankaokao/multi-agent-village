@@ -1454,3 +1454,11 @@ button.conv-open {
   max-height: 220px;
   overflow-y: auto;
 }
+
+.expired-image {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--card);
+  font-size: 13px;
+}

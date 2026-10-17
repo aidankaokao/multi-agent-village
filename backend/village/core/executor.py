@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 
 from village.core.appraiser import APPRAISER_ID, Appraisal, appraise
 from village.core.card import AgentSpec
+from village.core.painter import PaintEnv, painting
 from village.core.context import PREV, Turn
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan
@@ -148,15 +149,16 @@ class Runner:
     async def run(
         self, run_id: str, message: str, traced: bool = False, user_id: str | None = None,
         history: list[Turn] | None = None, memories: list[str] | None = None,
-        images: list[ImagePart] | None = None, relook: bool = False,
+        images: list[ImagePart] | None = None, relook: bool = False, paint: PaintEnv | None = None,
     ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。
 
         images：要給鑑定師看的圖（這次附的，或 relook=True 時是前面對話附的）。
+        paint：畫家的作畫環境（誰、哪段對話、張數上限）；沒有就不能畫圖。
         """
         self.bus.claim(run_id, user_id)
         try:
-            with llm_user(user_id):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
+            with llm_user(user_id), painting(paint):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
                 _MEMORIES.set(render_memories(memories) if memories else "")
                 _APPRAISAL.set("")
                 return await self._run(run_id, message, traced, user_id, history or [], images or [], relook)
@@ -347,6 +349,8 @@ class Runner:
             await emit("review.finished", run_id=run_id, agent=REVIEWER_ID, **rv.to_dict())
             if rv.passed or round_ == rules.review_redo:
                 return
+            if self._costly(rv.step and by_id[rv.step].agent):
+                return  # 例如畫家：重畫要再花一次錢，審核結果照實記錄、不退件
             step, r = by_id[rv.step], results[rv.step]
             r.rejected.append({"output": r.output, "reason": rv.reason})
             await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=f"審核員退回：{rv.reason}")
@@ -357,6 +361,10 @@ class Runner:
             await self._run_step(run_id, step, r, rules, instruction, context)
             if r.status != "done":
                 return
+
+    def _costly(self, agent_id: str | None) -> bool:
+        spec = self.registry.get(agent_id) if agent_id else None
+        return bool(spec and spec.kind == "tool" and spec.tool and spec.tool.id in TOOLS and TOOLS[spec.tool.id].costly)
 
     def _name(self, agent_id: str) -> str:
         spec = self.registry.get(agent_id)
@@ -431,7 +439,7 @@ async def run_tool_agent(
         try:
             args = _extract_json(res.text)
             await say(f"🔧 交給{tool.name}：{json.dumps(args, ensure_ascii=False)[:200]}")
-            result, r.tool_args = tool.run(args), args
+            result, r.tool_args = await tool.arun(args), args
             break
         except (PlanError, ToolError) as e:
             problem = str(e)
@@ -447,7 +455,7 @@ async def run_tool_agent(
         args = tool.fallback(instruction, context)
         if args is not None:
             try:
-                result, r.tool_args = tool.run(args), args
+                result, r.tool_args = await tool.arun(args), args
                 r.warnings.append("LLM 沒整理出可用的參數，改由程式直接從文字抓取")
             except ToolError as e:
                 problem = f"{problem}；程式直接抓取也失敗：{e}" if problem else str(e)

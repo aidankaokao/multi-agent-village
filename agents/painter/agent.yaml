@@ -1,0 +1,32 @@
+# 畫家：工具型村民。LLM 只把請求整理成生圖提示詞，圖由 image 分級的生圖模型畫（需要先在 LLM 設定加入生圖模型）。
+# 畫一張就要花錢：沒有測試題，審核員退件也不會重畫；張數上限在「村規」。
+card:
+  id: painter
+  name: 畫家
+  description: 用生圖模型畫插畫、圖片、海報、桌布（不是數據圖表，數據圖表找圖表師）。適合「畫一張、畫一幅、插畫、配圖、海報」等請求，也能依前一位村民寫的詩或故事、鑑定師看到的圖片內容作畫。
+  version: 0.1.0
+  skills:
+    - id: paint
+      description: 依描述畫一張圖
+      examples:
+        - 畫一隻在月光下睡覺的貓
+        - 幫這首詩配一張插圖
+        - 畫一張夏日海邊的像素風海報
+  tags: [tool, image]
+
+x-village:
+  sprite: painter
+  home: [22, 7]
+  keywords: [插畫, 插圖, 畫一張圖, 畫一幅, 生成圖片, 產生圖片, 海報, 桌布, 畫畫, 配圖, illustration]
+
+kind: tool
+tool:
+  id: painter
+
+model:
+  tier: small
+  temperature: 0.4
+  max_tokens: 1024
+
+validate:
+  max_chars: 3000

@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, ImagePart, LLMError, ProviderKind, ReasoningEffort
-from village.api.images import sniff
+from village.core.painter import check_generated
 from village.llm import vision_test
 from village.llm.service import ALL_TIERS, VISION, LLMService, llm_user
 from village.security.auth import CurrentUser, require_user
@@ -420,20 +420,6 @@ async def vision_test_model(model_id: str, request: Request, me: CurrentUser = M
 
 
 IMAGE_TEST_PROMPT = "A single red apple on a plain white background, simple flat illustration"
-RASTER = {"image/png", "image/jpeg", "image/webp", "image/gif"}
-
-
-def check_generated(images) -> list[tuple[str, bytes]]:
-    """只收點陣圖：看檔頭判斷（不相信供應商給的 media_type）；SVG 可能帶程式碼，不收。"""
-    out = []
-    for img in images:
-        mime = sniff(img.data)
-        if mime in RASTER:
-            out.append((mime, img.data))
-    if not out:
-        kinds = ", ".join(sorted({i.mime or "未知" for i in images}))
-        raise LLMError(f"回傳的不是支援的圖片格式（{kinds}）；向量圖（SVG）模型不能用")
-    return out
 
 
 @router.post("/models/{model_id}/image-test", response_model=ImageTestOut)

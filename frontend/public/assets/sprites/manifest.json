@@ -54,6 +54,11 @@
       "desc": "高帽、湯匙，料理食譜",
       "path": "characters/chef.png"
     },
+    "painter": {
+      "name": "畫家",
+      "desc": "紅色貝雷帽、調色盤、畫筆，畫插畫",
+      "path": "characters/painter.png"
+    },
     "mayor": {
       "name": "村長",
       "desc": "王冠、法杖",

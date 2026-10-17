@@ -117,6 +117,17 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>🎨 畫家</h3>
+        <Field label="每次問答最多畫幾張" hint="0～4；0 = 不開放畫圖。生圖比文字貴很多（每張約 0.01～0.2 美元）">
+          <NumInput value={draft.paint_per_run} min={0} max={4} onChange={(v) => set({ paint_per_run: v ?? 1 })} />
+        </Field>
+        <Field label="每人每天最多畫幾張" hint="以最近 24 小時計算，村民試打與生圖測驗也算在內；0～500">
+          <NumInput value={draft.paint_per_day} min={0} max={500} step={5} onChange={(v) => set({ paint_per_day: v ?? 20 })} />
+        </Field>
+        <span className="hint">每個人用自己的 API key 畫圖。畫作保存 14 天後自動刪除；審核員退件時畫家不會重畫（避免重複計費）。</span>
+      </section>
+
+      <section>
         <h3>📜 執行紀錄</h3>
         <Field label="保留最近幾筆" hint="超過的舊紀錄會自動刪除；10～10000">
           <NumInput value={draft.keep_runs} min={10} max={10000} step={100} onChange={(v) => set({ keep_runs: v ?? 500 })} />

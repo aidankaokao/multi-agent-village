@@ -174,7 +174,7 @@ async def test_tools_api_and_try(tmp_path, monkeypatch):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
             await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})
             tools = (await c.get("/api/villagers/tools")).json()
-            assert {t["id"] for t in tools} == {"calculator", "chart", "clock"} and tools[0]["default_prompt"]
+            assert {t["id"] for t in tools} == {"calculator", "chart", "clock", "painter"} and tools[0]["default_prompt"]
             ids = {v["id"] for v in (await c.get("/api/villagers")).json()}
             assert {"calculator", "chart"} <= ids  # 內建範例匯入
             # 沒有註冊模型 → LLM 失敗 → 退路照樣算得出來

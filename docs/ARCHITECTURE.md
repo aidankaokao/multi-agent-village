@@ -269,6 +269,11 @@ class BaseAgent(Protocol):
   記在 `image_verified_at`；有視覺模型時請它看一眼（只供參考）。SVG 不收（從我們的網址開啟可能執行程式碼）。
 - 畫作存 `chat_images`（`kind=generated`、`expires_at` = 14 天後；生圖測驗產生的沒有 conversation_id），
   讀取時過期就當不存在，啟動時與每 6 小時清理一次。
+- 畫家（內建村民 `painter`，工具型，工具 `tools/painter.py`）：LLM（small 分級）把請求和參考資料整理成
+  `{prompt（英文）, aspect_ratio, title}` → `core/painter.py` 的 `PaintEnv.paint` 檢查村規上限（`paint_per_run`、
+  最近 24 小時 `paint_per_day`）→ `tier:image` 生圖 → 只收點陣圖 → 存成畫作 → 附件 `{kind: "image", url: "/api/images/{id}"}`。
+  `PaintEnv` 放 context variable `PAINT_ENV`（api/chat.py、api/villagers.py 試打各自設定）。LLM 不能用時用請求原話畫。
+  工具 `costly = True`：審核員退件時不重畫，避免重複計費。
 
 #### 資料表
 

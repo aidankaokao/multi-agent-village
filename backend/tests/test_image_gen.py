@@ -162,3 +162,13 @@ async def test_generated_images_expire(env):
     assert await store.purge_expired() == 1
     async with app.state.ctx.sessionmaker() as s:
         assert await s.scalar(select(func.count()).select_from(ChatImage)) == 1
+
+
+async def test_count_generated_since(env):
+    c, app, _, _ = env
+    store = app.state.ctx.conversations
+    me = (await c.get("/api/auth/status")).json()["user"]["id"]
+    await store.save_generated(me, None, [("image/png", PNG)] * 2)
+    since = datetime.now(UTC) - timedelta(days=1)
+    assert await store.count_generated_since(me, since) == 2
+    assert await store.count_generated_since(me, datetime.now(UTC) + timedelta(minutes=1)) == 0

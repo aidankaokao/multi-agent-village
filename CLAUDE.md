@@ -13,7 +13,8 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 
 **Phase 5V 視覺模型完成**（`docs/ROADMAP.md`）：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、`chat_images` 表、
 `/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（追問時重看原圖）。
-**進行中：Phase 6G 生圖（畫家村民）**：A 完成（生圖模型註冊、`image` 分級、生圖測驗、畫作 14 天過期）；接著 B（畫家村民）。Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
+**Phase 6G 生圖完成**：生圖模型註冊、`image` 分級、生圖測驗、畫家村民（`tools/painter.py` + `core/painter.py`）、畫作 14 天過期。
+使用者會自己部署實測，有問題再回報。之後可能：修圖（附圖當參考圖）、Phase 6（台灣史 remote agent，暫緩）。Phase 6（台灣史 remote agent，獨立容器 RAG）暫緩。
 
 ## 使用者偏好（重要）
 
@@ -41,6 +42,8 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
   不能拿來對話；只有通過生圖測驗（`image_verified_at`）的會被用到。只收點陣圖（看檔頭），SVG 不收。
   畫作存 `chat_images`（kind=generated），14 天後過期（`GENERATED_DAYS`，main.py 定期清理）。
 - 村民類型：對話型（prompt）與工具型（tool，工具在 `backend/village/tools/`；LLM 只整理參數，計算交給程式，並有退路）。
+  需要外部服務的工具覆寫 `arun`（例如畫家）；每次執行都花錢的工具設 `costly = True`（審核員退件不重做）。
+  畫家的作畫環境（誰、哪段對話、張數上限）放 context variable `PAINT_ENV`（問答與村民試打各自設定）。
   年份 / 今天日期這類 LLM 不知道的事一律交給程式決定。
 - 驗證 / 審核 / 重試放在 harness 層，不寫進個別 agent。全域行為是「村規」（`settings` 表，「村規」分頁）。
 - 後端每個動作都要發事件，前端村落動畫只靠事件驅動；別人的問答事件只送動畫欄位（`events.for_viewer`）。

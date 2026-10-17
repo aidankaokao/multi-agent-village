@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from village.core.card import AgentSpec, Expect
 from village.core.executor import StepResult, run_agent
+from village.core.painter import PaintEnv, painting
 from village.core.harness import check_expect
 from village.core.registry import RESERVED_IDS
 from village.llm.base import LLMError
@@ -206,7 +207,10 @@ async def try_villager(body: TryBody, request: Request, me: CurrentUser = Depend
     t0 = time.monotonic()
     error = None
     try:
-        with llm_user(me.id):  # 試打用自己的 LLM 設定
+        ctx = _ctx(request)
+        rules = ctx.rules.current
+        paint = PaintEnv(ctx.llm, ctx.conversations, me.id, None, rules.paint_per_run, rules.paint_per_day)
+        with llm_user(me.id), painting(paint):  # 試打用自己的 LLM 設定（畫家試打也算進每天的張數）
             await run_agent(
                 _ctx(request).llm, spec, body.instruction, body.context, r, on_retry=on_retry, target=body.target
             )

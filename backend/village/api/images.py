@@ -10,6 +10,7 @@ import binascii
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
+from village.core.imagefmt import sniff
 from village.security.auth import CurrentUser, require_user
 
 router = APIRouter(prefix="/api/images", tags=["images"])
@@ -20,18 +21,6 @@ HARD_MAX_IMAGES = 10
 
 class ImageIn(BaseModel):
     data: str = Field(max_length=MAX_BYTES * 4 // 3 + 8)  # base64，可以帶 data:...;base64, 前綴
-
-
-def sniff(data: bytes) -> str | None:
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    return None
 
 
 def decode(images: list[ImageIn], max_images: int) -> list[tuple[str, bytes]]:
