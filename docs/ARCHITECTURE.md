@@ -268,7 +268,12 @@ class BaseAgent(Protocol):
 - `core/remote.py`：讀 card（`{url}/.well-known/agent-card.json`）、健康檢查（`/health`，沒有就讀 card；回 `ok: false` 視為外出中）、
   card → 村民定義。呼叫網址用管理員填的網址加上 card 裡 `url` 的路徑（card 寫的主機從容器多半連不到）。
 - `api/residents.py`（管理員）：preview、invite、update、refresh、check；`health_loop` 每分鐘檢查，狀態改變發 `residents.status`。
-- 「允許把提問者的 LLM 設定交給它」（`share_llm`）預設關閉：打開才會把提問者的模型網址、模型、key 放進 X-LLM-* header。
+- 「允許把提問者的 LLM 設定交給它」（`share_llm`）預設關閉：打開才會把提問者的模型網址、模型、key 放進 X-LLM-* header
+  （`LLMService.shareable`：large 分級第一個 OpenAI 相容模型；Anthropic 不相容）。
+- 派工：Runner 只把「在村」的駐村專家放進村長名冊（`RemoteDirectory.online_ids`）；`run_remote_agent` 用 A2A
+  `message/send` 送「指示＋前一步成果」，回覆的 text 是成果、data 的 citations 整理成「資料來源」附在後面。
+  呼叫需要的目錄與提問者放 context variable `REMOTE_ENV`；token、key 只在 header，執行紀錄只記訊息內容。
+- 地圖：`/api/agents` 帶 status，外出中的駐村專家半透明並標「（外出中）」；`residents.status` 事件讓前端即時更新。
 
 #### 生圖模型（image 分級）
 

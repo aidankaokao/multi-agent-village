@@ -47,7 +47,7 @@ async def env(tmp_path, monkeypatch):
     for k in ("VILLAGE_MASTER_KEYS", "VILLAGE_MASTER_KEY"):
         monkeypatch.delenv(k, raising=False)
     agent = FakeAgent()
-    monkeypatch.setattr(remote, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(agent.handler)))
+    monkeypatch.setattr(remote, "_client", lambda timeout=10: httpx.AsyncClient(transport=httpx.MockTransport(agent.handler)))
     db = tmp_path / "v.db"
     settings = Settings(database_url=f"sqlite+aiosqlite:///{db}", config_dir=tmp_path / "cfg", agents_dir=REPO_ROOT / "agents")
     app = create_app(settings, handoff_delay=0)
@@ -164,3 +164,143 @@ async def test_remote_agents_are_not_dispatched_yet(env):
     agents = [a for a in app.state.ctx.registry.all() if a.kind != "remote"]
     assert "th（" not in planner_system_prompt(agents)
     assert app.state.ctx.registry.get("th").kind == "remote"
+
+
+# ---------------------------------------------------------------- T4-B：派工與 A2A 呼叫
+
+import asyncio  # noqa: E402
+import json  # noqa: E402
+
+from village.llm.base import ChatResult, LLMClient, RemoteModel  # noqa: E402
+
+USER_KEY = "sk-user-llm-key-1234567890"
+REPLY = {
+    "jsonrpc": "2.0", "id": "x",
+    "result": {"kind": "message", "role": "agent", "messageId": "m", "parts": [
+        {"kind": "text", "text": "霧社事件的導火線是敬酒風波[1]。"},
+        {"kind": "data", "data": {"citations": [{"n": 1, "title": "霧社事件", "section": "霧社事件 › 事件近因",
+                                                  "url": "https://zh.wikipedia.org/zh-tw/霧社事件"}],
+                                  "model": "deepseek/deepseek-v4-flash", "llm_error": None}},
+    ]},
+}
+
+
+class PlannerClient(LLMClient):
+    """村子這邊的 LLM：規劃時把問題交給駐村專家 th。"""
+
+    def __init__(self, kind, base_url, api_key):
+        pass
+
+    async def chat(self, model, messages, **kw):
+        if kw.get("json_schema") and "th（" in (kw.get("system") or ""):
+            plan = {"steps": [{"id": "s1", "agent": "th", "instruction": "說明霧社事件的起因", "use": []}]}
+            return ChatResult(text=json.dumps(plan), model=model)
+        if kw.get("json_schema"):
+            return ChatResult(text='{"steps":[]}', model=model)
+        return ChatResult(text="村長回答", model=model)
+
+    async def list_models(self):
+        return [RemoteModel(id="x")]
+
+
+@pytest.fixture
+async def village(tmp_path, monkeypatch):
+    for k in ("VILLAGE_MASTER_KEYS", "VILLAGE_MASTER_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    agent = FakeAgent()
+
+    def handler(request: httpx.Request):
+        if request.method == "POST" and request.url.path == "/a2a":
+            agent.requests.append(request)
+            if agent.health == 401:
+                return httpx.Response(401, json={"detail": "bad token"})
+            return httpx.Response(200, json=agent.card.get("_reply", REPLY))
+        return agent.handler(request)
+
+    monkeypatch.setattr(remote, "_client", lambda timeout=10: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'v.db'}", config_dir=tmp_path / "cfg", agents_dir=REPO_ROOT / "agents")
+    app = create_app(settings, client_factory=PlannerClient, handoff_delay=0)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})
+            p = (await c.post("/api/llm/providers", json={"name": "or", "kind": "openai_compat",
+                                                          "base_url": "https://openrouter.ai/api/v1", "api_key": USER_KEY})).json()
+            m = (await c.post("/api/llm/models", json={"provider_id": p["id"], "model": "deepseek/deepseek-v4-flash"})).json()
+            await c.put("/api/llm/tiers", json={"large": [m["id"]]})
+            rules = (await c.get("/api/rules")).json()
+            await c.put("/api/rules", json={**rules, "reviewer_enabled": False, "memory_auto": False})
+            await c.post("/api/residents", json={"id": "th", "url": "http://host.docker.internal:8100", "token": TOKEN})
+            yield c, app, agent
+
+
+def a2a_calls(agent):
+    return [r for r in agent.requests if r.method == "POST" and r.url.path == "/a2a"]
+
+
+async def _ask(c, question="霧社事件的起因是什麼？"):
+    r = (await c.post("/api/chat", json={"message": question})).json()
+    for _ in range(200):
+        msgs = (await c.get(f"/api/conversations/{r['conversation_id']}/messages")).json()
+        if len(msgs) >= 2:
+            trace = (await c.get(f"/api/runs/{r['run_id']}")).json()
+            return msgs[1], trace
+        await asyncio.sleep(0.02)
+    raise AssertionError("no answer")
+
+
+async def test_dispatch_to_resident_without_sharing_llm(village):
+    c, app, agent = village
+    msg, trace = await _ask(c)
+    assert "敬酒風波" in msg["content"] and "資料來源：" in msg["content"] and "《霧社事件》事件近因" in msg["content"]
+    [req] = a2a_calls(agent)
+    assert req.headers["authorization"] == f"Bearer {TOKEN}"
+    assert "x-llm-api-key" not in req.headers and "x-llm-base-url" not in req.headers  # 開關預設關閉：不交出 LLM
+    body = json.loads(req.content)
+    assert body["method"] == "message/send" and body["params"]["message"]["parts"][0]["text"] == "說明霧社事件的起因"
+    step = trace["steps"][0]
+    assert step["agent"] == "th" and step["model"].startswith("deepseek/deepseek-v4-flash（")
+    assert TOKEN not in json.dumps(trace) and USER_KEY not in json.dumps(trace)
+
+
+async def test_share_llm_sends_askers_model(village):
+    c, app, agent = village
+    await c.patch("/api/residents/th", json={"share_llm": True})
+    msg, trace = await _ask(c)
+    req = a2a_calls(agent)[-1]
+    assert req.headers["x-llm-base-url"] == "https://openrouter.ai/api/v1"
+    assert req.headers["x-llm-model"] == "deepseek/deepseek-v4-flash" and req.headers["x-llm-api-key"] == USER_KEY
+    assert USER_KEY not in json.dumps(trace) and USER_KEY not in msg["content"]
+
+
+async def test_offline_resident_is_not_planned_and_errors_are_reported(village):
+    from village.api.residents import check_all
+
+    c, app, agent = village
+    agent.ready = False
+    await check_all(app.state.ctx)
+    msg, _ = await _ask(c)
+    assert msg["content"] == "村長回答" and a2a_calls(agent) == []  # 外出中：村長名冊裡沒有它
+
+    agent.ready = True
+    await check_all(app.state.ctx)
+    agent.health = 401  # 對方拒絕 token
+    msg, trace = await _ask(c)
+    assert "拒絕了存取 token" in trace["steps"][0]["error"]
+
+
+def test_parse_reply_variants():
+    text, data = remote.parse_reply(REPLY)
+    assert text.startswith("霧社事件") and data["citations"][0]["n"] == 1
+    task = {"jsonrpc": "2.0", "id": 1, "result": {"kind": "task", "status": {"state": "completed"},
+                                                    "artifacts": [{"parts": [{"kind": "text", "text": "任務結果"}]}]}}
+    assert remote.parse_reply(task)[0] == "任務結果"
+    from village.llm.base import LLMError
+
+    with pytest.raises(LLMError, match="回報錯誤"):
+        remote.parse_reply({"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "不支援"}})
+    with pytest.raises(LLMError, match="沒有回答內容"):
+        remote.parse_reply({"jsonrpc": "2.0", "id": 1, "result": {"kind": "message", "parts": []}})
+    assert remote.render_citations({}) == ""
+    out = remote.render_citations({"citations": [{"n": 2, "title": "李登輝", "section": "李登輝 › 生平",
+                                                  "url": "https://zh.wikipedia.org/zh-tw/%E6%9D%8E%E7%99%BB%E8%BC%9D"}]})
+    assert out == "資料來源：\n[2] 《李登輝》生平　https://zh.wikipedia.org/zh-tw/李登輝"

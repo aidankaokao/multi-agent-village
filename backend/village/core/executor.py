@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 
 from village.core.appraiser import APPRAISER_ID, Appraisal, appraise
 from village.core.card import AgentSpec
+from village.core import remote
 from village.core.painter import PaintEnv, painting
 from village.core.context import PREV, Turn
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
@@ -138,6 +139,7 @@ class Runner:
         handoff_delay: float = 1.0,
         rules: RulesStore | None = None,
         trace: TraceStore | None = None,
+        directory: remote.RemoteDirectory | None = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -145,6 +147,7 @@ class Runner:
         self.handoff_delay = handoff_delay  # 讓前端有時間播放「走過去交接」的動畫
         self.rules = rules
         self.trace = trace
+        self.directory = directory  # 駐村專家的狀態與 token（沒有時不派工給駐村專家）
 
     async def run(
         self, run_id: str, message: str, traced: bool = False, user_id: str | None = None,
@@ -158,7 +161,8 @@ class Runner:
         """
         self.bus.claim(run_id, user_id)
         try:
-            with llm_user(user_id), painting(paint):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
+            env = remote.RemoteEnv(self.directory, self.llm, user_id) if self.directory else None
+            with llm_user(user_id), painting(paint), remote.remote_calls(env):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
                 _MEMORIES.set(render_memories(memories) if memories else "")
                 _APPRAISAL.set("")
                 return await self._run(run_id, message, traced, user_id, history or [], images or [], relook)
@@ -172,7 +176,9 @@ class Runner:
         _PREVIOUS.set(history[-1].answer if history else "")  # use 裡的 "prev" 指這個（每次問答各自一份）
         emit = self.bus.publish
         rules = self.rules.current if self.rules else DEFAULT_RULES
-        agents = [a for a in self.registry.all() if a.kind != "remote"]  # 駐村專家的派工在 T4-B 接上
+        # 駐村專家只派「在村」的（健康檢查每分鐘更新）；外出中的不出現在村長的名冊
+        online = await self.directory.online_ids() if self.directory else set()
+        agents = [a for a in self.registry.all() if a.kind != "remote" or a.id in online]
         t0 = time.monotonic()
         plan: Plan | None = None
         results: dict[str, StepResult] = {}
@@ -384,11 +390,27 @@ async def run_agent(
 ) -> None:
     """依村民類型執行；問答、試打、測試題共用。"""
     if spec.kind == "remote":
-        raise LLMError("駐村專家的派工還沒接上（Phase 6 T4-B）")
+        await run_remote_agent(spec, instruction, context, r, on_text=on_text)
+        return
     if spec.kind == "tool":
         await run_tool_agent(llm, spec, instruction, context, r, on_text=on_text, on_retry=on_retry, target=target)
     else:
         await run_prompt_agent(llm, spec, instruction, context, r, on_text=on_text, on_retry=on_retry, target=target)
+
+
+async def run_remote_agent(
+    spec: AgentSpec, instruction: str, context: str, r: StepResult, *, on_text: TextCallback | None = None
+) -> None:
+    """駐村專家：用 A2A 把指示（＋前一步成果）交給對方，回答附上引用來源。對方自己處理檢索與 LLM。"""
+    r.attempts += 1
+    r.input = remote.render_message(instruction, context)  # 執行紀錄只記訊息內容；token、key 只在 header
+    text, data, warnings = await remote.call(spec, instruction, context)
+    sources = remote.render_citations(data)
+    r.output = f"{text}\n\n{sources}" if sources else text
+    r.model = f"{data['model']}（{spec.name}）" if data.get("model") else spec.name
+    r.warnings += warnings
+    if on_text:
+        await on_text(r.output)
 
 
 TOOL_RETRIES = 2  # 參數不合法時帶錯誤訊息請 LLM 重新整理的次數

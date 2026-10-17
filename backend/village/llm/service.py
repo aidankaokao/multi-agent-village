@@ -121,6 +121,21 @@ class LLMService:
     async def has_models(self, user_id: str) -> bool:
         return bool(await self.candidates("tier:large", user_id))
 
+    async def shareable(self, user_id: str | None) -> dict | None:
+        """可以交給駐村專家的 LLM 設定：large 分級裡第一個 OpenAI 相容（含 Ollama）的模型。
+
+        回傳 {base_url, model, api_key, reasoning_effort}；Anthropic 的 API 格式不同，不能交給對方。
+        """
+        if user_id is None:
+            return None
+        for m in await self.candidates("tier:large", user_id):
+            if m.provider.kind in ("openai_compat", "ollama"):
+                base = m.provider.base_url or DEFAULT_BASE_URLS.get(m.provider.kind)
+                if base:
+                    return {"base_url": base, "model": m.model, "api_key": self.decrypt_api_key(m.provider) or "",
+                            "reasoning_effort": m.reasoning_effort}
+        return None
+
     async def has_vision(self, user_id: str) -> bool:
         return bool(await self.candidates(f"tier:{VISION}", user_id))
 

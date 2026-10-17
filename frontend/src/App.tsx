@@ -102,7 +102,7 @@ function VillageApp({
 
   useVillageEvents((e) => {
     villageRef.current?.dispatch(e);
-    if (e.type === "agents.changed") loadAgents();
+    if (e.type === "agents.changed" || e.type === "residents.status") loadAgents();
     else dispatch({ type: "event", event: e });
     if (["run.finished", "run.failed", "run.cancelled"].includes(e.type)) {
       setTraceTick((n) => n + 1);
@@ -111,7 +111,7 @@ function VillageApp({
   });
 
   const villagers = useMemo<VillagerInfo[]>(
-    () => agents.map((a) => ({ id: a.id, name: a.name, sprite: a.sprite, home: a.home })),
+    () => agents.map((a) => ({ id: a.id, name: a.name, sprite: a.sprite, home: a.home, away: a.kind === "remote" && a.status !== "online" })),
     [agents],
   );
   const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));

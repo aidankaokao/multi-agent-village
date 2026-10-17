@@ -15,6 +15,7 @@ from village.api.conversations import router as conversations_router
 from village.api.memories import router as memories_router
 from village.api.images import router as images_router
 from village.api.residents import health_loop
+from village.core.remote import RemoteDirectory
 from village.api.residents import router as residents_router
 from village.api.runs import router as runs_router
 from village.api.workshop import router as workshop_router
@@ -101,7 +102,10 @@ def create_app(
             llm=llm,
             bus=bus,
             registry=registry,
-            runner=Runner(registry, llm, bus, handoff_delay=handoff_delay, rules=rules, trace=trace),
+            runner=Runner(
+                registry, llm, bus, handoff_delay=handoff_delay, rules=rules, trace=trace,
+                directory=RemoteDirectory(sm, box),
+            ),
             rules=rules,
             trace=trace,
             conversations=ConversationStore(sm),

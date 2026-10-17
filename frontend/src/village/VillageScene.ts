@@ -26,6 +26,7 @@ export interface VillagerInfo {
   name: string;
   sprite: string | null;
   home: [number, number] | null;
+  away?: boolean; // 駐村專家連不上（外出中）：半透明、名字後面標示
 }
 
 // ---------------------------------------------------------------- 地圖裝飾與障礙物
@@ -136,11 +137,13 @@ class Villager {
   private timer?: Phaser.Time.TimerEvent;
   private bubbleTimer?: Phaser.Time.TimerEvent;
 
+  away = false;
+
   constructor(
     private scene: Phaser.Scene,
     public id: string,
     private skin: string, // spritesheet key
-    name: string,
+    private name: string,
     public home: Phaser.Math.Vector2,
   ) {
     this.sprite = scene.add.sprite(home.x, home.y, skin, 1).setOrigin(0.5, 0.9).setScale(CHAR_SCALE);
@@ -228,6 +231,14 @@ class Villager {
     this.showBubble(ok ? "done" : "error", ok ? 1800 : 4000);
     this.busy = false;
     this.scheduleWander(2000);
+  }
+
+  /** 駐村專家外出中：半透明、名字加註；回來時恢復 */
+  setAway(away: boolean) {
+    if (away === this.away) return;
+    this.away = away;
+    this.sprite.setAlpha(away ? 0.35 : 1);
+    this.label.setAlpha(away ? 0.6 : 1).setText(away ? `${this.name}（外出中）` : this.name);
   }
 
   /** 新村民登場：淡入 + 完成泡泡 */
@@ -323,13 +334,18 @@ export class VillageScene extends Phaser.Scene {
       }
     }
     for (const info of wanted.values()) {
-      if (this.villagers.has(info.id)) continue;
+      const existing = this.villagers.get(info.id);
+      if (existing) {
+        existing.setAway(!!info.away); // 在村 / 外出中切換不用重建角色
+        continue;
+      }
       this.looks.set(info.id, look(info));
       const skin = info.sprite && this.manifest.characters[info.sprite] ? info.sprite : "poet";
       const [hx, hy] = nearestFree(info.home ?? this.freeSpot(info.id));
       const v = new Villager(this, info.id, skin, info.name, new Phaser.Math.Vector2(hx * TILE, hy * TILE));
       this.villagers.set(info.id, v);
-      if (animate) v.appear();
+      if (animate && !info.away) v.appear();
+      v.setAway(!!info.away);
     }
   }
 
