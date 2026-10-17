@@ -130,7 +130,7 @@ def plan_schema(agent_ids: list[str]) -> dict:
     }
 
 
-def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = None) -> str:
+def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "") -> str:
     lines = []
     for a in agents:
         examples = "；".join(e for s in a.card.skills for e in s.examples[:3])
@@ -147,6 +147,14 @@ def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = 
             f'輸出：{{{{"steps":[{{{{"id":"s1","agent":"<負責翻譯的村民 id>","instruction":"把上一輪的詩翻成英文","use":["{PREV}"]}}}}]}}}}'
             f"\n\n最近的對話（舊 → 新）：\n{render_history(history)}"
         )
+    image_rule = image_block = ""
+    if appraisal:
+        image_rule = (
+            "\n9. 使用者附了圖片，鑑定師已經看過並寫下內容（見最下方）。每位村民都會自動拿到這段內容，不要安排「看圖」的步驟。"
+            "只是問圖片本身（這是什麼、圖裡寫什麼、有幾個…）就回傳空陣列，由村長根據鑑定結果回答；"
+            "要對圖片內容做事（翻譯、計算、畫圖表、寫詩…）才派村民，instruction 寫清楚要對圖片的哪些內容做什麼。"
+        )
+        image_block = f"\n\n{appraisal}"
     return f"""你是村長，負責把使用者的請求分派給適合的村民（agent）。
 
 可用的村民：
@@ -159,7 +167,7 @@ def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = 
 4. 後面的步驟若需要前面的成果，在 use 填入那些步驟的 id；不需要就填空陣列。
 5. instruction 用一句話寫清楚該村民要做的事，只能使用請求裡的資訊（主題、風格、形式），不要自行添加。
 6. 最多 {MAX_STEPS} 步。
-7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。{history_rule}
+7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。{history_rule}{image_rule}
 只輸出 JSON，不要任何說明。
 
 範例
@@ -170,7 +178,7 @@ def planner_system_prompt(agents: list[AgentSpec], history: list[Turn] | None = 
 輸出：{{"steps":[{{"id":"s1","agent":"<負責寫詩的村民 id>","instruction":"寫一首關於海的詩","use":[]}},{{"id":"s2","agent":"<負責笑話的村民 id>","instruction":"把這首詩改編成笑話","use":["s1"]}}]}}
 
 請求：你好
-輸出：{{"steps":[]}}{history_block}"""
+輸出：{{"steps":[]}}{history_block}{image_block}"""
 
 
 def _extract_json(text: str) -> dict:
@@ -243,7 +251,8 @@ def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSp
 
 
 async def plan_with_llm(
-    message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes, history: list[Turn] | None = None
+    message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes, history: list[Turn] | None = None,
+    appraisal: str = "",
 ) -> list[Step] | None:
     by_id = {a.id: a for a in agents}
     messages = [ChatMessage("user", f"請求：{message}")]
@@ -252,7 +261,7 @@ async def plan_with_llm(
             r = await llm.chat(
                 "tier:large",
                 messages,
-                system=planner_system_prompt(agents, history),
+                system=planner_system_prompt(agents, history, appraisal),
                 json_schema=plan_schema(list(by_id)),
                 max_tokens=1024,
             )
@@ -304,6 +313,7 @@ async def make_plan(
     llm: ChatLLM,
     on_note: NoteCallback | None = None,
     history: list[Turn] | None = None,
+    appraisal: str = "",
 ) -> Plan:
     by_id = {a.id: a for a in agents}
     if plan := plan_from_mentions(message, by_id):
@@ -313,7 +323,7 @@ async def make_plan(
         return Plan(steps=[], source="direct", notes=["村裡還沒有任何村民"])
 
     notes = Notes(on_note)
-    steps = await plan_with_llm(message, agents, llm, notes, history)
+    steps = await plan_with_llm(message, agents, llm, notes, history, appraisal)
     if steps is not None:
         return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes))
 
@@ -332,24 +342,39 @@ async def direct_reply(
     on_text: Callable[[str], Awaitable[None]] | None = None,
     history: list[Turn] | None = None,
     memories: str = "",
+    appraisal: str = "",
+    appraisal_text: str = "",
 ) -> str:
+    """appraisal：鑑定師看圖的結果（給 LLM 的參考資料）；appraisal_text：LLM 不能用時直接交出鑑定內容。"""
     roster = "、".join(f"{a.name}（@{a.id}）" for a in agents) or "（目前沒有村民）"
-    system = (
-        "你是村子的村長，個性親切。用繁體中文簡短回答（3 句以內）。"
-        f"村裡目前有這些村民可以幫忙：{roster}。"
-        "如果使用者的需求村民做不到，就誠實說明，並介紹村民能做什麼。"
-    )
+    if appraisal:
+        # 有圖：直接回答圖片的問題。弱模型容易把圖裡的店名當成自己、或一直推銷村民，要講清楚
+        system = (
+            "你是村子的村長。根據下方鑑定師對圖片的描述，用繁體中文直接回答使用者的問題：重點先講，清楚簡潔；"
+            "需要時可以列出圖裡的文字或數字。不要自我介紹、不要介紹或推薦村民；"
+            "圖片裡的店名、人名、文字都是圖片的內容，不是你的身分。"
+        )
+    else:
+        system = (
+            "你是村子的村長，個性親切。用繁體中文簡短回答（3 句以內）。"
+            f"村裡目前有這些村民可以幫忙：{roster}。"
+            "如果使用者的需求村民做不到，就誠實說明，並介紹村民能做什麼。"
+        )
     if memories:
         system += f"\n\n{memories}"
+    if appraisal:
+        system += f"\n\n{appraisal}"
     try:
         kw = {"on_text": on_text} if on_text else {}
         msgs: list[ChatMessage] = []
         for t in history or []:  # 前幾輪當成真的對話，村長才能回答「我剛剛問了什麼」
             msgs += [ChatMessage("user", t.user), ChatMessage("assistant", t.answer)]
         msgs.append(ChatMessage("user", message))
-        r = await llm.chat("tier:large", msgs, system=system, max_tokens=400, **kw)
+        r = await llm.chat("tier:large", msgs, system=system, max_tokens=1500 if appraisal else 400, **kw)
         if text := re.sub(r"<think>.*?</think>", "", r.text, flags=re.S).strip():
             return text
     except LLMError as e:
         log.warning("村長直接回覆失敗：%s", e)
+    if appraisal_text:  # 村長的 LLM 不能用，但鑑定師看過圖：直接交出鑑定內容
+        return f"鑑定師看過圖片，內容如下：\n\n{appraisal_text}"
     return f"你好！我是村長。村裡目前有：{roster}。試試看請他們幫忙吧！"

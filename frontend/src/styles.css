@@ -1444,3 +1444,13 @@ button.conv-open {
   font-size: 12px;
   color: #c9a46a;
 }
+
+.pnote.appraisal summary {
+  cursor: pointer;
+}
+
+.pnote.appraisal .output {
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}

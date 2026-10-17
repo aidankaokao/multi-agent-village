@@ -76,6 +76,18 @@ export interface Tiers {
   vision: string[]; // 鑑定師看圖專用，不和 large / small 互相備援
 }
 
+export interface AppraisalInfo {
+  ok: boolean;
+  text: string;
+  error: string;
+  count: number;
+  relook: boolean; // 追問時重看前面附的圖
+  model: string | null;
+  elapsed_ms: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
 export interface VisionTestResult {
   passed: boolean;
   reason: string;
@@ -184,7 +196,12 @@ export interface TraceReview {
 export interface RunDetail extends RunSummary {
   answer: string | null;
   error: string | null;
-  plan: { steps: { id: string; agent: string; instruction: string; use: string[] }[]; source: string; notes: string[] } | null;
+  plan: {
+    steps: { id: string; agent: string; instruction: string; use: string[] }[];
+    source: string;
+    notes: string[];
+    appraisal?: AppraisalInfo; // 鑑定師看圖的結果
+  } | null;
   steps: TraceStep[];
   reviews: TraceReview[];
   finished_at: string | null;

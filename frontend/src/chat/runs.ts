@@ -21,6 +21,16 @@ export interface StepView {
   attachments?: Attachment[];
 }
 
+export interface AppraisalView {
+  status: "running" | "done" | "error";
+  count: number;
+  relook: boolean;
+  text?: string;
+  error?: string;
+  model?: string;
+  elapsed_ms?: number;
+}
+
 export type PlanSource = "mention" | "llm" | "keyword" | "direct";
 
 export interface ReviewView {
@@ -40,6 +50,7 @@ export interface RunView {
   remembered?: string[]; // 書記這次記下的
   forgotten?: string[]; // 書記這次忘掉的
   reviewing?: boolean; // 審核員檢查中
+  appraisal?: AppraisalView; // 鑑定師看圖
   reviews: ReviewView[];
   source?: PlanSource;
   notes: string[];
@@ -189,6 +200,23 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
         reviewing: false,
         finishedAt: Date.now(),
         steps: run.steps.map((s) => (s.status === "running" || s.status === "pending" ? { ...s, status: "error", live: undefined, error: "已取消" } : s)),
+      };
+      break;
+    case "appraise.started":
+      run = { ...run, appraisal: { status: "running", count: (e.count as number) ?? 1, relook: !!e.relook } };
+      break;
+    case "appraise.finished":
+      run = {
+        ...run,
+        appraisal: {
+          status: e.ok ? "done" : "error",
+          count: (e.count as number) ?? 1,
+          relook: !!e.relook,
+          text: e.text as string,
+          error: e.error as string,
+          model: (e.model as string) ?? undefined,
+          elapsed_ms: e.elapsed_ms as number,
+        },
       };
       break;
     case "memory.started":

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ConversationRow } from "../api";
 import { Attachments, ImageStrip } from "../ui/Attachments";
 import { imageFiles, prepareImage } from "./prepareImage";
-import { leafIds, type RunsState, type RunView, type StepView } from "./runs";
+import { leafIds, type AppraisalView, type RunsState, type RunView, type StepView } from "./runs";
 
 /** 能不能附圖：要有通過看圖測驗的視覺模型；張數上限由村規決定 */
 export interface Vision {
@@ -73,7 +73,7 @@ export function ChatPanel({
   const fileInput = useRef<HTMLInputElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 使用者往上捲去看舊內容時，串流不要把畫面拉回底部
-  const names: Record<string, string> = { mayor: "村長", reviewer: "審核員", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
+  const names: Record<string, string> = { mayor: "村長", reviewer: "審核員", appraiser: "鑑定師", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
   const active = runs.order.filter((id) => ["planning", "running"].includes(runs.byId[id].status));
   const busy = active.length > 0;
 
@@ -339,6 +339,7 @@ function useNow(active: boolean): number {
 const secs = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
 
 function statusText(run: RunView, names: Record<string, string>): string {
+  if (run.appraisal?.status === "running") return run.appraisal.relook ? "鑑定師重看前面的圖…" : "鑑定師看圖中…";
   if (run.status === "planning") return "正在想要請誰幫忙…";
   if (run.status === "failed") return "失敗";
   if (run.status === "cancelled") return "已停止";
@@ -359,7 +360,8 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
   // 只有一個最終步驟時，它的成果就是下方的回答（串流也顯示在那裡）；平行有多個時各自顯示在執行過程
   const last = leaves.size === 1 ? run.steps.find((s) => leaves.has(s.id)) : undefined;
   const lastReview = run.reviews[run.reviews.length - 1];
-  const hasProcess = run.status === "planning" || run.steps.length > 0 || run.notes.length > 0 || run.reviews.length > 0;
+  const hasProcess =
+    run.status === "planning" || run.steps.length > 0 || run.notes.length > 0 || run.reviews.length > 0 || !!run.appraisal;
 
   let answer = "";
   if (run.status === "done") answer = run.answer ?? "";
@@ -391,7 +393,8 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
         )}
         {hasProcess && open && (
           <div className="process">
-            {run.status === "planning" && (
+            {run.appraisal && <AppraisalNote a={run.appraisal} />}
+            {run.status === "planning" && run.appraisal?.status !== "running" && (
               <div className="pnote live">🤔 村長正在閱讀村民名冊，分派工作…</div>
             )}
             {run.notes.map((n, i) => (
@@ -450,6 +453,22 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
         )}
       </div>
     </div>
+  );
+}
+
+function AppraisalNote({ a }: { a: AppraisalView }) {
+  const what = `${a.relook ? "重看前面附的" : "看了"} ${a.count} 張圖`;
+  if (a.status === "running") return <div className="pnote live">🔎 鑑定師正在{a.relook ? "重看前面附的" : "看"} {a.count} 張圖…</div>;
+  if (a.status === "error") return <div className="pnote review bad">🔎 鑑定師沒辦法看圖：{a.error}</div>;
+  return (
+    <details className="pnote appraisal">
+      <summary>
+        🔎 鑑定師{what}
+        {a.model && <span className="tag">{a.model}</span>}
+        {a.elapsed_ms !== undefined && <span className="muted elapsed">{secs(a.elapsed_ms)}</span>}
+      </summary>
+      <pre className="output">{a.text}</pre>
+    </details>
   );
 }
 

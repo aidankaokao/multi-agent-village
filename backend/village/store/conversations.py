@@ -62,6 +62,26 @@ class ConversationStore:
             await s.commit()
             return Started(conv.id, ids)
 
+    async def recent_images(self, conversation_id: str, turns: int) -> list[tuple[str, bytes]]:
+        """前幾輪（不含目前這一輪）裡最近一次附的圖，給鑑定師追問時重看。超過 turns 輪就不算。"""
+        if turns <= 0:
+            return []
+        async with self._sm() as s:
+            rows = list(
+                await s.scalars(
+                    select(Message).where(Message.conversation_id == conversation_id, Message.role == "user")
+                    .order_by(Message.created_at.desc()).limit(turns + 1)
+                )
+            )
+            for m in rows[1:]:  # rows[0] 是目前這一輪的提問
+                ids = (m.meta or {}).get("images") or []
+                if ids:
+                    imgs = {i.id: i for i in await s.scalars(
+                        select(ChatImage).where(ChatImage.id.in_(ids), ChatImage.conversation_id == conversation_id)
+                    )}
+                    return [(imgs[i].mime, imgs[i].data) for i in ids if i in imgs]
+        return []
+
     async def get_image(self, image_id: str, user_id: str) -> ChatImage | None:
         """只有上傳的人拿得到（管理員也一樣）。"""
         async with self._sm() as s:

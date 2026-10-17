@@ -10,7 +10,7 @@ from village.core.card import AgentSpec, load_spec
 
 log = logging.getLogger("village.registry")
 
-RESERVED_IDS = {"mayor", "craftsman", "reviewer", "scribe"}  # 村長、工匠、審核員、書記由系統提供
+RESERVED_IDS = {"mayor", "craftsman", "reviewer", "scribe", "appraiser"}  # 村長、工匠、審核員、書記、鑑定師由系統提供
 
 
 class AgentRegistry:

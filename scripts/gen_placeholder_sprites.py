@@ -311,6 +311,29 @@ def acc_scribe(d, view, frame, dy):
         r(d, 9, 21 + dy, 11, 23 + dy, page)
 
 
+def acc_appraiser(d, view, frame, dy):
+    hat, band, gold, lens = hexc("#2a3a2e"), hexc("#a8323e"), hexc("#e0b84a"), hexc("#cfe3ff")
+    sky, hill = hexc("#7ab8e8"), hexc("#4a9a4a")
+    r(d, 10, 1 + dy, 21, 4 + dy, hat)  # 圓頂禮帽
+    r(d, 8, 5 + dy, 23, 5 + dy, hat)
+    r(d, 10, 4 + dy, 21, 4 + dy, band)
+    if view == "down":
+        r(d, 17, 11 + dy, 19, 13 + dy, lens)  # 單片眼鏡
+        px(d, [(18, 12 + dy)], EYE)
+        px(d, [(17, 10 + dy), (18, 10 + dy), (19, 10 + dy), (20, 11 + dy), (20, 12 + dy), (20, 13 + dy), (17, 14 + dy), (18, 14 + dy), (19, 14 + dy), (16, 11 + dy), (16, 12 + dy), (16, 13 + dy)], gold)
+        px(d, [(20, 14 + dy), (20, 15 + dy), (19, 16 + dy), (19, 17 + dy)], gold)  # 鏈子
+        r(d, 10, 19 + dy, 19, 25, gold)  # 手上的畫框
+        r(d, 11, 20 + dy, 18, 22 + dy, sky)
+        r(d, 11, 23 + dy, 18, 24, hill)
+    elif view == "left":
+        r(d, 10, 11 + dy, 12, 13 + dy, lens)
+        px(d, [(11, 12 + dy)], EYE)
+        px(d, [(9, 11 + dy), (9, 12 + dy), (9, 13 + dy), (10, 10 + dy), (11, 10 + dy), (12, 10 + dy), (10, 14 + dy), (11, 14 + dy), (12, 14 + dy)], gold)
+        r(d, 6, 19 + dy, 12, 25, gold)
+        r(d, 7, 20 + dy, 11, 22 + dy, sky)
+        r(d, 7, 23 + dy, 11, 24, hill)
+
+
 CHARACTERS = {
     # id: (中文名, 外觀說明（工匠挑外觀時參考）, 調色盤, 配件, 系統角色？)
     "poet": ("詩人", "貝雷帽、羽毛筆，文藝創作", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet, False),
@@ -324,6 +347,7 @@ CHARACTERS = {
     "mayor": ("村長", "王冠、法杖", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor, True),
     "craftsman": ("工匠", "安全帽、槌子", dict(hair="#3a2a1e", cloth="#4a6a8a", cloth2="#2a3a4a", shoe="#2a1a1a"), acc_craftsman, True),
     "scribe": ("書記", "頭巾、筆記本、羽毛筆", dict(hair="#3a2a1e", cloth="#8a6a3a", cloth2="#5a4424", shoe="#2a1a1a"), acc_scribe, True),
+    "appraiser": ("鑑定師", "圓頂禮帽、單片眼鏡、畫框", dict(hair="#d8d0c0", cloth="#6a3a7a", cloth2="#46264f", shoe="#1a1a1a"), acc_appraiser, True),
     "auditor": ("審核員", "黑袍、放大鏡", dict(hair="#5a4a3a", cloth="#2a2a3a", cloth2="#1a1a26", shoe="#111111"), acc_auditor, True),
 }
 

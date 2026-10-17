@@ -175,6 +175,26 @@ function Detail({ run, names, onBack, onDeleted }: { run: RunDetail; names: Reco
         )}
       </div>
 
+      {run.plan?.appraisal && (
+        <section>
+          <h3>
+            🔎 鑑定師看圖（{run.plan.appraisal.count} 張{run.plan.appraisal.relook ? "，追問時重看前面的圖" : ""}）
+          </h3>
+          <div className="row muted">
+            {run.plan.appraisal.model && <span className="tag">{run.plan.appraisal.model}</span>}
+            <span>{secs(run.plan.appraisal.elapsed_ms)}</span>
+            {tokens(run.plan.appraisal.tokens_in, run.plan.appraisal.tokens_out) && (
+              <span>・{tokens(run.plan.appraisal.tokens_in, run.plan.appraisal.tokens_out)}</span>
+            )}
+          </div>
+          {run.plan.appraisal.ok ? (
+            <pre className="output">{run.plan.appraisal.text}</pre>
+          ) : (
+            <div className="step-error">沒辦法看圖：{run.plan.appraisal.error}</div>
+          )}
+        </section>
+      )}
+
       {run.plan && (
         <section>
           <h3>① 村長的計畫（{SOURCE_LABEL[run.plan.source] ?? run.plan.source}）</h3>

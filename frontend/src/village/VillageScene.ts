@@ -123,6 +123,8 @@ export const CRAFTSMAN: VillagerInfo = { id: "craftsman", name: "工匠", sprite
 export const REVIEWER: VillagerInfo = { id: "reviewer", name: "審核員", sprite: "auditor", home: [10, 12] };
 /** 書記：問答後在背景記下使用者的長期記憶，事件的 agent 是 scribe */
 export const SCRIBE: VillagerInfo = { id: "scribe", name: "書記", sprite: "scribe", home: [13, 15] };
+/** 鑑定師：使用者附圖時先看圖，把內容寫成文字交給村長，事件的 agent 是 appraiser */
+export const APPRAISER: VillagerInfo = { id: "appraiser", name: "鑑定師", sprite: "appraiser", home: [19, 12] };
 
 class Villager {
   sprite: Phaser.GameObjects.Sprite;
@@ -311,7 +313,7 @@ export class VillageScene extends Phaser.Scene {
       this.pending = list;
       return;
     }
-    const wanted = new Map([MAYOR, CRAFTSMAN, REVIEWER, SCRIBE, ...list].map((v) => [v.id, v]));
+    const wanted = new Map([MAYOR, CRAFTSMAN, REVIEWER, SCRIBE, APPRAISER, ...list].map((v) => [v.id, v]));
     const look = (v: VillagerInfo) => JSON.stringify([v.sprite, v.name, v.home]);
     for (const [id, v] of this.villagers) {
       const info = wanted.get(id);
@@ -358,6 +360,7 @@ export class VillageScene extends Phaser.Scene {
       case "workshop.started":
       case "review.started":
       case "memory.started":
+      case "appraise.started":
         v?.startWork();
         break;
       case "agent.finished":
@@ -373,6 +376,9 @@ export class VillageScene extends Phaser.Scene {
         break;
       case "memory.finished":
         v?.finish(true);
+        break;
+      case "appraise.finished":
+        v?.finish(e.ok !== false);
         break;
       case "run.cancelled": // 使用者按停止：大家收工
         this.villagers.forEach((x) => x.busy && x.finish(false));

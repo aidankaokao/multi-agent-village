@@ -72,6 +72,12 @@
       "path": "characters/scribe.png",
       "system": true
     },
+    "appraiser": {
+      "name": "鑑定師",
+      "desc": "圓頂禮帽、單片眼鏡、畫框",
+      "path": "characters/appraiser.png",
+      "system": true
+    },
     "auditor": {
       "name": "審核員",
       "desc": "黑袍、放大鏡",

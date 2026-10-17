@@ -73,8 +73,10 @@ SYSTEM = """你是村子裡的審核員，在答案交給使用者之前做最�
 用繁體中文。只輸出 JSON：{"pass": true 或 false, "reason": "...", "fix": "...", "step": "..."}"""
 
 
-def render(message: str, leaves: list[Leaf], history: list[Turn] | None = None) -> str:
+def render(message: str, leaves: list[Leaf], history: list[Turn] | None = None, appraisal: str = "") -> str:
     parts = []
+    if appraisal:  # 使用者附了圖：審核員也看不到圖，用鑑定師的描述判斷
+        parts += [appraisal, ""]
     if history:  # 「再把它翻成英文」這種接續的請求，要知道「它」是什麼
         parts += ["前一輪的對話（參考用）：", render_history(history), ""]
     parts += [f"使用者的請求：{message}", ""]
@@ -85,14 +87,15 @@ def render(message: str, leaves: list[Leaf], history: list[Turn] | None = None) 
 
 
 async def review(
-    llm: ChatLLM, message: str, leaves: list[Leaf], target: str = "tier:large", history: list[Turn] | None = None
+    llm: ChatLLM, message: str, leaves: list[Leaf], target: str = "tier:large", history: list[Turn] | None = None,
+    appraisal: str = "",
 ) -> Review | None:
     """回傳 None 代表沒辦法審核（LLM 不能用或輸出無法解析），呼叫端應直接放行。"""
     ids = [lf.step_id for lf in leaves]
     t0 = time.monotonic()
     try:
         r = await llm.chat(
-            target, [ChatMessage("user", render(message, leaves, history))], system=SYSTEM,
+            target, [ChatMessage("user", render(message, leaves, history, appraisal))], system=SYSTEM,
             json_schema=review_schema(ids), max_tokens=1024, fallback="tier:large",
         )
         data = _extract_json(r.text)

@@ -1,6 +1,7 @@
 """問答與村民清單 API。"""
 
 import asyncio
+import base64
 import logging
 import uuid
 
@@ -8,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from village.api import images as image_api
-from village.core import scribe
+from village.core import appraiser, scribe
+from village.llm.base import ImagePart
 from village.llm.service import NO_VISION, NOT_CONFIGURED, llm_user
 from village.security.auth import CurrentUser, require_user
 
@@ -73,6 +75,15 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     started = await ctx.conversations.start_turn(me.id, body.conversation_id, message, images)
     conv_id = started.conversation_id
     history = await ctx.conversations.recent_turns(conv_id, rules.context_turns)
+    # 鑑定師要看的圖：這次附的；沒附但前幾輪有圖、而且問題像在問那張圖 → 重看原圖
+    relook = False
+    look = images
+    if not look and body.conversation_id and appraiser.wants_relook(message):
+        look = await ctx.conversations.recent_images(conv_id, rules.context_turns)
+        relook = bool(look)
+        if relook and not await ctx.llm.has_vision(me.id):
+            look, relook = [], False  # 視覺模型被拿掉了：照一般問答處理
+    parts = [ImagePart(mime, base64.b64encode(data).decode()) for mime, data in look]
     memories = [m.content for m in await ctx.memories.relevant(me.id, message, rules.memory_max)] if rules.memory_enabled else []
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
     ctx.bus.claim(run_id, me.id)  # 在 task 開始前就認領，第一個事件也只送給提問者
@@ -81,7 +92,8 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
         """執行問答，結束（含失敗、取消）後把回答存回對話。"""
         try:
             out = await ctx.runner.run(
-                run_id, message, traced=True, user_id=me.id, history=history, memories=memories
+                run_id, message, traced=True, user_id=me.id, history=history, memories=memories,
+                images=parts, relook=relook,
             )
         except asyncio.CancelledError:
             await ctx.conversations.finish_turn(conv_id, run_id, "", "cancelled")

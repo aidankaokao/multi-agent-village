@@ -254,6 +254,11 @@ class BaseAgent(Protocol):
   `POST /api/chat` 的 `images`（data URL）由 `api/images.py` 把關：看檔頭判斷格式（PNG / JPEG / WebP / GIF）、
   每張 ≤ 2MB、張數 ≤ 村規 `max_images`；沒有可用的視覺模型回 409。圖片存 `chat_images`（user_id、conversation_id 都 CASCADE），
   使用者訊息的 `meta.images` 記 id；`GET /api/images/{id}` 只有上傳的人拿得到（管理員也不行）。nginx 上限 12MB。
+- 鑑定師（`core/appraiser.py`，系統角色 `appraiser`）：有圖時在村長規劃前先用 `tier:vision` 看圖，依問題寫下細節
+  （文字 / 數字 / 表格逐字抄），結果放 `_APPRAISAL`（context variable）帶進村長規劃、村長直接回覆、村民參考資料、審核員。
+  事件 `appraise.started` / `appraise.finished`，看完 `agent.handoff` 走去找村長；結果記在執行紀錄 `plan.appraisal`。
+  追問（這輪沒附圖）時 `wants_relook` 判斷問題是否跟圖有關（位置、顏色、文字、它 / 那個…），是就重看 `context_turns` 輪內最近附的圖，
+  並附上前一輪問答當背景。看不了圖時告訴村長「看不到，不要猜」；村長 LLM 不能用時直接交出鑑定內容。
 
 #### 資料表
 

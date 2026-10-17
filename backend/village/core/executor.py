@@ -1,4 +1,4 @@
-"""執行一次問答：村長規劃 → 執行步驟（互不依賴的可平行）→ harness 檢查 → 審核員 → 發事件、寫執行紀錄。
+"""執行一次問答：（有附圖時鑑定師先看圖）→ 村長規劃 → 執行步驟（互不依賴的可平行）→ harness 檢查 → 審核員 → 發事件、寫執行紀錄。
 
 每個動作都發事件到 EventBus，前端的村落動畫與聊天框完全由事件驅動。
 """
@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 
+from village.core.appraiser import APPRAISER_ID, Appraisal, appraise
 from village.core.card import AgentSpec
 from village.core.context import PREV, Turn
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
@@ -20,7 +21,7 @@ from village.core.registry import AgentRegistry
 from village.core.scribe import render_memories
 from village.core.reviewer import REVIEWER_ID, Leaf, Review, review
 from village.events import EventBus
-from village.llm.base import ChatMessage, LLMError, TextCallback
+from village.llm.base import ChatMessage, ImagePart, LLMError, TextCallback
 from village.llm.service import llm_user
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore, VillageRules
@@ -84,6 +85,8 @@ def render_context(
     parts = []
     if memories := _MEMORIES.get():
         parts.append(memories)
+    if appraisal := _APPRAISAL.get():
+        parts.append(appraisal)
     if PREV in step.use and previous:
         parts.append(f"參考資料（上一輪的回答）：\n{previous}")
     for ref in step.use:
@@ -120,6 +123,7 @@ def compose_answer(plan: Plan, results: dict[str, StepResult], registry: AgentRe
 # 上一輪的回答：Runner 是全村共用的，同時有好幾個人在問答，所以放 context variable（每個問答 task 各自一份）
 _PREVIOUS: ContextVar[str] = ContextVar("previous_answer", default="")
 _MEMORIES: ContextVar[str] = ContextVar("memories", default="")  # 書記記下的長期記憶（已排成文字）
+_APPRAISAL: ContextVar[str] = ContextVar("appraisal", default="")  # 鑑定師看圖的結果（已排成文字）
 
 DEFAULT_RULES = VillageRules(reviewer_enabled=False, parallel=False)  # 沒接 DB 時（測試）維持最單純的行為
 
@@ -144,17 +148,25 @@ class Runner:
     async def run(
         self, run_id: str, message: str, traced: bool = False, user_id: str | None = None,
         history: list[Turn] | None = None, memories: list[str] | None = None,
+        images: list[ImagePart] | None = None, relook: bool = False,
     ) -> dict:
-        """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。"""
+        """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。
+
+        images：要給鑑定師看的圖（這次附的，或 relook=True 時是前面對話附的）。
+        """
         self.bus.claim(run_id, user_id)
         try:
             with llm_user(user_id):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
                 _MEMORIES.set(render_memories(memories) if memories else "")
-                return await self._run(run_id, message, traced, user_id, history or [])
+                _APPRAISAL.set("")
+                return await self._run(run_id, message, traced, user_id, history or [], images or [], relook)
         finally:
             self.bus.release(run_id)
 
-    async def _run(self, run_id: str, message: str, traced: bool, user_id: str | None, history: list[Turn]) -> dict:
+    async def _run(
+        self, run_id: str, message: str, traced: bool, user_id: str | None, history: list[Turn],
+        images: list[ImagePart], relook: bool,
+    ) -> dict:
         _PREVIOUS.set(history[-1].answer if history else "")  # use 裡的 "prev" 指這個（每次問答各自一份）
         emit = self.bus.publish
         rules = self.rules.current if self.rules else DEFAULT_RULES
@@ -163,6 +175,7 @@ class Runner:
         plan: Plan | None = None
         results: dict[str, StepResult] = {}
         reviews: list[Review] = []
+        looked: Appraisal | None = None
         if self.trace:
             self.trace.keep = rules.keep_runs
             if not traced:
@@ -170,12 +183,15 @@ class Runner:
 
         async def record(status: str, **fields) -> None:
             if self.trace:
+                plan_out = plan.to_dict() if plan else None
+                if plan_out is not None and looked:
+                    plan_out["appraisal"] = looked.to_dict()  # 鑑定師看圖的結果也記在執行紀錄
                 await self.trace.finish(
-                    run_id, status=status, plan=plan.to_dict() if plan else None,
+                    run_id, status=status, plan=plan_out,
                     steps=[asdict(r) for r in results.values()], reviews=[rv.to_dict() for rv in reviews],
                     elapsed_ms=int((time.monotonic() - t0) * 1000),
-                    extra_tokens_in=sum(rv.tokens_in for rv in reviews),
-                    extra_tokens_out=sum(rv.tokens_out for rv in reviews),
+                    extra_tokens_in=sum(rv.tokens_in for rv in reviews) + (looked.tokens_in if looked else 0),
+                    extra_tokens_out=sum(rv.tokens_out for rv in reviews) + (looked.tokens_out if looked else 0),
                     **fields,
                 )
 
@@ -184,14 +200,19 @@ class Runner:
             async def on_note(note: str) -> None:
                 await emit("plan.note", run_id=run_id, agent=MAYOR, note=note)
 
-            plan = await make_plan(message, agents, self.llm, on_note=on_note, history=history)
+            if images:
+                looked = await self._appraise(run_id, message, images, relook, history)
+                _APPRAISAL.set(looked.render())
+
+            plan = await make_plan(message, agents, self.llm, on_note=on_note, history=history, appraisal=_APPRAISAL.get())
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:
                 await emit("agent.started", run_id=run_id, step_id=None, agent=MAYOR, instruction=message)
                 on_text = DeltaEmitter(self.bus, run_id=run_id, step_id=None, agent=MAYOR)
                 answer = await direct_reply(
-                    message, agents, self.llm, on_text=on_text, history=history, memories=_MEMORIES.get()
+                    message, agents, self.llm, on_text=on_text, history=history, memories=_MEMORIES.get(),
+                    appraisal=_APPRAISAL.get(), appraisal_text=looked.text if looked and looked.ok else "",
                 )
                 await emit("agent.finished", run_id=run_id, step_id=None, agent=MAYOR, output=answer)
                 await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[], reviews=[])
@@ -294,6 +315,16 @@ class Runner:
         else:
             await emit("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
 
+    async def _appraise(
+        self, run_id: str, message: str, images: list[ImagePart], relook: bool, history: list[Turn]
+    ) -> Appraisal:
+        """鑑定師看圖；看完走去找村長交接（看不了也照樣交代，村長才不會亂猜圖片內容）。"""
+        await self.bus.publish("appraise.started", run_id=run_id, agent=APPRAISER_ID, count=len(images), relook=relook)
+        looked = await appraise(self.llm, message, images, relook, history[-1] if history else None)
+        await self.bus.publish("appraise.finished", run_id=run_id, agent=APPRAISER_ID, **looked.to_dict())
+        await self.bus.publish("agent.handoff", run_id=run_id, from_agent=APPRAISER_ID, to_agent=MAYOR)
+        return looked
+
     async def _review_loop(
         self, run_id: str, message: str, plan: Plan, results: dict[str, StepResult], reviews: list[Review],
         rules: VillageRules, history: list[Turn] | None = None,
@@ -306,7 +337,9 @@ class Runner:
                 Leaf(s.id, self._name(s.agent), s.instruction, results[s.id].output) for s in leaf_steps(plan)
             ]
             await emit("review.started", run_id=run_id, agent=REVIEWER_ID, round=round_ + 1)
-            rv = await review(self.llm, message, leaves, rules.reviewer_target, history[-1:] if history else None)
+            rv = await review(
+                self.llm, message, leaves, rules.reviewer_target, history[-1:] if history else None, _APPRAISAL.get()
+            )
             if rv is None:
                 await emit("review.finished", run_id=run_id, agent=REVIEWER_ID, skipped=True, reason="審核員無法使用，略過審核")
                 return
