@@ -79,6 +79,8 @@ extra-agents/report-maker/
       Excel（月營運數據 30 列＋分店資料）、txt（指標名詞解釋與目標值）、PDF（區經理檢討報告，數字取自 Excel，可交叉比對）
 - [x] 部署實測發現：讀 PDF 時容器當掉（exit 132 SIGILL）——pdfminer 載入 cryptography 50，aarch64 wheel 在本機 Docker VM 不能跑；
       釘 `cryptography<47`（同村子）。測試網頁的斷線訊息加上「agent 可能當掉，看 docker-compose logs」提示
+- [x] 測試網頁的「記住設定」改成瀏覽器專屬、無法匯出的金鑰（IndexedDB）加密，打開自動帶入、不用密碼（使用者回饋：
+      每次都要輸入密碼解開多此一舉）；舊的密碼格式解開一次自動轉換。台灣史專家的測試網頁一起改
 - [ ] 使用者部署實測
 
 ### R2：村子附檔（主專案）

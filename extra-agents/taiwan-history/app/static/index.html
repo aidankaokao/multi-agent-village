@@ -45,9 +45,9 @@
     <details id="settings-box">
       <summary>⚙️ 連線設定 <span id="settings-state" class="muted"></span></summary>
       <div id="unlock" hidden>
-        <label>已記住的設定是加密的，輸入密碼解開</label>
+        <label>記住設定的方式改了：最後一次輸入以前設的密碼解開，之後打開網頁會自動帶入，不用再輸入密碼</label>
         <div class="row"><input id="unlock-pw" type="password" autocomplete="current-password"><button id="unlock-btn" type="button">解開</button>
-          <button id="forget-btn" type="button" class="ghost">忘記已記住的設定</button></div>
+          <button id="forget-btn" type="button" class="ghost">不要了，重新填</button></div>
         <div id="unlock-msg" class="status bad"></div>
       </div>
       <label>存取 token（agent 的 .env 裡 TH_ACCESS_TOKENS 的其中一個）</label>
@@ -65,15 +65,13 @@
         <button type="button" class="ghost" data-preset="openrouter">填入 OpenRouter</button>
         <button type="button" class="ghost" data-preset="ollama">填入本機 Ollama</button>
       </div>
-      <div class="check"><input id="remember" type="checkbox"><label for="remember" style="margin:0">記住設定（用密碼加密後存在這個瀏覽器）</label></div>
-      <div id="remember-box" hidden>
-        <label id="remember-pw-label">加密用的密碼（至少 6 個字；忘記就只能重新填設定）</label>
-        <input id="remember-pw" type="password" autocomplete="new-password">
-      </div>
-      <div class="row" style="margin-top:10px"><button id="save-btn" type="button">套用</button></div>
+      <div class="check"><input id="remember" type="checkbox"><label for="remember" style="margin:0">記住設定（加密存在這個瀏覽器，下次打開自動帶入）</label></div>
+      <div class="row" style="margin-top:10px"><button id="save-btn" type="button">套用</button>
+        <button id="forget-saved" type="button" class="ghost" hidden>刪除記住的設定</button></div>
       <div id="save-msg" class="status"></div>
       <div class="muted" style="margin-top:6px">不勾「記住」時，設定只存在這個分頁的記憶體裡，重新整理就要重填。
-        勾選時用你的密碼在瀏覽器裡加密（PBKDF2 + AES-GCM）後才存，沒有密碼的人只看得到密文。</div>
+        勾選時用這個瀏覽器專屬、無法匯出的金鑰加密（WebCrypto AES-GCM，金鑰存在瀏覽器的 IndexedDB）後才存：電腦上的檔案是密文，
+        但能用這個瀏覽器打開這個網頁的人都能直接使用這些設定（和瀏覽器記住密碼一樣），公用電腦不要勾。</div>
     </details>
   </div>
 
@@ -94,27 +92,53 @@
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = "th-settings-v1";
 let settings = { token: "", url: "", model: "", key: "", effort: "" };
-let unlockedPw = ""; // 解開記住的設定時用的密碼：再次套用時沿用它重新加密（只在這個分頁的記憶體裡）
 
-// ---------------------------------------------------------------- 加密保存（WebCrypto）
+// ---------------------------------------------------------------- 記住設定（WebCrypto）
+// v2：瀏覽器自己產生、無法匯出的 AES-GCM 金鑰（存在 IndexedDB），打開網頁自動解密，不用輸入密碼。
+// v1（舊版）：使用者自訂密碼（PBKDF2）加密；只用來把舊資料解開一次、轉成 v2。
 const enc = new TextEncoder(), dec = new TextDecoder();
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-async function deriveKey(password, salt) {
-  const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 310000, hash: "SHA-256" }, base,
-    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+function storedBox() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } }
+function keyStore(mode, fn) {
+  return new Promise((ok, fail) => {
+    const open = indexedDB.open("agent-test-page", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("keys");
+    open.onerror = () => fail(open.error);
+    open.onsuccess = () => {
+      const req = fn(open.result.transaction("keys", mode).objectStore("keys"));
+      req.onsuccess = () => ok(req.result); req.onerror = () => fail(req.error);
+    };
+  });
 }
-async function seal(obj, password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(password, salt), enc.encode(JSON.stringify(obj)));
-  return { v: 1, salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+async function deviceKey(create) {
+  let key = await keyStore("readonly", (s) => s.get(STORE_KEY));
+  if (!key && create) {
+    key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]); // false = 不能匯出
+    await keyStore("readwrite", (s) => s.put(key, STORE_KEY));
+  }
+  return key;
 }
-async function unseal(box, password) {
-  const key = await deriveKey(password, unb64(box.salt));
+async function remember(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deviceKey(true), enc.encode(JSON.stringify(obj)));
+  localStorage.setItem(STORE_KEY, JSON.stringify({ v: 2, iv: b64(iv), ct: b64(ct) }));
+}
+async function recall(box) {
+  const key = await deviceKey(false);
+  if (!key) throw new Error("找不到金鑰");
   return JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct))));
 }
-function storedBox() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } }
+async function unsealV1(box, password) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: unb64(box.salt), iterations: 310000, hash: "SHA-256" }, base,
+    { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  return JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct))));
+}
+async function forget() {
+  localStorage.removeItem(STORE_KEY);
+  try { await keyStore("readwrite", (s) => s.delete(STORE_KEY)); } catch {}
+}
 
 // ---------------------------------------------------------------- 設定
 function fillForm() {
@@ -126,73 +150,84 @@ function readForm() {
            key: $("llm-key").value.trim(), effort: $("llm-effort").value };
 }
 function showState() {
-  if (!settings.token && storedBox()) { $("settings-state").textContent = "（🔒 已加密記住，輸入密碼解開）"; return; }
+  const box = storedBox();
+  if (!settings.token && box?.v === 1) { $("settings-state").textContent = "（🔒 舊版記住的設定，輸入密碼解開一次）"; return; }
   const parts = [settings.token ? "token ✓" : "還沒填 token", settings.url && settings.model ? `LLM：${settings.model}` : "沒有 LLM（只會列出資料）"];
+  if (box?.v === 2) parts.push("已記住");
   $("settings-state").textContent = "（" + parts.join("、") + "）";
+  $("forget-saved").hidden = !box;
 }
 document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
   if (b.dataset.preset === "openrouter") { $("llm-url").value = "https://openrouter.ai/api/v1"; }
   else { $("llm-url").value = "http://host.docker.internal:11434/v1"; $("llm-key").value = ""; $("llm-model").value ||= "qwen3.5:9b"; $("llm-effort").value = "none"; }
 }));
-function syncRemember() {
-  $("remember-box").hidden = !$("remember").checked;
-  $("remember-pw-label").textContent = unlockedPw
-    ? "加密用的密碼（留空 = 沿用目前的密碼；要換密碼就填新的，至少 6 個字）"
-    : "加密用的密碼（至少 6 個字；忘記就只能重新填設定）";
-}
-$("remember").addEventListener("change", syncRemember);
 $("save-btn").addEventListener("click", async () => {
   settings = readForm();
   $("save-msg").className = "status ok";
   if ($("remember").checked) {
     if (!window.isSecureContext) { $("save-msg").className = "status bad"; $("save-msg").textContent = "瀏覽器的加密功能只能在 localhost 或 https 使用；請用 http://localhost:… 打開這個網頁"; return; }
-    const pw = $("remember-pw").value || unlockedPw;
-    if (pw.length < 6) { $("save-msg").className = "status bad"; $("save-msg").textContent = "密碼至少 6 個字"; $("remember-pw").focus(); return; }
-    localStorage.setItem(STORE_KEY, JSON.stringify(await seal(settings, pw)));
-    unlockedPw = pw;
-    $("remember-pw").value = "";
-    syncRemember();
-    $("save-msg").textContent = "已套用，並加密記住在這個瀏覽器。";
+    await remember(settings);
+    $("save-msg").textContent = "已套用，並加密記住在這個瀏覽器（下次打開自動帶入）。";
   } else {
-    localStorage.removeItem(STORE_KEY);
-    unlockedPw = "";
+    await forget();
     $("save-msg").textContent = "已套用（只在這個分頁，重新整理要重填）。";
   }
+  $("unlock").hidden = true;
   showState();
 });
+$("forget-saved").addEventListener("click", async () => {
+  if (!confirm("刪除這個瀏覽器記住的設定？（目前分頁裡的設定還能用，重新整理後就要重填）")) return;
+  await forget(); $("remember").checked = false; showState();
+  $("save-msg").className = "status ok"; $("save-msg").textContent = "已刪除記住的設定。";
+});
+// 舊版（密碼加密）的設定：解開一次並轉成新版，之後不用再輸入密碼
 $("unlock-btn").addEventListener("click", async () => {
   try {
-    const pw = $("unlock-pw").value;
-    settings = await unseal(storedBox(), pw);
-    unlockedPw = pw;
-    fillForm(); showState(); $("unlock").hidden = true; $("unlock-pw").value = ""; $("remember").checked = true;
-    syncRemember();
-    $("unlock-msg").textContent = "";
-    $("save-msg").className = "status ok"; $("save-msg").textContent = "已解開記住的設定，可以直接使用（不用再按「套用」）。";
-    $("settings-box").open = false;
-    const next = pending; pending = null;
-    if (next && settings.token) next(); // 剛剛被擋下來的動作：解開後直接接著做
-  } catch { $("unlock-msg").textContent = "密碼不對"; $("unlock-pw").select(); }
+    settings = await unsealV1(storedBox(), $("unlock-pw").value);
+  } catch { $("unlock-msg").textContent = "密碼不對"; $("unlock-pw").select(); return; }
+  await remember(settings);
+  fillForm(); $("unlock").hidden = true; $("unlock-pw").value = ""; $("remember").checked = true; showState();
+  $("save-msg").className = "status ok"; $("save-msg").textContent = "已解開並改成新的記住方式，之後打開會自動帶入。";
+  $("settings-box").open = false;
+  const next = pending; pending = null;
+  if (next && settings.token) next(); // 剛剛被擋下來的動作：解開後直接接著做
 });
 $("unlock-pw").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); $("unlock-btn").click(); } });
+$("forget-btn").addEventListener("click", async () => {
+  await forget(); $("unlock").hidden = true; $("remember").checked = false; showState(); $("token").focus();
+});
 
-// 還沒有可用的設定：有加密記住的設定 → 請使用者輸入密碼（解開後自動接著做）；沒有 → 請使用者填設定
+// 還沒有可用的設定：舊版記住的設定 → 請使用者輸入密碼（解開後自動接著做）；沒有 → 請使用者填設定
 let pending = null;
 function needSettings(action) {
   $("settings-box").open = true;
-  if (storedBox() && !unlockedPw) {
+  if (storedBox()?.v === 1) {
     pending = action;
-    $("unlock-msg").textContent = "設定已加密記住：輸入密碼按「解開」（或 Enter），解開後會自動繼續。";
+    $("unlock-msg").textContent = "輸入以前設的密碼按「解開」（或 Enter），解開後會自動繼續；之後就不用再輸入。";
     $("unlock-pw").focus();
   } else {
     $("save-msg").className = "status bad"; $("save-msg").textContent = "先填存取 token 並按「套用」";
     $("token").focus();
   }
 }
-$("forget-btn").addEventListener("click", () => {
-  if (!confirm("刪除這個瀏覽器記住的設定？")) return;
-  localStorage.removeItem(STORE_KEY); unlockedPw = ""; $("unlock").hidden = true; $("remember").checked = false; syncRemember();
-});
+
+// 打開網頁：自動帶入記住的設定
+async function loadSaved() {
+  const box = storedBox();
+  if (box?.v === 2) {
+    try {
+      settings = await recall(box);
+      fillForm(); $("remember").checked = true;
+    } catch {
+      await forget(); // 金鑰不見了（例如清除過網站資料）：只能重填
+      $("save-msg").className = "status bad"; $("save-msg").textContent = "記住的設定讀不出來（可能清除過瀏覽器資料），請重新填一次。";
+    }
+  } else if (box?.v === 1) {
+    $("unlock").hidden = false;
+  }
+  if (!settings.token) { $("settings-box").open = true; (box?.v === 1 ? $("unlock-pw") : $("token")).focus(); }
+  showState();
+}
 
 // ---------------------------------------------------------------- 呼叫 agent API
 function headers() {
@@ -298,9 +333,7 @@ async function health() {
   } catch { $("health").className = "status bad"; $("health").textContent = "連不上服務"; }
 }
 health();
-if (storedBox()) { $("unlock").hidden = false; $("settings-box").open = true; $("unlock-pw").focus(); }
-else if (!settings.token) $("settings-box").open = true;
-showState();
+loadSaved();
 </script>
 </body>
 </html>
