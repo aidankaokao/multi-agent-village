@@ -123,8 +123,12 @@ export interface AgentInfo {
 
 export const village = {
   agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
-  chat: (message: string, conversation_id: string | null) =>
-    api<{ run_id: string; conversation_id: string }>("/api/chat", { method: "POST", json: { message, conversation_id } }),
+  /** images：data URL（前端已縮圖成 JPEG） */
+  chat: (message: string, conversation_id: string | null, images: string[] = []) =>
+    api<{ run_id: string; conversation_id: string; image_ids: string[] }>("/api/chat", {
+      method: "POST",
+      json: { message, conversation_id, images: images.map((data) => ({ data })) },
+    }),
   cancel: (runId: string) => api<{ ok: boolean }>(`/api/chat/${runId}/cancel`, { method: "POST" }),
 };
 
@@ -192,6 +196,7 @@ export interface VillageRules {
   memory_enabled: boolean;
   memory_auto: boolean;
   memory_max: number;
+  max_images: number;
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -347,6 +352,8 @@ export interface AuthStatus {
   allow_registration: boolean;
   user: Me | null;
   llm_ready: boolean; // 自己的 LLM 設定好了沒（每個帳號用自己的 LLM 與額度）
+  vision_ready: boolean; // 有通過看圖測驗的視覺模型（vision 分級）→ 可以附圖
+  max_images: number; // 村規：每次最多附幾張圖（0 = 不開放）
 }
 
 export interface UserRow extends Me {
@@ -391,7 +398,7 @@ export interface MessageRow {
   content: string;
   run_id: string | null;
   status: "done" | "error" | "cancelled";
-  meta: { attachments?: Attachment[]; agents?: string[]; review?: boolean | null } | null;
+  meta: { attachments?: Attachment[]; agents?: string[]; review?: boolean | null; images?: string[] } | null;
   created_at: string;
 }
 

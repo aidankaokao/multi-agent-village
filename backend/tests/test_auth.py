@@ -31,7 +31,7 @@ async def test_first_user_is_admin_then_members(app):
     a, db = app
     async with client(a) as admin, client(a) as bob, client(a) as anon:
         st = (await anon.get("/api/auth/status")).json()
-        assert st == {"setup_required": True, "allow_registration": True, "user": None, "llm_ready": False}
+        assert st == {"setup_required": True, "allow_registration": True, "user": None, "llm_ready": False, "vision_ready": False, "max_images": 3}
 
         r = await admin.post("/api/auth/register", json={"username": "Aidan", "password": "password123", "display_name": "艾登"})
         assert r.status_code == 200 and r.json()["first"] and r.json()["user"]["role"] == "admin"

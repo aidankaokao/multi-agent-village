@@ -3,7 +3,7 @@ import { AccountsPanel, DeleteAccountModal, PasswordModal } from "./accounts/Acc
 import { auth, conversations, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type ConversationRow, type Me } from "./api";
 import { LoginPage } from "./auth/LoginPage";
 import { MemoryPanel } from "./memory/MemoryPanel";
-import { ChatPanel } from "./chat/ChatPanel";
+import { ChatPanel, type Vision } from "./chat/ChatPanel";
 import { initialRuns, runsReducer } from "./chat/runs";
 import { useVillageEvents } from "./events";
 import { RulesPanel } from "./rules/RulesPanel";
@@ -31,7 +31,7 @@ export function App() {
     auth
       .status()
       .then(setStatus)
-      .catch(() => setStatus({ setup_required: false, allow_registration: false, user: null, llm_ready: false }));
+      .catch(() => setStatus({ setup_required: false, allow_registration: false, user: null, llm_ready: false, vision_ready: false, max_images: 0 }));
   }, []);
 
   useEffect(() => {
@@ -47,6 +47,7 @@ export function App() {
       key={status.user.id}
       me={status.user}
       llmReady={status.llm_ready}
+      vision={{ ready: status.vision_ready, maxImages: status.max_images }}
       onRecheck={load}
       onLogout={async () => {
         await auth.logout().catch(() => {});
@@ -60,7 +61,19 @@ export function App() {
  * 版面：像素地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
  * 右下 💬 打開問答視窗。抽屜與問答視窗同時只開一個（進行中的問答不受影響）。
  */
-function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: boolean; onRecheck: () => void; onLogout: () => void }) {
+function VillageApp({
+  me,
+  llmReady,
+  vision,
+  onRecheck,
+  onLogout,
+}: {
+  me: Me;
+  llmReady: boolean;
+  vision: Vision;
+  onRecheck: () => void;
+  onLogout: () => void;
+}) {
   const [deleting, setDeleting] = useState(false);
   const pages = PAGES.filter((p) => !p.admin || me.role === "admin");
   const [userMenu, setUserMenu] = useState(false);
@@ -104,7 +117,7 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
   const busy = runs.order.some((id) => ["planning", "running"].includes(runs.byId[id].status));
 
   const openPage = (p: Page | null) => {
-    if (page === "llm" && p !== "llm") onRecheck(); // 離開 LLM 設定時重新確認設定好了沒
+    if ((page === "llm" || page === "rules") && p !== page) onRecheck(); // 離開 LLM 設定 / 村規時重新確認（LLM、視覺模型、附圖張數）
     setPage(p);
     setMenuOpen(false);
     if (p) setChatOpen(false);
@@ -113,8 +126,7 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
     const next = !chatOpen;
     setChatOpen(next);
     if (next) {
-      setPage(null);
-      setMenuOpen(false);
+      openPage(null);
       setUnseen(false);
     }
   };
@@ -132,7 +144,7 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || document.querySelector(".modal-backdrop")) return;
       if (menuOpen) setMenuOpen(false);
-      else if (page) setPage(null);
+      else if (page) openPage(null);
       else if (chatOpen) setChatOpen(false);
     };
     window.addEventListener("keydown", onKey);
@@ -167,10 +179,10 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
       .catch(() => {});
   }, [openConversation]);
 
-  const send = async (message: string) => {
-    const { run_id, conversation_id } = await village.chat(message, convId);
+  const send = async (message: string, images: string[]) => {
+    const { run_id, conversation_id } = await village.chat(message, convId, images);
     if (conversation_id !== convId) setConvId(conversation_id);
-    dispatch({ type: "local", run_id, message });
+    dispatch({ type: "local", run_id, message: message || "這張圖片裡有什麼？", images });
     loadConvs();
   };
 
@@ -275,6 +287,7 @@ function VillageApp({ me, llmReady, onRecheck, onLogout }: { me: Me; llmReady: b
           runs={runs}
           agents={agents}
           onSend={send}
+          vision={vision}
           onReset={() => openConversation(null)}
           conversations={convs}
           currentConversation={convId}

@@ -21,6 +21,7 @@ class VillageRules(BaseModel):
     memory_enabled: bool = True  # 問答時帶入長期記憶
     memory_auto: bool = True  # 書記在問答後自動記錄
     memory_max: int = Field(default=10, ge=1, le=30)  # 每次最多帶入幾條記憶
+    max_images: int = Field(default=3, ge=0, le=10)  # 問答每次最多附幾張圖（0 = 不開放附圖）
 
 
 class RulesStore:

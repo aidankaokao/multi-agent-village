@@ -133,7 +133,7 @@ async def test_recent_turns_skips_failed_and_current(app):
 
         s.add(User(id=uid, username="u1", display_name="u1", password_hash="x"))
         await s.commit()
-    conv = await store.start_turn(uid, None, "第一題")
+    conv = (await store.start_turn(uid, None, "第一題")).conversation_id
     await store.finish_turn(conv, "r1", "第一個回答", "done")
     await store.start_turn(uid, conv, "第二題")
     await store.finish_turn(conv, "r2", "", "error")

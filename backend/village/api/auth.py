@@ -45,6 +45,8 @@ async def auth_status(request: Request, response: Response) -> dict:
         "allow_registration": n == 0 or ctx.rules.current.allow_registration,
         "user": user.to_dict() if user else None,
         "llm_ready": bool(user) and await ctx.llm.has_models(user.id),  # 還沒設定自己的 LLM → 前端提醒
+        "vision_ready": bool(user) and await ctx.llm.has_vision(user.id),  # 有通過看圖測驗的視覺模型 → 可以附圖
+        "max_images": ctx.rules.current.max_images,
     }
 
 

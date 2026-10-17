@@ -7,17 +7,22 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from village.api import images as image_api
 from village.core import scribe
-from village.llm.service import NOT_CONFIGURED, llm_user
+from village.llm.service import NO_VISION, NOT_CONFIGURED, llm_user
 from village.security.auth import CurrentUser, require_user
 
 router = APIRouter(prefix="/api", tags=["chat"], dependencies=[Depends(require_user)])
 log = logging.getLogger("village.chat")
 
 
+DEFAULT_IMAGE_QUESTION = "這張圖片裡有什麼？"
+
+
 class ChatBody(BaseModel):
-    message: str = Field(min_length=1, max_length=2000)
+    message: str = Field(default="", max_length=2000)  # 有附圖時可以留空
     conversation_id: str | None = None  # 接著哪段對話；不填 = 開新對話
+    images: list[image_api.ImageIn] = Field(default_factory=list, max_length=image_api.HARD_MAX_IMAGES)
 
 
 class AgentOut(BaseModel):
@@ -56,10 +61,17 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     ctx = request.app.state.ctx
     if not await ctx.llm.has_models(me.id):
         raise HTTPException(status.HTTP_409_CONFLICT, NOT_CONFIGURED)  # 用自己的 LLM：還沒設定就先提醒
-    run_id = uuid.uuid4().hex[:12]
-    message = body.message.strip()
-    conv_id = await ctx.conversations.start_turn(me.id, body.conversation_id, message)
     rules = ctx.rules.current
+    message = body.message.strip()
+    images = image_api.decode(body.images, rules.max_images)
+    if not message and not images:
+        raise HTTPException(422, "請輸入問題")
+    if images and not await ctx.llm.has_vision(me.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, NO_VISION)  # 沒有視覺模型看不懂圖，先提醒
+    message = message or DEFAULT_IMAGE_QUESTION
+    run_id = uuid.uuid4().hex[:12]
+    started = await ctx.conversations.start_turn(me.id, body.conversation_id, message, images)
+    conv_id = started.conversation_id
     history = await ctx.conversations.recent_turns(conv_id, rules.context_turns)
     memories = [m.content for m in await ctx.memories.relevant(me.id, message, rules.memory_max)] if rules.memory_enabled else []
     await ctx.trace.start(run_id, message, me.id)  # 先建立紀錄：回傳 run_id 後馬上就查得到
@@ -92,7 +104,7 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     ctx.active[run_id] = task
     task.add_done_callback(ctx.tasks.discard)
     task.add_done_callback(lambda _: (ctx.active.pop(run_id, None), ctx.owners.pop(run_id, None)))
-    return {"run_id": run_id, "conversation_id": conv_id}
+    return {"run_id": run_id, "conversation_id": conv_id, "image_ids": started.image_ids}
 
 
 async def take_notes_after(ctx, user_id: str, run_id: str, message: str) -> None:

@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ConversationRow } from "../api";
-import { Attachments } from "../ui/Attachments";
+import { Attachments, ImageStrip } from "../ui/Attachments";
+import { imageFiles, prepareImage } from "./prepareImage";
 import { leafIds, type RunsState, type RunView, type StepView } from "./runs";
+
+/** 能不能附圖：要有通過看圖測驗的視覺模型；張數上限由村規決定 */
+export interface Vision {
+  ready: boolean;
+  maxImages: number;
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   llm: "村長規劃",
@@ -27,7 +34,8 @@ const EXAMPLES = [
 interface Props {
   runs: RunsState;
   agents: AgentInfo[];
-  onSend: (message: string) => Promise<void>;
+  onSend: (message: string, images: string[]) => Promise<void>;
+  vision: Vision;
   onReset: () => void;
   onCancel: (runId: string) => Promise<void>;
   onOpenTrace: (runId: string) => void;
@@ -43,6 +51,7 @@ export function ChatPanel({
   runs,
   agents,
   onSend,
+  vision,
   onReset,
   onCancel,
   onOpenTrace,
@@ -58,6 +67,10 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [images, setImages] = useState<string[]>([]); // 準備附上的圖（已縮圖的 data URL）
+  const [preparing, setPreparing] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 使用者往上捲去看舊內容時，串流不要把畫面拉回底部
   const names: Record<string, string> = { mayor: "村長", reviewer: "審核員", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
@@ -69,15 +82,39 @@ export function ChatPanel({
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [runs]);
 
+  const attachHint = !vision.ready
+    ? "附圖需要視覺模型：到「LLM 設定」對模型做看圖測驗，通過後加入 vision 分級"
+    : vision.maxImages === 0
+      ? "村規目前不開放附圖"
+      : `附圖（最多 ${vision.maxImages} 張；也可以直接貼上或拖曳進來）`;
+
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    if (!vision.ready || vision.maxImages === 0) return setError(attachHint);
+    const room = vision.maxImages - images.length;
+    if (room <= 0) return setError(`一次最多附 ${vision.maxImages} 張圖`);
+    setPreparing(true);
+    setError(files.length > room ? `一次最多附 ${vision.maxImages} 張圖，只加入前 ${room} 張` : "");
+    try {
+      const ready = await Promise.all(files.slice(0, room).map(prepareImage));
+      setImages((xs) => [...xs, ...ready].slice(0, vision.maxImages));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPreparing(false);
+    }
+  };
+
   const send = async (message: string) => {
     const m = message.trim();
-    if (!m || sending) return;
+    if ((!m && !images.length) || sending || preparing) return;
     setSending(true);
     setError("");
     stick.current = true;
     try {
-      await onSend(m);
+      await onSend(m, images);
       setText("");
+      setImages([]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -92,7 +129,22 @@ export function ChatPanel({
   };
 
   return (
-    <div className="chat">
+    <div
+      className={`chat ${dragging ? "dragging" : ""}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDragging(false);
+        addFiles(imageFiles(e.dataTransfer.files));
+      }}
+    >
+      {dragging && <div className="drop-hint">{vision.ready && vision.maxImages > 0 ? "放開就附上圖片" : attachHint}</div>}
       <div className="chat-bar">
         <button className="link conv-toggle" onClick={() => setListOpen(!listOpen)} title="對話紀錄">
           {listOpen ? "▾" : "▸"} 📂 {current ? current.title : "新對話"}
@@ -197,11 +249,35 @@ export function ChatPanel({
             )}
           </p>
         )}
+        {(images.length > 0 || preparing) && (
+          <div className="pending-images">
+            {images.map((src, i) => (
+              <figure key={i}>
+                <img src={src} alt={`附圖 ${i + 1}`} />
+                <button type="button" title="移除" onClick={() => setImages((xs) => xs.filter((_, j) => j !== i))}>
+                  ✕
+                </button>
+              </figure>
+            ))}
+            {preparing && <span className="muted">縮圖中…</span>}
+          </div>
+        )}
         <textarea
           rows={3}
           value={text}
-          placeholder="輸入問題，Enter 送出、Shift+Enter 換行；可用 @poet、@jester 直接指名"
+          placeholder={
+            images.length
+              ? "問問關於這張圖的問題（留空 = 這張圖片裡有什麼？）"
+              : "輸入問題，Enter 送出、Shift+Enter 換行；可用 @poet、@jester 直接指名"
+          }
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            const files = imageFiles(e.clipboardData.items);
+            if (files.length) {
+              e.preventDefault();
+              addFiles(files);
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -210,7 +286,27 @@ export function ChatPanel({
           }}
         />
         <div className="row">
-          <button type="submit" disabled={sending || !text.trim()} style={{ flex: 1 }}>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles(imageFiles(e.target.files));
+              e.target.value = ""; // 同一張圖可以再選一次
+            }}
+          />
+          <button
+            type="button"
+            className="attach"
+            title={attachHint}
+            disabled={!vision.ready || vision.maxImages === 0 || preparing}
+            onClick={() => fileInput.current?.click()}
+          >
+            🖼️
+          </button>
+          <button type="submit" disabled={sending || preparing || (!text.trim() && !images.length)} style={{ flex: 1 }}>
             {sending ? "送出中…" : busy ? "送出（村民忙碌中）" : "送出"}
           </button>
           {busy && (
@@ -274,7 +370,10 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
 
   return (
     <div className="run">
-      <div className="bubble user">{run.message}</div>
+      <div className="bubble user">
+        {run.images && run.images.length > 0 && <ImageStrip urls={run.images} />}
+        {run.message}
+      </div>
 
       <div className="bubble village">
         <div className="row">

@@ -13,6 +13,7 @@ from village.api.llm import router as llm_router
 from village.api.villagers import router as villagers_router
 from village.api.conversations import router as conversations_router
 from village.api.memories import router as memories_router
+from village.api.images import router as images_router
 from village.api.runs import router as runs_router
 from village.api.workshop import router as workshop_router
 from village.config import Settings
@@ -110,6 +111,7 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(conversations_router)
     app.include_router(memories_router)
+    app.include_router(images_router)
 
     @app.get("/api/health")
     async def health():

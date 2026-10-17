@@ -154,6 +154,20 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ChatImage(Base):
+    """使用者在問答附的圖片（前端已縮圖、去掉 EXIF）。跟著對話保存，刪對話或帳號時一起刪；只有本人看得到。"""
+
+    __tablename__ = "chat_images"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    mime: Mapped[str] = mapped_column(String(32))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    size: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Memory(Base):
     """長期記憶：關於使用者本人、跨對話有效的事（名字、偏好、事實）。由書記自動記錄或使用者手動新增。"""
 

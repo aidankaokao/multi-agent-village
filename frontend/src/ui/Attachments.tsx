@@ -52,3 +52,31 @@ export function Attachments({ items }: { items?: Attachment[] }) {
     </div>
   );
 }
+
+/** 使用者附的圖：小縮圖排一排，點一下放大 */
+export function ImageStrip({ urls }: { urls: string[] }) {
+  const [zoom, setZoom] = useState<number | null>(null);
+  return (
+    <div className="image-strip">
+      {urls.map((u, i) => (
+        <img key={u + i} src={u} alt={`附圖 ${i + 1}`} title="點一下放大" onClick={() => setZoom(i)} />
+      ))}
+      {zoom !== null && (
+        <Modal title={`附圖 ${zoom + 1} / ${urls.length}`} onClose={() => setZoom(null)} wide>
+          <img className="zoomed" src={urls[zoom]} alt={`附圖 ${zoom + 1}`} />
+          {urls.length > 1 && (
+            <div className="row">
+              <button className="link" disabled={zoom === 0} onClick={() => setZoom(zoom - 1)}>
+                ← 上一張
+              </button>
+              <span style={{ flex: 1 }} />
+              <button className="link" disabled={zoom === urls.length - 1} onClick={() => setZoom(zoom + 1)}>
+                下一張 →
+              </button>
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}

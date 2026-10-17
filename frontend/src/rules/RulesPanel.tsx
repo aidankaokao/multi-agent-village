@@ -110,6 +110,13 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>🖼️ 附圖</h3>
+        <Field label="每次問答最多附幾張圖" hint="0～10；0 = 不開放附圖。圖片會送給視覺模型，張數越多越花 token">
+          <NumInput value={draft.max_images} min={0} max={10} onChange={(v) => set({ max_images: v ?? 3 })} />
+        </Field>
+      </section>
+
+      <section>
         <h3>📜 執行紀錄</h3>
         <Field label="保留最近幾筆" hint="超過的舊紀錄會自動刪除；10～10000">
           <NumInput value={draft.keep_runs} min={10} max={10000} step={100} onChange={(v) => set({ keep_runs: v ?? 500 })} />

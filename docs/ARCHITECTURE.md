@@ -250,6 +250,10 @@ class BaseAgent(Protocol):
 - 看圖測驗（`llm/vision_test.py`）：純 Python 畫 PNG（隨機四位數字＋紅藍綠紫其中一色的圖形），
   數字與顏色都答對才通過，記在 `llm_models.vision_verified_at`；沒通過就清掉（vision 分級會略過它）。
   原因：有些模型收到圖片不會報錯，而是忽略圖片亂答。
+- 問答附圖：前端 `chat/prepareImage.ts` 縮圖（長邊 ≤ 1568px）並畫到 canvas 重新輸出 JPEG（EXIF / GPS 不會送出）；
+  `POST /api/chat` 的 `images`（data URL）由 `api/images.py` 把關：看檔頭判斷格式（PNG / JPEG / WebP / GIF）、
+  每張 ≤ 2MB、張數 ≤ 村規 `max_images`；沒有可用的視覺模型回 409。圖片存 `chat_images`（user_id、conversation_id 都 CASCADE），
+  使用者訊息的 `meta.images` 記 id；`GET /api/images/{id}` 只有上傳的人拿得到（管理員也不行）。nginx 上限 12MB。
 
 #### 資料表
 

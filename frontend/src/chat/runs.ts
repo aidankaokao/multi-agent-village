@@ -33,6 +33,7 @@ export interface ReviewView {
 export interface RunView {
   id: string;
   message: string;
+  images?: string[]; // 使用者附的圖（剛送出時是 data URL，從紀錄載入時是 /api/images/{id}）
   status: "planning" | "running" | "done" | "failed" | "cancelled";
   fromHistory?: boolean; // 從對話紀錄載入（沒有執行過程，只有結果）
   scribing?: boolean; // 書記正在記錄
@@ -58,7 +59,7 @@ export const initialRuns: RunsState = { order: [], byId: {} };
 
 type Action =
   | { type: "load"; messages: MessageRow[] } // 切換對話 / 重新整理：用存起來的訊息重建畫面
-  | { type: "local"; run_id: string; message: string }
+  | { type: "local"; run_id: string; message: string; images?: string[] }
   | { type: "event"; event: VillageEvent }
   | { type: "reset" };
 
@@ -82,6 +83,7 @@ export function runsFromMessages(messages: MessageRow[]): RunsState {
     const t0 = Date.parse(q.created_at);
     const run: RunView = {
       ...newRun(id, q.content),
+      images: q.meta?.images?.map((i) => `/api/images/${i}`),
       startedAt: t0,
       finishedAt: a ? Date.parse(a.created_at) : t0,
       fromHistory: true,
@@ -103,8 +105,12 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
   if (action.type === "reset") return initialRuns;
   if (action.type === "load") return runsFromMessages(action.messages);
   if (action.type === "local") {
-    if (state.byId[action.run_id]) return state;
-    const run = newRun(action.run_id, action.message);
+    const existing = state.byId[action.run_id];
+    if (existing) {
+      // 事件比 POST 回應早到時 run 已經建好了，補上圖片
+      return action.images?.length ? { ...state, byId: { ...state.byId, [existing.id]: { ...existing, images: action.images } } } : state;
+    }
+    const run = { ...newRun(action.run_id, action.message), images: action.images };
     return { order: [...state.order, run.id], byId: { ...state.byId, [run.id]: run } };
   }
 
