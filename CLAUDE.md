@@ -3,31 +3,28 @@
 像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者的問題。
 
 - 架構：`docs/ARCHITECTURE.md`（全景、事件表、加密、帳號 / 對話 / 記憶、目錄結構）
-- 外接 agent：`extra-agents/`（每個子資料夾是獨立服務，各有 PLAN.md）
+- 外接 agent：`extra-agents/`（每個子資料夾是獨立服務，各有 PLAN.md、README、docker-compose、build.sh）
 - 階段規劃：`docs/ROADMAP.md`
 - 素材規格：`docs/SPRITES.md`
 
 ## 目前進度
 
-Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
-帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。DB 遷移到 0009。
+全部經使用者部署實測。DB 遷移到 0009。
 
-**Phase 5V 視覺模型完成**（使用者已實測）：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、小圖放大、`chat_images` 表、
-`/api/images/{id}` 只有本人看得到）、系統角色「鑑定師」看圖（清單類一律完整抄寫、追問時重看原圖）。
-**Phase 6G 生圖完成**（使用者已實測 10 個步驟）：生圖模型只接 OpenRouter（`POST /images`）、`image` 分級、生圖測驗、
-畫家村民（`tools/painter.py` + `core/painter.py`）、村規張數上限、畫作 14 天過期。
-**修圖**剛做完、等使用者實測：附圖或上一張畫作當參考圖（`input_references`），畫家判斷 `use_reference`。
+- **Phase 0～5**：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
+  帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。
+- **Phase 5V 視覺**：`vision` 分級與看圖測驗、💬 附圖（前端縮圖去 EXIF、小圖放大、`chat_images`、`/api/images/{id}` 只有本人看得到）、
+  系統角色「鑑定師」看圖（清單類一律完整抄寫、追問時重看原圖）。
+- **Phase 6G 生圖**：只接 OpenRouter（`POST /images`）、`image` 分級、生圖測驗、畫家村民（`tools/painter.py` + `core/painter.py`）、
+  村規張數上限、畫作 14 天過期、修圖（附圖或上一張畫作當參考圖，`input_references`）。
+- **Phase 6 台灣史專家（外接 agent）**：`extra-agents/taiwan-history/`（獨立專案，規劃與進度在它的 `PLAN.md`）。
+  中文維基 175 篇 → bge-m3 + SQLite 混合檢索 → 呼叫端自帶 LLM（header）→ 附引用的回答；資料沒有的可用模型知識補充並標示
+  「以下非資料內容：」；A2A（`message/send`、`message/stream`）、存取 token、簡易測試網頁、獨立 docker-compose（127.0.0.1:8100）。
+  村子這邊叫「**駐村專家**」（村民 `kind: remote`）：邀請 / 管理介面、token 加密、健康檢查與外出中、村長派工、共享提問者 LLM 的開關、
+  串流顯示。待改進（以後再說）：「起因 / 近因」檢索、測試題、回答風格。
+- **地圖互動**：點村民開始問答（自動 @）、村民冒泡自我介紹、村民之間聊天（頻率使用者覺得剛好）。
 
-修圖已實測通過。
-
-**進行中：Phase 6 台灣史專家**（外接 agent），規劃與進度在 `extra-agents/taiwan-history/PLAN.md`（每完成一步要更新）。
-- 複雜的 agent 放 `extra-agents/<名稱>/` 獨立開發、獨立部署（自己的程式、docker-compose、.env），不 import 村子的程式碼；
-  完成後村子用 HTTP（A2A）接成外接村民（T4，改村子這邊）。外接的 agent 在村子裡叫「**駐村專家**」。
-- T1～T3 完成並經使用者部署實測（容器 127.0.0.1:8100）。T4-A（駐村專家的資料與管理介面）使用者已實測；
-  T4-B（村長派工、A2A 呼叫、共享 LLM、引用來源、外出中動畫）使用者已實測；之後加上 A2A 串流（`message/stream`），等使用者實測。
-- 使用者沒有台灣史資料：由 Claude 從中文維基百科等公開資料抓取、整理成 Markdown（附來源網址與 CC BY-SA 授權）。
-- 回答範圍、風格、它自己的 LLM 設定等「之後再討論」，先不要自己決定。
-本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
+**下一步**：使用者 compact 後要討論下一步做什麼（還沒決定）。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
 
@@ -89,7 +86,9 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 - 後端：`cd backend && uv run village serve`（127.0.0.1:8000）；測試 `uv run pytest`
 - 前端：`cd frontend && npm run dev`（5173，/api 與 /ws 代理到後端）；型別檢查 `npx tsc -b`
 - 忘記密碼：`village reset-password <帳號>`；直接建管理員：`village create-admin <帳號>`（容器內加 `docker-compose exec backend`）
-- 主金鑰輪替：`village rotate-key`
+- 主金鑰輪替：`village rotate-key`（API key 與駐村專家的存取 token 一起重新加密）
+- 台灣史專家（`extra-agents/taiwan-history/`）：`uv run th index | search | ask | serve | gen-token`、`uv run pytest`；
+  部署 `./build.sh` → 使用者自己 `docker-compose up -d`（在那個資料夾）。兩邊都要更新時：**先部署專家、再部署村子**
 - 重新產生 sprites（角色、裝飾、manifest）：`uv run --with pillow python scripts/gen_placeholder_sprites.py`
 - 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh` → 使用者自己 `docker-compose up -d`；前端綁 0.0.0.0
 - DB 結構用 Alembic（`backend/village/store/migrations/`），啟動時自動 upgrade head；create_all 時代的舊 DB 先標記 0001 再升級。
@@ -111,5 +110,10 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 - Ollama 生圖：2026/1 曾在 macOS 推出實驗性生圖（x/flux2-klein、x/z-image-turbo，只有 CLI），但 2026/10 的原始碼
   （`server/routes.go`、`cmd/cmd.go`）會拒絕生圖模型（「image generation models are not currently supported」），
   本機 0.40.5 也沒有 `/v1/images/generations`。使用者決定先只用 OpenRouter；Ollama 恢復支援再寫轉接（`LLMClient.generate_image`）。
+- pytest 偶爾卡住（某個測試失敗時沒正常收尾）：用 `perl -e 'alarm 90; exec @ARGV' uv run pytest -q` 跑，逐檔找出卡住的；
+  卡住後記得 `pkill -f pytest`。
+- 村子在容器裡：連主機上的服務（Ollama、駐村專家）要用 `host.docker.internal`，不能用 localhost；主機本身不認得這個名稱
+  （本機開發模式的 e2e 測試要用 localhost）。綁 127.0.0.1 的服務從容器用 host.docker.internal 連得到（已實測）。
+- 駐村專家不支援串流時村子會記住（`remote._NO_STREAM`，記憶體），重啟村子才會再試；所以要先部署新版專家再部署村子。
 - 村長規劃的「移除沒要求的步驟」（`prune_unrequested`）：除了關鍵字，也比對指示是不是請求的原話（字的兩兩組合六成以上）；
   會花錢的村民（畫家）重複出現且不是原話的步驟會被移除。

@@ -217,11 +217,18 @@ class BaseAgent(Protocol):
 | `workshop.started` / `workshop.finished` / `workshop.error` | 工匠（`agent: craftsman`）追問或打造村民時的動態 |
 | `memory.started` / `memory.finished` | 書記（`agent: scribe`）在問答後記錄；finished 帶 `added`、`forgot` |
 | `agents.changed` | 村民名冊有變動，村子裡的角色登場 / 換裝 / 離開 |
+| `appraise.started` / `appraise.finished` | 鑑定師（`agent: appraiser`）看圖；finished 帶 `ok`、`text`、`count`、`relook` |
+| `residents.status` | 駐村專家在村 / 外出中改變（`agent`、`status`）；前端重新讀名冊，外出中的半透明並標註 |
 | `run.finished` | 聊天框出現最終答案 |
 
 ```json
 {"type": "agent.started", "run_id": "r_123", "step_id": "s1", "agent": "poet", "ts": "..."}
 ```
+
+**地圖互動**（只在前端，`village/VillageScene.ts`）：閒著的村民每 8～15 秒有人冒一句（台詞由 `App.tsx` 的 `idleLines`
+從名片產生；系統角色的台詞寫在 `MAYOR` 等常數），同時最多兩個泡泡；每 30～60 秒兩位附近的村民湊在一起聊幾句；
+收到 `agent.started` 等事件時立刻中斷去工作。點村民 → App 開新對話並在輸入框填「@id 」（村長不加 @；工匠、審核員、書記、
+鑑定師只自我介紹；外出中的駐村專家說外出中）。
 
 **串流**：`agent.delta` 帶的是「目前為止的完整文字」而不是增量，前端直接取代顯示，所以節流掉事件（每 80ms 最多一次）、
 換備援模型或重做時從頭來過都不會錯亂。半成品已先清掉 `<think>`、遮蔽髒話；正式結果仍以通過 harness 檢查的
@@ -374,9 +381,10 @@ multi-agent-village/
 │       ├── cli.py               # village serve / rotate-key / reset-password / create-admin
 │       ├── config.py            # 環境變數（DATABASE_URL、config_dir、agents_dir）
 │       ├── events.py            # Event bus；claim / for_viewer（事件只給提問者）
-│       ├── api/                 # auth、chat、conversations、memories、runs（含村規）、villagers、workshop、llm
+│       ├── api/                 # auth、chat、conversations、memories、runs（含村規）、villagers、workshop、llm、
+│       │                        # images（附圖 / 畫作）、residents（駐村專家）
 │       ├── core/
-│       │   ├── card.py          # 村民定義（AgentSpec：prompt / tool）
+│       │   ├── card.py          # 村民定義（AgentSpec：prompt / tool / remote）
 │       │   ├── registry.py      # 記憶體中的村民名冊；保留名稱
 │       │   ├── orchestrator.py  # 村長：@指名 → LLM 規劃 → 關鍵字備援 → 直接回覆
 │       │   ├── executor.py      # 執行、平行、逾時、取消、審核迴圈、工具型村民、事件、紀錄
@@ -384,20 +392,26 @@ multi-agent-village/
 │       │   ├── reviewer.py      # 審核員
 │       │   ├── workshop.py      # 工匠：對話打造村民
 │       │   ├── scribe.py        # 書記：長期記憶
+│       │   ├── appraiser.py     # 鑑定師：看圖（vision 分級）
+│       │   ├── painter.py       # 畫家的作畫環境：生圖、張數上限、畫作保存、參考圖
+│       │   ├── remote.py        # 駐村專家：agent card、健康檢查、A2A 呼叫（send / stream）
+│       │   ├── imagefmt.py      # 圖片格式判斷、寬高
 │       │   └── context.py       # 多輪上下文（Turn、prev、指稱判斷）
-│       ├── tools/               # 工具箱：calculator、chart（SVG）、clock
-│       ├── llm/                 # openai_compat、anthropic_client、service（每個帳號的模型 + 備援）
+│       ├── tools/               # 工具箱：calculator、chart（SVG）、clock、painter（生圖）
+│       ├── llm/                 # openai_compat、anthropic_client、service（每個帳號的模型 + 備援）、vision_test
 │       ├── security/            # crypto（AES-256-GCM、主金鑰）、auth（帳號 / session / 權限）、redact
 │       └── store/               # models、migrations（Alembic）、agents、runs、settings（村規）、conversations、memories
-├── agents/                      # 內建範例村民（第一次啟動匯入 DB）：poet、jester、calculator、chart
+├── agents/                      # 內建範例村民（第一次啟動匯入 DB）：poet、jester、calculator、chart、painter
+├── extra-agents/                # 獨立開發、獨立部署的外接 agent（村子裡叫駐村專家）
+│   └── taiwan-history/          # 台灣史專家：corpus（維基 175 篇）、app（RAG、A2A、測試網頁）、自己的 docker-compose
 ├── frontend/
 │   ├── public/assets/sprites/   # 角色四向圖、裝飾（deco/）、UI 泡泡、manifest.json
 │   └── src/
 │       ├── App.tsx              # 登入閘門、滿版村子、⚙️ 選單、抽屜、💬 問答視窗
 │       ├── auth/                # 登入頁（示範村落劇本 demo.ts）
-│       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色）
-│       ├── chat/                # 問答面板、事件 reducer
-│       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊
+│       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色、冒泡與村民互動、點村民）
+│       ├── chat/                # 問答面板、事件 reducer、附圖前處理
+│       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定
 │       └── ui/                  # Modal、Attachments（圖片放大）
 ├── scripts/gen_placeholder_sprites.py
