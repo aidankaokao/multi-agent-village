@@ -3,6 +3,7 @@
 像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者的問題。
 
 - 架構：`docs/ARCHITECTURE.md`（全景、事件表、加密、帳號 / 對話 / 記憶、目錄結構）
+- 外接 agent：`extra-agents/`（每個子資料夾是獨立服務，各有 PLAN.md）
 - 階段規劃：`docs/ROADMAP.md`
 - 素材規格：`docs/SPRITES.md`
 
@@ -17,7 +18,13 @@ Phase 0～5 完成：村民管理與工坊（工匠）、審核員 / 執行紀�
 畫家村民（`tools/painter.py` + `core/painter.py`）、村規張數上限、畫作 14 天過期。
 **修圖**剛做完、等使用者實測：附圖或上一張畫作當參考圖（`input_references`），畫家判斷 `use_reference`。
 
-**下一個話題**：Phase 6 台灣史專家（remote agent，獨立容器 RAG）。使用者有些地方要先討論，**先聽使用者的想法再提方案**。
+修圖已實測通過。
+
+**進行中：Phase 6 台灣史專家**（外接 agent），規劃與進度在 `extra-agents/taiwan-history/PLAN.md`（每完成一步要更新）。
+- 複雜的 agent 放 `extra-agents/<名稱>/` 獨立開發、獨立部署（自己的程式、docker-compose、.env），不 import 村子的程式碼；
+  完成後村子用 HTTP（A2A）接成外接村民（T4，改村子這邊）。
+- 使用者沒有台灣史資料：由 Claude 從中文維基百科等公開資料抓取、整理成 Markdown（附來源網址與 CC BY-SA 授權）。
+- 回答範圍、風格、它自己的 LLM 設定等「之後再討論」，先不要自己決定。
 本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）

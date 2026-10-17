@@ -1,0 +1,7 @@
+# 向量索引、執行資料：可以從 corpus/ 重建，不進 git
+data/
+index/
+*.db
+*.sqlite3
+# 本機設定與 key
+.env

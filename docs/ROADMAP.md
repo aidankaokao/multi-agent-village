@@ -195,13 +195,20 @@ LLM 只負責把請求整理成工具的參數（JSON schema），計算由程�
 
 ---
 
-## Phase 6 — Remote agent：台灣史專家（獨立容器）（暫緩）
+## Phase 6 — 外接 agent：台灣史專家（進行中）
 
-- [ ] `services/taiwan-history/`：獨立 FastAPI 服務，實作 A2A（`/.well-known/agent-card.json` + `message/send`）
-- [ ] 先做基本 RAG（資料切塊 + 向量檢索 + 引用來源），再進化到 GraphRAG / agentic RAG
-- [ ] 主系統 `agents/taiwan-history/agent.yaml` 只填 `kind: remote` + `endpoint`
-- [ ] `docker-compose.yml`：backend、frontend、taiwan-history、(postgres)
-- [ ] 健康檢查：remote agent 掛掉時，村民在村落裡顯示「外出中」並從可用名單移除
+決定：複雜的 agent 獨立開發、獨立部署，放在 `extra-agents/<名稱>/`（自己的程式、docker-compose、.env），
+不放進 `agents/`、不 import 村子的程式碼；開發完成後村子用 HTTP（A2A）把它接成「外接村民」。
+台灣史資料由 Claude 從公開資料（先以中文維基百科為主）抓取整理成文件。
+
+詳細規劃與進度：[`extra-agents/taiwan-history/PLAN.md`](../extra-agents/taiwan-history/PLAN.md)
+
+- [x] T0：規劃、建立資料夾
+- [ ] T1：資料蒐集（條目清單 → 抓取 → Markdown 文件，附來源與授權）
+- [ ] T2：RAG 服務（切塊、向量化、檢索、附引用的回答、測試題）
+- [ ] T3：對外介面（A2A + health + token）與獨立部署
+- [ ] T4：村子這邊的「外接村民」（填網址、讀 agent card、健康檢查、外出中）
+- [ ] T5：GraphRAG / agentic RAG、更多資料來源
 
 ---
 
