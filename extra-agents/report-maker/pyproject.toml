@@ -11,6 +11,8 @@ dependencies = [
     "pdfplumber>=0.11",
     "weasyprint>=62",
     "jinja2>=3.1",
+    # pdfminer（讀 PDF）會載入 cryptography；47+ 的 aarch64 wheel 在本機 Docker VM 會 SIGILL（exit 132），同村子的釘法
+    "cryptography>=43,<47",
 ]
 
 [project.scripts]

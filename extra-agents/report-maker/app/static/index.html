@@ -283,7 +283,10 @@ async function generate() {
       ${data?.llm_error ? `<div class="status bad">LLM：${esc(data.llm_error)}</div>` : ""}
       <details style="margin-top:8px" open><summary>聊天視窗會看到的短版</summary><div class="report">${md(text)}</div></details>`;
   } catch (e) {
-    out.innerHTML = `<div class="status bad">${esc(e.message)}</div>`;
+    // 串流中途斷線（瀏覽器的訊息是 Error in input stream / network error / Failed to fetch 之類）：多半是 agent 當掉或重啟
+    const broken = e instanceof TypeError || /input stream|network|fetch|load failed/i.test(e.message);
+    const hint = broken ? "（和 agent 的連線中途斷了：可能是 agent 當掉或重新啟動，請在 report-maker 資料夾執行 docker-compose logs --tail 50 查看）" : "";
+    out.innerHTML = `<div class="status bad">${esc(e.message)}${hint}</div>`;
   } finally { $("go-btn").disabled = false; }
 }
 $("report-form").addEventListener("submit", (e) => { e.preventDefault(); generate(); });

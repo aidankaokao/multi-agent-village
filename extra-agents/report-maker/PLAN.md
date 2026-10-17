@@ -77,6 +77,8 @@ extra-agents/report-maker/
 - [x] 單元測試 24 個（不需要 WeasyPrint、不連 LLM）；本機實測 qwen3.5:9b：3 份範例檔約 2 分半，數字都正確
 - [x] 測試用範例檔（`samples/`，`make_samples.py` 產生）：連鎖咖啡店 5 家分店 2025 上半年——
       Excel（月營運數據 30 列＋分店資料）、txt（指標名詞解釋與目標值）、PDF（區經理檢討報告，數字取自 Excel，可交叉比對）
+- [x] 部署實測發現：讀 PDF 時容器當掉（exit 132 SIGILL）——pdfminer 載入 cryptography 50，aarch64 wheel 在本機 Docker VM 不能跑；
+      釘 `cryptography<47`（同村子）。測試網頁的斷線訊息加上「agent 可能當掉，看 docker-compose logs」提示
 - [ ] 使用者部署實測
 
 ### R2：村子附檔（主專案）
