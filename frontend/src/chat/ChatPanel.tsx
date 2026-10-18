@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ConversationRow } from "../api";
 import { Attachments, DocChips, ImageStrip } from "../ui/Attachments";
+import { Markdown } from "../ui/Markdown";
 import { acceptedExts, docAgents, pickDocs, readDoc, type DocFile } from "./docs";
 import { findMention, insertMention, isAway, matchAgents, type MentionQuery } from "./mention";
 import { imageFiles, prepareImage } from "./prepareImage";
@@ -566,7 +567,7 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
 
         {(answer || writing) && (
           <div className="answer">
-            {answer || <span className="muted">✍️ {writer} 正在寫…</span>}
+            {answer ? <Markdown text={answer} /> : <span className="muted">✍️ {writer} 正在寫…</span>}
             {writing && <span className="cursor">▌</span>}
           </div>
         )}
@@ -662,10 +663,10 @@ function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Reco
       ))}
       {/* 最後一步的成果就是下方的回答，這裡不重複顯示 */}
       {!isLast && (text || s.status === "running") && (
-        <pre className="output">
-          {text}
+        <div className="output">
+          {text && <Markdown text={text} />}
           {s.status === "running" && <span className="cursor">▌</span>}
-        </pre>
+        </div>
       )}
       {!isLast && <Attachments items={s.attachments} />}
       {s.verdict && <VerdictNote v={s.verdict} names={names} />}
@@ -675,7 +676,11 @@ function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Reco
           {s.rounds.map((r) => (
             <div key={r.round}>
               <div className="muted">第 {r.round} 輪{r.verdict ? `：${r.verdict.passed ? "通過" : "不通過"}` : ""}</div>
-              {r.output && <pre className="output">{r.output}</pre>}
+              {r.output && (
+                <div className="output">
+                  <Markdown text={r.output} />
+                </div>
+              )}
             </div>
           ))}
         </details>
