@@ -74,8 +74,12 @@ def validate(loop: Loop | None, steps: list) -> Loop | None:
     if loop.check not in ids or loop.back_to not in ids or ids.index(loop.back_to) >= ids.index(loop.check):
         return None
     check = steps[ids.index(loop.check)]
-    if not [u for u in check.use if u != PREV]:
+    checked = [u for u in check.use if u != PREV]
+    if not checked:
         return None
+    by_id = {s.id: s for s in steps}
+    if any(by_id[u].agent == check.agent for u in checked if u in by_id):
+        return None  # 自己審自己：退回也是同一位，沒有意義（多半是該寫的村民停用了，村長只好派給審查者）
     return Loop(loop.check, loop.back_to, max(0, min(MAX_ROUNDS, int(loop.max_rounds or 0))))
 
 

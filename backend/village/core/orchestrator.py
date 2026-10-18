@@ -162,7 +162,7 @@ def render_documents(docs, fresh: bool, doc_agents: list[AgentSpec]) -> str:
 
 
 def planner_system_prompt(
-    agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "", documents: str = "",
+    agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "", documents: str = "", disabled: str = "",
 ) -> str:
     lines = []
     for a in agents:
@@ -174,6 +174,11 @@ def planner_system_prompt(
             hint += f"【收文件：{'、'.join(a.remote.accepts)}；只有它讀得到使用者附的文件】"
         lines.append(f"- {a.id}（{a.name}）：{a.card.description}{hint}{costly}" + (f" 例：{examples}" if examples else ""))
     roster = "\n".join(lines)
+    if disabled:
+        roster += (
+            f"\n（停用中，不能派工：{disabled}。請求的工作只有停用中的村民會做時，那一步不要排、"
+            "也不要找別的村民代替；整個請求都做不了就回傳空陣列，村長會告訴使用者）"
+        )
     history_rule = history_block = ""
     if history:
         history_rule = (
@@ -288,7 +293,12 @@ def finish_loop(steps: list[Step], message: str, loop: loops.Loop | None, notes:
     """確認 LLM 給的迴圈合理；沒有（或不合理）但請求像在要求「不通過就重做」時，由程式補上。"""
     checked = loops.validate(loop, steps)
     if loop and not checked:
-        notes.append(f"村長規劃的迴圈不合理（{loop.check} 退回 {loop.back_to}），改由程式判斷")
+        by_id = {s.id: s for s in steps}
+        check = by_id.get(loop.check)
+        if check and any(by_id[u].agent == check.agent for u in check.use if u in by_id):
+            notes.append(f"審查者和被審查的是同一位村民（{check.agent}），自己審自己沒有意義，不排迴圈")
+        else:
+            notes.append(f"村長規劃的迴圈不合理（{loop.check} 退回 {loop.back_to}），改由程式判斷")
     if checked is None and (guess := loops.from_message(steps, message)):
         checked = loops.validate(guess, steps)
         if checked:
@@ -353,6 +363,7 @@ async def plan_with_llm(
     message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes, history: list[Turn] | None = None,
     appraisal: str = "",
     documents: str = "",
+    disabled: str = "",
 ) -> tuple[list[Step], loops.Loop | None] | None:
     by_id = {a.id: a for a in agents}
     messages = [ChatMessage("user", f"請求：{message}")]
@@ -361,7 +372,7 @@ async def plan_with_llm(
             r = await llm.chat(
                 "tier:large",
                 messages,
-                system=planner_system_prompt(agents, history, appraisal, documents),
+                system=planner_system_prompt(agents, history, appraisal, documents, disabled),
                 json_schema=plan_schema(list(by_id)),
                 max_tokens=1024,
             )
@@ -418,6 +429,7 @@ async def make_plan(
     history: list[Turn] | None = None,
     appraisal: str = "",
     documents: str = "",
+    disabled: str = "",
 ) -> Plan:
     by_id = {a.id: a for a in agents}
     if plan := plan_from_mentions(message, by_id):
@@ -428,7 +440,7 @@ async def make_plan(
         return Plan(steps=[], source="direct", notes=["村裡還沒有任何村民"])
 
     notes = Notes(on_note)
-    planned = await plan_with_llm(message, agents, llm, notes, history, appraisal, documents)
+    planned = await plan_with_llm(message, agents, llm, notes, history, appraisal, documents, disabled)
     if planned is not None:
         steps, loop = planned
         return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes), loop=loop)
@@ -451,6 +463,7 @@ async def direct_reply(
     memories: str = "",
     appraisal: str = "",
     appraisal_text: str = "",
+    disabled: str = "",
 ) -> str:
     """appraisal：鑑定師看圖的結果（給 LLM 的參考資料）；appraisal_text：LLM 不能用時直接交出鑑定內容。"""
     roster = "、".join(f"{a.name}（@{a.id}）" for a in agents) or "（目前沒有村民）"
@@ -467,6 +480,11 @@ async def direct_reply(
             f"村裡目前有這些村民可以幫忙：{roster}。"
             "如果使用者的需求村民做不到，就誠實說明，並介紹村民能做什麼。"
         )
+        if disabled:
+            system += (
+                f"目前停用中的村民：{disabled}。使用者要的工作需要停用中的村民時，明確告訴他"
+                "「○○目前停用中，請管理員到右上 ⚙️ →「村民」頁啟用」。"
+            )
     if memories:
         system += f"\n\n{memories}"
     if appraisal:

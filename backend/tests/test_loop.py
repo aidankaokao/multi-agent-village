@@ -63,6 +63,10 @@ def test_loop_from_message_and_validate():
     assert loops.validate(loops.Loop("s3", "s3"), steps) is None  # 退回點要在審查步驟之前
     assert loops.validate(loops.Loop("s1", "s1"), steps) is None
     assert loops.validate(loops.Loop("s3", "s1", 9), steps).max_rounds == loops.MAX_ROUNDS
+    # 自己審自己（該寫的村民停用了，村長只好派給審稿人）：不排迴圈
+    same = [Step("s1", "editor", "寫一首詩"), Step("s2", "editor", "檢查押韻", ["s1"])]
+    assert loops.validate(loops.Loop("s2", "s1"), same) is None and loops.from_message(same, "不通過就重寫") is not None
+    assert loops.validate(loops.from_message(same, "不通過就重寫"), same) is None
 
 
 async def test_planner_loop_and_fallbacks(registry):
@@ -149,3 +153,32 @@ async def test_unclear_verdict_uses_llm_then_passes(registry):
     out = await Runner(registry, FakeLLM(editor_says("押韻不太行")), Recorder(), handoff_delay=0,
                        rules=Rules(loop_max_rounds=2)).run("r4", "海的詩，不通過就重寫")
     assert out["steps"][1]["verdict"]["how"] == "LLM 判斷" and out["steps"][0]["round"] == 2
+
+
+async def test_disabled_villagers_are_told_to_mayor(registry):
+    from village.core.orchestrator import direct_reply
+
+    registry.disabled = {"poet": "詩人（寫短詩）"}
+    agents = [a for a in registry.all() if a.id != "poet"]
+    llm = FakeLLM(lambda t, m, kw: '{"steps":[],"loop":null}' if kw.get("json_schema") else "詩人目前停用中")
+    plan = await make_plan("寫一首詩", agents, llm, disabled=registry.disabled_text())
+    assert plan.steps == [] and "停用中，不能派工：詩人（寫短詩）" in llm.calls[0]["system"]
+    await direct_reply("寫一首詩", agents, llm, disabled=registry.disabled_text())
+    assert "請管理員到右上" in llm.calls[1]["system"] and "詩人（寫短詩）" in llm.calls[1]["system"]
+
+
+async def test_registry_tracks_disabled(tmp_path):
+    import httpx
+
+    from village.config import REPO_ROOT, Settings
+    from village.main import create_app
+
+    app = create_app(Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'v.db'}", config_dir=tmp_path / "cfg",
+                              agents_dir=REPO_ROOT / "agents"), handoff_delay=0)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})
+            r = await c.patch("/api/villagers/poet", json={"enabled": False})
+            assert r.status_code in (200, 204), r.text
+            reg = app.state.ctx.registry
+            assert reg.get("poet") is None and reg.disabled["poet"].startswith("詩人（")

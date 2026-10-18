@@ -17,12 +17,15 @@ class AgentRegistry:
     def __init__(self, specs: list[AgentSpec] | None = None):
         self._specs: dict[str, AgentSpec] = {}
         self.errors: dict[str, str] = {}  # 村民 id / 資料夾名稱 -> 載入錯誤
+        # 停用中的村民：id -> 「名字（說明）」。不會被派工，但村長要知道（使用者要的工作需要它時，告訴使用者它停用中）
+        self.disabled: dict[str, str] = {}
         if specs:
             self.replace(specs)
 
-    def replace(self, specs: list[AgentSpec], errors: dict[str, str] | None = None) -> None:
+    def replace(self, specs: list[AgentSpec], errors: dict[str, str] | None = None, disabled: dict[str, str] | None = None) -> None:
         self._specs = {s.id: s for s in specs}
         self.errors = errors or {}
+        self.disabled = disabled or {}
         log.info("agents loaded: %s", sorted(self._specs))
 
     def all(self) -> list[AgentSpec]:
@@ -30,6 +33,9 @@ class AgentRegistry:
 
     def get(self, agent_id: str) -> AgentSpec | None:
         return self._specs.get(agent_id)
+
+    def disabled_text(self) -> str:
+        return "、".join(self.disabled.values())
 
 
 def load_dir(root: Path) -> tuple[list[AgentSpec], dict[str, str]]:

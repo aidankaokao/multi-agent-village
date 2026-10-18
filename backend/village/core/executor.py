@@ -262,6 +262,7 @@ class Runner:
             documents = render_documents(note.docs, note.fresh, doc_agents) if note.docs else ""
             plan = await make_plan(
                 message, agents, self.llm, on_note=on_note, history=history, appraisal=_APPRAISAL.get(), documents=documents,
+                disabled=self.registry.disabled_text(),
             )
             if note.docs and (note.fresh or note.agent) and doc_agents and not any(
                     s.agent in {a.id for a in doc_agents} for s in plan.steps):
@@ -281,6 +282,7 @@ class Runner:
                 answer = await direct_reply(
                     message, agents, self.llm, on_text=on_text, history=history, memories=_MEMORIES.get(),
                     appraisal=_APPRAISAL.get(), appraisal_text=looked.text if looked and looked.ok else "",
+                    disabled=self.registry.disabled_text(),
                 )
                 await emit("agent.finished", run_id=run_id, step_id=None, agent=MAYOR, output=answer)
                 await emit("run.finished", run_id=run_id, ok=True, answer=answer, steps=[], reviews=[])
