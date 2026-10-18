@@ -171,11 +171,22 @@ def _recordings() -> list:
     return env.files if env else []
 
 
-def with_typist(plan: Plan, typist_id: str, message: str, note: str = "") -> Plan:
-    """在計畫最前面加上聽打員的步驟；原本沒有依賴的步驟改成用它的逐字稿。"""
+SUMMARIZER = "summarizer"
+# 請求除了逐字稿還要別的（村長沒排時，程式接著交給摘要師）
+_WANTS_SUMMARY = re.compile(r"摘要|重點|總結|整理|會議記錄|會議紀錄|待辦|決議|懶人包|結論|大綱")
+
+
+def with_typist(plan: Plan, typist_id: str, message: str, note: str = "", summarizer: str | None = None) -> Plan:
+    """在計畫最前面加上聽打員的步驟；原本沒有依賴的步驟改成用它的逐字稿。
+
+    村長什麼都沒排、請求卻還要摘要 / 重點 / 待辦時（常見於村長找不到適合的村民就放棄），接著排摘要師。
+    """
     ids = {s.id for s in plan.steps}
     first = next(i for i in ("s0", "t0", "typist") if i not in ids)
     head = Step(id=first, agent=typist_id, instruction="把使用者附的錄音轉成逐字稿")
+    if not plan.steps and summarizer and _WANTS_SUMMARY.search(message):
+        tail = Step(id="s1" if first != "s1" else "s2", agent=summarizer, instruction=message, use=[first])
+        return Plan(steps=[head, tail], source="llm", notes=plan.notes + ([note] if note else []), loop=plan.loop)
     if not plan.steps:
         head.instruction = message
     steps = [head] + [
@@ -304,8 +315,11 @@ class Runner:
             if heard and typist and not any(s.agent == typist.id for s in plan.steps):
                 # 附了錄音，村長卻沒派聽打員（弱模型常見）：第一步補上聽打員，其他步驟改成處理它的逐字稿
                 why = f"附了錄音：先交給{typist.name}轉成逐字稿"
-                plan = with_typist(plan, typist.id, message, why)
+                summarizer = next((a for a in agents if a.id == SUMMARIZER), None)
+                plan = with_typist(plan, typist.id, message, why, summarizer.id if summarizer else None)
                 await on_note(why)
+                if len(plan.steps) > 1 and plan.steps[-1].agent == SUMMARIZER and plan.steps[-1].use == [plan.steps[0].id]:
+                    await on_note(f"請求還要整理內容：接著交給{summarizer.name}")
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:

@@ -39,6 +39,7 @@ def test_audio_checks_and_layout():
     assert audio.to_traditional("我们讨论软件和服务器") == "我們討論軟體和伺服器"
     assert audio.to_traditional("我們討論軟體") == "我們討論軟體" and audio.to_traditional("hello") == "hello"
     assert audio.to_traditional("会議は三時からです") == "会議は三時からです"  # 日文不轉
+    assert audio.to_traditional("好,我們開始?營收 1,200 萬, OK") == "好，我們開始？營收 1,200 萬， OK"
     assert audio.join(["Hello", "world.", "你好", "世界"]) == "Hello world.你好世界"
     assert audio.join(["（第一句）好。", "（第二句）"]) == "（第一句）好。（第二句）"
 
@@ -297,3 +298,9 @@ def test_with_typist():
     assert [(s.id, s.agent, s.use) for s in out.steps] == [("s0", "typist", []), ("s1", "poet", ["s0"]), ("s2", "translator", ["s1"])]
     out = with_typist(Plan(steps=[], source="direct"), "typist", "轉成文字")
     assert out.steps[0].instruction == "轉成文字" and out.source == "llm"
+    # 村長沒排、請求還要重點和待辦：接著交給摘要師
+    out = with_typist(Plan(steps=[], source="direct"), "typist", "轉成逐字稿，再整理會議的重點和待辦", summarizer="summarizer")
+    assert [(s.id, s.agent, s.use) for s in out.steps] == [("s0", "typist", []), ("s1", "summarizer", ["s0"])]
+    assert out.steps[1].instruction == "轉成逐字稿，再整理會議的重點和待辦"
+    out = with_typist(Plan(steps=[], source="direct"), "typist", "轉成逐字稿", summarizer="summarizer")
+    assert len(out.steps) == 1

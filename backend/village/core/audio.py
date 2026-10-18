@@ -97,15 +97,23 @@ _CC = None
 
 
 def to_traditional(text: str) -> str:
-    """轉成台灣繁體與用語（軟件 → 軟體）；本來就是繁體的不會變。有假名的（日文）不轉，免得把日文漢字改掉。"""
+    """轉成台灣繁體與用語（軟件 → 軟體），中文旁邊的半形標點改成全形（「,」→「，」）；本來就是繁體的不會變。
+
+    有假名的（日文）不轉，免得把日文漢字改掉。
+    """
     global _CC
-    if not re.search(r"[一-鿿]", text) or re.search(r"[぀-ヿ]", text):
+    if not re.search(r"[\u4e00-\u9fff]", text) or re.search(r"[\u3040-\u30ff]", text):
         return text
     if _CC is None:
         from opencc import OpenCC
 
         _CC = OpenCC("s2twp")
-    return _CC.convert(text)
+    return _HALF_PUNCT.sub(lambda m: _FULL[m.group(0)], _CC.convert(text))
+
+
+_FULL = {",": "，", "?": "？", "!": "！", ":": "：", ";": "；"}
+# 前面是中文或全形標點的半形標點（「好,我們」）；數字裡的逗號、英文句子不動
+_HALF_PUNCT = re.compile(r"(?<=[\u4e00-\u9fff\u3001-\u303f\uff01-\uff5e])[,?!:;]")
 
 
 # ---------------------------------------------------------------- ffmpeg
@@ -167,7 +175,7 @@ async def split(path: Path, workdir: Path, chunk_seconds: int = CHUNK_SECONDS) -
 
 # ---------------------------------------------------------------- 排版
 
-_CJK = re.compile(r"[　-〿㐀-鿿＀-￯]")  # 中日文字與全形標點
+_CJK = re.compile(r"[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]")  # 中日文字與全形標點
 _SENTENCE_END = re.compile(r"(?<=[。！？!?])")
 PARAGRAPH_SECONDS = 60
 PARAGRAPH_CHARS = 300

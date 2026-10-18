@@ -369,7 +369,8 @@ class BaseAgent(Protocol):
   進度用 `tools.base.report`（`PROGRESS` context variable，`run_tool_agent` 設定）顯示「⏳ 轉寫：2 / 6 段…」；
   工具 `timeout_s = 1800` 放寬步驟逾時；`costly = True`；同一次問答重做時用快取不再轉一次。
 - 附了錄音：村長規劃提示加上「錄音只有聽打員聽得到，第一步一定是它」；村長漏派時 `with_typist` 在最前面補上
-  聽打員步驟，原本沒有依賴的步驟改成用它的逐字稿。
+  聽打員步驟，原本沒有依賴的步驟改成用它的逐字稿。村長什麼都沒排、請求卻還要摘要 / 重點 / 待辦（`_WANTS_SUMMARY`）時，
+  接著排內建村民「摘要師 @summarizer」（prompt 型、large 分級）。逐字稿中文旁的半形標點改全形（`to_traditional`）。
 
 #### 資料表
 
@@ -473,7 +474,7 @@ multi-agent-village/
 │       ├── llm/                 # openai_compat、anthropic_client、service（每個帳號的模型 + 備援）、vision_test、audio_test（＋assets/）
 │       ├── security/            # crypto（AES-256-GCM、主金鑰）、auth（帳號 / session / 權限）、redact
 │       └── store/               # models、migrations（Alembic）、agents、runs、settings（村規）、conversations、memories
-├── agents/                      # 內建範例村民（啟動時補進 DB 沒有的）：poet、jester、calculator、chart、painter、editor、typist
+├── agents/                      # 內建範例村民（啟動時補進 DB 沒有的）：poet、jester、calculator、chart、painter、editor、typist、summarizer
 ├── extra-agents/                # 獨立開發、獨立部署的外接 agent（村子裡叫駐村專家）
 │   ├── taiwan-history/          # 台灣史專家：corpus（維基 175 篇）、app（RAG、A2A、測試網頁）、自己的 docker-compose（:8100）
 │   ├── report-maker/            # 文件彙整師：讀檔與統計、報告 JSON、圖表、WeasyPrint PDF、範例檔 samples/（:8101）
