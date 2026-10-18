@@ -210,6 +210,12 @@ function Detail({ run, names, onBack, onDeleted }: { run: RunDetail; names: Reco
               {s.use.length > 0 && `（使用 ${s.use.join(", ")} 的成果）`}
             </div>
           ))}
+          {run.plan.loop && (
+            <div className="pnote">
+              🔁 迴圈：{run.plan.loop.check} 審查，不通過退回 {run.plan.loop.back_to} 重做（最多{" "}
+              {run.plan.loop.max_rounds || "村規上限的"} 輪）
+            </div>
+          )}
         </section>
       )}
 
@@ -261,6 +267,7 @@ function StepCard({ s, name }: { s: TraceStep; name: string }) {
         <code className="muted">{s.id}</code>
         {s.model && <span className="tag">{s.model}</span>}
         {s.attempts > 1 && <span className="tag warn">共 {s.attempts} 次</span>}
+        {(s.round ?? 1) > 1 && <span className="tag">第 {s.round} 輪</span>}
         <span className="muted elapsed">
           {secs(s.elapsed_ms)} {tokens(s.tokens_in, s.tokens_out)}
         </span>
@@ -294,7 +301,21 @@ function StepCard({ s, name }: { s: TraceStep; name: string }) {
           <pre className="output">{JSON.stringify(s.tool_args, null, 2)}</pre>
         </details>
       )}
+      {s.history?.map((h) => (
+        <details key={h.round}>
+          <summary className="muted">
+            🔁 第 {h.round} 輪的版本{h.verdict ? `（${h.verdict.passed ? "通過" : "不通過"}）` : ""}
+          </summary>
+          <pre className="output">{h.output}</pre>
+        </details>
+      ))}
       {s.output && <pre className="output">{s.output}</pre>}
+      {s.verdict && (
+        <div className={`pnote review ${s.verdict.passed ? "ok" : "bad"}`}>
+          {s.verdict.passed ? "✅ 審查通過" : "❌ 審查不通過"}（{s.verdict.how}）
+          {s.verdict.feedback && <div className="muted">{s.verdict.feedback}</div>}
+        </div>
+      )}
       <Attachments items={s.attachments} />
       {s.error && <div className="step-error">{s.error}</div>}
     </div>

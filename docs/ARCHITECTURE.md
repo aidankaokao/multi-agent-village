@@ -219,6 +219,7 @@ class BaseAgent(Protocol):
 | `agents.changed` | 村民名冊有變動，村子裡的角色登場 / 換裝 / 離開 |
 | `appraise.started` / `appraise.finished` | 鑑定師（`agent: appraiser`）看圖；finished 帶 `ok`、`text`、`count`、`relook` |
 | `residents.status` | 駐村專家在村 / 外出中改變（`agent`、`status`）；前端重新讀名冊，外出中的半透明並標註 |
+| `loop.verdict` | 迴圈的審查結論（`step_id`、`passed`、`feedback`、`how`、`round`、`max_rounds`、`back_agent`、`retry`、`stop`）；不通過要重做時接著發 `agent.handoff`（審查者 → 被退回的村民） |
 | `run.finished` | 聊天框出現最終答案 |
 
 ```json
@@ -282,6 +283,20 @@ class BaseAgent(Protocol):
   對方回 -32601 就改 `message/send` 並記住（`_NO_STREAM`，重啟後重試）。回覆的 text 是成果、data 的 citations 整理成「資料來源」附在後面。
   呼叫需要的目錄與提問者放 context variable `REMOTE_ENV`；token、key 只在 header，執行紀錄只記訊息內容。
 - 地圖：`/api/agents` 帶 status，外出中的駐村專家半透明並標「（外出中）」；`residents.status` 事件讓前端即時更新。
+
+#### 迴圈：改到過關為止（`core/loop.py`）
+
+- 計畫最多一個迴圈 `plan.loop = {check, back_to, max_rounds}`（LLM 計畫的 JSON 多一個 `loop` 欄位，沒有就 null）。
+  審查步驟是普通步驟（任何村民或駐村專家；內建「審稿人 @editor」專門挑毛病）。
+- 村長漏排時程式補上（`loops.from_message`）：請求有「不通過就…／改到…為止／最多 N 輪」而且計畫裡有審查步驟
+  （審稿人或指示含檢查、審、校對…）→ 退回審查的前一步；提到補資料、重查 → 退回第一步。@指名、關鍵字備援也適用。
+- 執行（`Runner._execute` → `_judge_round`）：審查步驟的指示補上「最後一行寫『結論：通過 / 不通過』」；
+  判定順序：讀結論 → 小模型判讀（`tier:small`，JSON）→ 都不行當作通過並註明。不通過且還有輪數 →
+  `back_to` 到 `check` 的步驟重設成下一輪（舊成果收進 `StepResult.history`），重做時 context 帶「審查意見＋你上一版的成果」
+  （context variable `_LOOP` 的 `LoopState.note_for`）。
+- 上限：村規 `loop_max_rounds`（預設 3、最多 5；計畫寫的不能超過）、每次問答總步數 `MAX_TOTAL_STEPS = 15`。
+  用完還沒通過 → 交出最後一版，回答後面註明最後的審查意見（`_loop_footnote`）。
+- 回答是被審查的成果：`leaf_steps` 把審查步驟換成它用到的步驟（前端 `leafIds` 一樣）；審查意見只在執行過程。
 
 #### 附文件（交給收文件的駐村專家）
 
@@ -410,6 +425,7 @@ multi-agent-village/
 │       │   ├── painter.py       # 畫家的作畫環境：生圖、張數上限、畫作保存、參考圖
 │       │   ├── remote.py        # 駐村專家：agent card、健康檢查、A2A 呼叫（send / stream、文件與回傳檔案）
 │       │   ├── docfiles.py      # 附文件：格式與大小檢查、哪些駐村專家收哪些檔案
+│       │   ├── loop.py          # 迴圈：審查結論判讀、從請求補迴圈、輪次狀態
 │       │   ├── imagefmt.py      # 圖片格式判斷、寬高
 │       │   └── context.py       # 多輪上下文（Turn、prev、指稱判斷）
 │       ├── tools/               # 工具箱：calculator、chart（SVG）、clock、painter（生圖）

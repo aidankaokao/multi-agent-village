@@ -128,6 +128,16 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>🔁 迴圈（改到過關為止）</h3>
+        <Field
+          label="最多幾輪"
+          hint="1～5。例如「審稿人檢查，不通過就重寫」：審查不通過會退回重做，到這個輪數就交出最後一版。每輪都會再呼叫一次村民的 LLM（駐村專家、畫家也一樣），輪數越多越花錢"
+        >
+          <NumInput value={draft.loop_max_rounds} min={1} max={5} onChange={(v) => set({ loop_max_rounds: v ?? 3 })} />
+        </Field>
+      </section>
+
+      <section>
         <h3>📜 執行紀錄</h3>
         <Field label="保留最近幾筆" hint="超過的舊紀錄會自動刪除；10～10000">
           <NumInput value={draft.keep_runs} min={10} max={10000} step={100} onChange={(v) => set({ keep_runs: v ?? 500 })} />

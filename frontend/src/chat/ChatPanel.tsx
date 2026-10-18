@@ -4,7 +4,7 @@ import { Attachments, DocChips, ImageStrip } from "../ui/Attachments";
 import { acceptedExts, docAgents, pickDocs, readDoc, type DocFile } from "./docs";
 import { findMention, insertMention, isAway, matchAgents, type MentionQuery } from "./mention";
 import { imageFiles, prepareImage } from "./prepareImage";
-import { leafIds, type AppraisalView, type RunsState, type RunView, type StepView } from "./runs";
+import { leafIds, type AppraisalView, type LoopVerdictView, type RunsState, type RunView, type StepView } from "./runs";
 
 /** 能不能附圖：要有通過看圖測驗的視覺模型；張數上限由村規決定 */
 export interface Vision {
@@ -545,6 +545,13 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
                 ・{n}
               </div>
             ))}
+            {run.loop && (
+              <div className="pnote">
+                🔁 {names[run.steps.find((x) => x.id === run.loop!.check)?.agent ?? ""] ?? run.loop.check} 審查（{run.loop.check}），不通過就退回{" "}
+                {names[run.steps.find((x) => x.id === run.loop!.back_to)?.agent ?? ""] ?? run.loop.back_to}（{run.loop.back_to}）重做
+                {run.loop.max_rounds ? `，最多 ${run.loop.max_rounds} 輪` : ""}
+              </div>
+            )}
             {run.steps.map((s) => (
               <StepItem key={s.id} step={s} names={names} now={now} isLast={s === last} />
             ))}
@@ -599,6 +606,21 @@ function RunBlock({ run, names, onOpenTrace }: { run: RunView; names: Record<str
   );
 }
 
+/** 迴圈的審查結論：通過、不通過退回重做、或用完輪數交出最後一版 */
+function VerdictNote({ v, names }: { v: LoopVerdictView; names: Record<string, string> }) {
+  const back = names[v.backAgent] ?? v.backAgent;
+  const how = v.how && v.how !== "結論" ? `（${v.how}）` : "";
+  if (v.passed) return <div className="pnote review ok">✅ 通過（第 {v.round} 輪）{how}</div>;
+  return (
+    <div className="pnote review bad">
+      {v.retry
+        ? `❌ 不通過 → 退回${back}重做（第 ${v.round}/${v.maxRounds} 輪）${how}`
+        : `❌ 不通過，但${v.stop ?? "輪數用完"}，交出最後一版${how}`}
+      {v.feedback && <div className="muted loop-feedback">{v.feedback}</div>}
+    </div>
+  );
+}
+
 function AppraisalNote({ a }: { a: AppraisalView }) {
   const what = `${a.relook ? "重看前面附的" : "看了"} ${a.count} 張圖`;
   if (a.status === "running") return <div className="pnote live">🔎 鑑定師正在{a.relook ? "重看前面附的" : "看"} {a.count} 張圖…</div>;
@@ -625,6 +647,7 @@ function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Reco
         <strong>{names[s.agent] ?? s.agent}</strong>
         {s.use.length > 0 && <span className="muted">使用 {s.use.join(", ")} 的成果</span>}
         {s.retries > 0 && <span className="tag warn">重做 {s.retries}</span>}
+        {(s.round ?? 1) > 1 && <span className="tag">第 {s.round} 輪</span>}
         {s.model && <span className="tag">{s.model}</span>}
         {elapsed !== undefined && <span className="muted elapsed">{secs(elapsed)}</span>}
       </div>
@@ -645,6 +668,18 @@ function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Reco
         </pre>
       )}
       {!isLast && <Attachments items={s.attachments} />}
+      {s.verdict && <VerdictNote v={s.verdict} names={names} />}
+      {s.rounds && s.rounds.length > 0 && (
+        <details className="loop-rounds">
+          <summary className="muted">前 {s.rounds.length} 輪的版本</summary>
+          {s.rounds.map((r) => (
+            <div key={r.round}>
+              <div className="muted">第 {r.round} 輪{r.verdict ? `：${r.verdict.passed ? "通過" : "不通過"}` : ""}</div>
+              {r.output && <pre className="output">{r.output}</pre>}
+            </div>
+          ))}
+        </details>
+      )}
       {isLast && s.status !== "pending" && s.status !== "error" && <div className="muted">→ 成果顯示在下方回答</div>}
       {s.error && <div className="step-error">{s.error}</div>}
     </div>

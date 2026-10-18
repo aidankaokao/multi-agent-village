@@ -17,6 +17,7 @@ from village.core.card import AgentSpec
 from village.core import remote
 from village.core.painter import PaintEnv, painting
 from village.core.context import PREV, Turn
+from village.core import loop as loops
 from village.core.docfiles import DocFile
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import (
@@ -83,6 +84,9 @@ class StepResult:
     rejected: list[dict] = field(default_factory=list)  # 被審核員退回的舊版本 {output, reason}
     attachments: list[dict] = field(default_factory=list)  # 工具產生的圖片等（{kind, name, data, title}）
     tool_args: dict | None = None  # 工具型村民：LLM（或退路）整理出的參數
+    round: int = 1  # 迴圈的第幾輪
+    verdict: dict | None = None  # 迴圈的審查步驟：{passed, feedback, how}
+    history: list[dict] = field(default_factory=list)  # 迴圈前幾輪的成果 {round, output, verdict}
 
 
 def render_context(
@@ -95,6 +99,9 @@ def render_context(
         parts.append(appraisal)
     if PREV in step.use and previous:
         parts.append(f"參考資料（上一輪的回答）：\n{previous}")
+    if state := _LOOP.get():
+        if note := state.note_for(step.id):
+            parts.append(note)
     for ref in step.use:
         r = results.get(ref)
         if r and r.output:
@@ -108,9 +115,21 @@ def render_user(template: str, instruction: str, context: str) -> str:
 
 
 def leaf_steps(plan: Plan) -> list[Step]:
-    """最後交給使用者的步驟：沒有其他步驟用到它的成果（例如「同時翻成英文和日文」就有兩個）。"""
+    """最後交給使用者的步驟：沒有其他步驟用到它的成果（例如「同時翻成英文和日文」就有兩個）。
+
+    迴圈的審查步驟不算：交給使用者的是被審查的成果（審查意見只顯示在執行過程）。
+    """
     used = {u for s in plan.steps for u in s.use}
-    return [s for s in plan.steps if s.id not in used]
+    by_id = {s.id: s for s in plan.steps}
+    out: list[Step] = []
+    for s in plan.steps:
+        if s.id in used:
+            continue
+        if plan.loop and s.id == plan.loop.check:
+            out += [by_id[u] for u in s.use if u in by_id and by_id[u] not in out]
+        elif s not in out:
+            out.append(s)
+    return out
 
 
 def compose_answer(plan: Plan, results: dict[str, StepResult], registry: AgentRegistry) -> tuple[str, bool]:
@@ -130,6 +149,7 @@ def compose_answer(plan: Plan, results: dict[str, StepResult], registry: AgentRe
 _PREVIOUS: ContextVar[str] = ContextVar("previous_answer", default="")
 _MEMORIES: ContextVar[str] = ContextVar("memories", default="")  # 書記記下的長期記憶（已排成文字）
 _APPRAISAL: ContextVar[str] = ContextVar("appraisal", default="")  # 鑑定師看圖的結果（已排成文字）
+_LOOP: ContextVar[loops.LoopState | None] = ContextVar("loop", default=None)  # 迴圈進度（第幾輪、審查意見）
 
 
 @dataclass
@@ -189,6 +209,7 @@ class Runner:
                 _MEMORIES.set(render_memories(memories) if memories else "")
                 _APPRAISAL.set("")
                 _DOCS.set(_DocNote(docs or [], fresh_docs, doc_agent))
+                _LOOP.set(None)
                 return await self._run(run_id, message, traced, user_id, history or [], images or [], relook)
         finally:
             self.bus.release(run_id)
@@ -269,9 +290,11 @@ class Runner:
             results = {s.id: StepResult(id=s.id, agent=s.agent, instruction=s.instruction, use=s.use) for s in plan.steps}
             await self._execute(run_id, plan, results, rules)
             answer, ok = compose_answer(plan, results, self.registry)
+            answer = _loop_footnote(answer, plan, results, self.registry)
             if ok and rules.reviewer_enabled:
                 await self._review_loop(run_id, message, plan, results, reviews, rules, history)
                 answer, ok = compose_answer(plan, results, self.registry)
+                answer = _loop_footnote(answer, plan, results, self.registry)
 
             steps = [asdict(r) for r in results.values()]
             rv = [x.to_dict() for x in reviews]
@@ -291,9 +314,21 @@ class Runner:
             return {"ok": False, "error": str(e)}
 
     async def _execute(self, run_id: str, plan: Plan, results: dict[str, StepResult], rules: VillageRules) -> None:
-        """依相依關係一批一批執行：同一批互不依賴，開啟平行時同時跑（最多 max_parallel 個）。"""
+        """依相依關係一批一批執行：同一批互不依賴，開啟平行時同時跑（最多 max_parallel 個）。
+
+        有迴圈時：審查步驟做完就判定；不通過且還有輪數 → 從 back_to 到審查步驟重做（帶著上一版與審查意見）。
+        """
         sem = asyncio.Semaphore(rules.max_parallel if rules.parallel else 1)
         remaining = list(plan.steps)
+        state = None
+        if plan.loop:
+            ids = [s.id for s in plan.steps]
+            span = ids[ids.index(plan.loop.back_to) : ids.index(plan.loop.check) + 1]
+            limit = min(plan.loop.max_rounds or rules.loop_max_rounds, rules.loop_max_rounds)
+            checker = self._name(results[plan.loop.check].agent)
+            state = loops.LoopState(plan.loop, 1, max(1, limit), span, checker=checker)
+            _LOOP.set(state)
+        executed = 0
         while remaining:
             ready = [s for s in remaining if all(results[u].status != "pending" for u in s.use if u != PREV)]
             if not ready:  # 理論上不會發生（use 只能引用前面的步驟）
@@ -309,6 +344,53 @@ class Runner:
             else:
                 for s in ready:
                     await one(s)
+            executed += len(ready)
+            if state and state.loop and any(s.id == state.loop.check for s in ready):
+                if await self._judge_round(run_id, plan, results, state, executed):
+                    redo = [s for s in plan.steps if s.id in state.span]
+                    remaining = redo + [s for s in remaining if s not in redo]
+
+    async def _judge_round(
+        self, run_id: str, plan: Plan, results: dict[str, StepResult], state: loops.LoopState, executed: int
+    ) -> bool:
+        """迴圈的審查步驟做完：判定通過與否；要重做就把範圍內的步驟重設成下一輪，回傳 True。"""
+        loop = state.loop
+        r = results[loop.check]
+        if r.status != "done":
+            return False
+        verdict = await loops.judge(self.llm, r.output)
+        r.verdict = verdict.to_dict()
+        back = results[loop.back_to]
+        retry = not verdict.passed and state.round < state.max_rounds
+        stop = ""
+        if retry and executed + len(state.span) > loops.MAX_TOTAL_STEPS:
+            retry, stop = False, f"這次問答已經執行 {executed} 步，再重做會超過 {loops.MAX_TOTAL_STEPS} 步的上限"
+        elif not verdict.passed and not retry:
+            stop = f"已經到第 {state.round}/{state.max_rounds} 輪"
+        if verdict.how != "結論":
+            r.warnings.append(f"審查結論：{verdict.how}")
+        if stop:
+            r.warnings.append(f"審查沒有通過，但{stop}，交出最後一版")
+        await self.bus.publish(
+            "loop.verdict", run_id=run_id, step_id=loop.check, agent=r.agent, passed=verdict.passed,
+            feedback=verdict.feedback[:500], how=verdict.how, round=state.round, max_rounds=state.max_rounds,
+            back_to=loop.back_to, back_agent=back.agent, retry=retry, stop=stop or None,
+        )
+        if not retry:
+            return False
+        state.feedback = verdict.feedback or r.output
+        state.previous = {sid: results[sid].output for sid in state.span}
+        state.round += 1
+        for sid in state.span:  # 這一輪的成果收進歷史，步驟重設成下一輪
+            old = results[sid]
+            old.history.append({"round": old.round, "output": old.output, "verdict": old.verdict, "elapsed_ms": old.elapsed_ms})
+            results[sid] = StepResult(
+                id=old.id, agent=old.agent, instruction=old.instruction, use=old.use, round=state.round,
+                history=old.history, tokens_in=old.tokens_in, tokens_out=old.tokens_out,
+            )
+        if r.agent != back.agent:  # 地圖：審查者把稿子交還給被退回的村民
+            await self.bus.publish("agent.handoff", run_id=run_id, from_agent=r.agent, to_agent=back.agent)
+        return True
 
     async def _start_step(self, run_id: str, step: Step, results: dict[str, StepResult], rules: VillageRules) -> None:
         r = results[step.id]
@@ -323,14 +405,17 @@ class Runner:
         if deps and self.handoff_delay:
             await asyncio.sleep(self.handoff_delay)
         context = render_context(step, results, self.registry, _PREVIOUS.get())
-        await self._run_step(run_id, step, r, rules, step.instruction, context)
+        state = _LOOP.get()
+        is_check = bool(state and state.loop and step.id == state.loop.check)
+        instruction = step.instruction + (loops.VERDICT_SUFFIX if is_check else "")
+        await self._run_step(run_id, step, r, rules, instruction, context)
 
     async def _run_step(
         self, run_id: str, step: Step, r: StepResult, rules: VillageRules, instruction: str, context: str
     ) -> None:
         emit = self.bus.publish
         spec = self.registry.get(step.agent)
-        await emit("agent.started", run_id=run_id, step_id=step.id, agent=step.agent, instruction=step.instruction)
+        await emit("agent.started", run_id=run_id, step_id=step.id, agent=step.agent, instruction=step.instruction, round=r.round)
         t0 = time.monotonic()
         timeout = rules.step_timeout_s
         if spec is not None and remote.files_for(spec):  # 要處理文件、產生報告：放寬時間上限
@@ -463,6 +548,19 @@ async def run_remote_agent(
         r.attachments.append(Attachment(kind="file", name=f.name, title=f.name, url=f"/api/files/{file_id}").to_dict())
     if on_text:
         await on_text(r.output)  # 最後補上資料來源
+
+
+def _loop_footnote(answer: str, plan: Plan, results: dict[str, StepResult], registry: AgentRegistry) -> str:
+    """迴圈到最後都沒通過：在回答後面註明（使用者才知道這一版還有問題）。"""
+    if not plan.loop or plan.loop.check not in results:
+        return answer
+    r = results[plan.loop.check]
+    if r.status != "done" or not r.verdict or r.verdict.get("passed"):
+        return answer
+    spec = registry.get(r.agent)
+    reason = (r.verdict.get("feedback") or "").strip()
+    reason = reason if len(reason) <= 300 else reason[:300] + "…"
+    return f"{answer}\n\n（{spec.name if spec else r.agent}到第 {r.round} 輪仍未通過，以上是最後一版。最後的審查意見：{reason}）"
 
 
 TOOL_RETRIES = 2  # 參數不合法時帶錯誤訊息請 LLM 重新整理的次數

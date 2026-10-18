@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
 
 from village.core.card import AgentSpec
+from village.core import loop as loops
 from village.core.context import PREV, Turn, refers_back, render_history
 from village.llm.base import ChatMessage, ChatResult, LLMError
 from village.tools import TOOLS
@@ -44,9 +45,11 @@ class Plan:
     steps: list[Step]
     source: PlanSource
     notes: list[str] = field(default_factory=list)  # 規劃過程中的退路紀錄，顯示在 trace
+    loop: loops.Loop | None = None  # 改到過關為止（最多一個）
 
     def to_dict(self) -> dict:
-        return {"steps": [asdict(s) for s in self.steps], "source": self.source, "notes": self.notes}
+        return {"steps": [asdict(s) for s in self.steps], "source": self.source, "notes": self.notes,
+                "loop": self.loop.to_dict() if self.loop else None}
 
 
 class PlanError(ValueError):
@@ -124,9 +127,19 @@ def plan_schema(agent_ids: list[str]) -> dict:
                     "required": ["id", "agent", "instruction", "use"],
                     "additionalProperties": False,
                 },
-            }
+            },
+            "loop": {
+                "type": ["object", "null"],
+                "properties": {
+                    "check": {"type": "string"},
+                    "back_to": {"type": "string"},
+                    "max_rounds": {"type": "integer"},
+                },
+                "required": ["check", "back_to", "max_rounds"],
+                "additionalProperties": False,
+            },
         },
-        "required": ["steps"],
+        "required": ["steps", "loop"],
         "additionalProperties": False,
     }
 
@@ -164,24 +177,24 @@ def planner_system_prompt(
     history_rule = history_block = ""
     if history:
         history_rule = (
-            f"\n8. 請求如果是在說前面的內容（它、這個、剛剛、上面、再把…），那一步的 use 填 \"{PREV}\"（代表上一輪的回答），"
+            f"\n9. 請求如果是在說前面的內容（它、這個、剛剛、上面、再把…），那一步的 use 填 \"{PREV}\"（代表上一輪的回答），"
             "instruction 寫清楚要對它做什麼；請求沒提到前面的內容就不要用。"
         )
         history_block = (
             f"\n\n請求：（上一輪回答是一首詩）再把它翻成英文\n"
-            f'輸出：{{{{"steps":[{{{{"id":"s1","agent":"<負責翻譯的村民 id>","instruction":"把上一輪的詩翻成英文","use":["{PREV}"]}}}}]}}}}'
+            f'輸出：{{{{"steps":[{{{{"id":"s1","agent":"<負責翻譯的村民 id>","instruction":"把上一輪的詩翻成英文","use":["{PREV}"]}}}}],"loop":null}}}}'
             f"\n\n最近的對話（舊 → 新）：\n{render_history(history)}"
         )
     image_rule = image_block = ""
     if appraisal:
         image_rule = (
-            "\n9. 使用者附了圖片，鑑定師已經看過並寫下內容（見最下方）。每位村民都會自動拿到這段內容，不要安排「看圖」的步驟。"
+            "\n10. 使用者附了圖片，鑑定師已經看過並寫下內容（見最下方）。每位村民都會自動拿到這段內容，不要安排「看圖」的步驟。"
             "只是問圖片本身（這是什麼、圖裡寫什麼、有幾個…）就回傳空陣列，由村長根據鑑定結果回答；"
             "要對圖片內容做事（翻譯、計算、畫圖表、寫詩…）才派村民，instruction 寫清楚要對圖片的哪些內容做什麼。"
         )
         image_block = f"\n\n{appraisal}"
     if documents:
-        image_rule += f"\n10. {documents}"
+        image_rule += f"\n11. {documents}"
     return f"""你是村長，負責把使用者的請求分派給適合的村民（agent）。
 
 可用的村民：
@@ -194,18 +207,24 @@ def planner_system_prompt(
 4. 後面的步驟若需要前面的成果，在 use 填入那些步驟的 id；不需要就填空陣列。
 5. instruction 用一句話寫清楚該村民要做的事，只能使用請求裡的資訊（主題、風格、形式），不要自行添加。
 6. 最多 {MAX_STEPS} 步。
-7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。{history_rule}{image_rule}
+7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。
+8. loop：只有請求要求「審查不通過就重做 / 改到通過為止 / 最多 N 輪」時才填，否則填 null。
+   填法：安排一個審查步驟（use 填被審查的步驟），loop 填 {{"check": 審查步驟 id, "back_to": 不通過時退回的步驟 id
+   （只要改寫就填被審查的那一步；要重新查資料就填第一步）, "max_rounds": N（沒說就填 3）}}。{history_rule}{image_rule}
 只輸出 JSON，不要任何說明。
 
 範例
 請求：講一個關於狗的笑話
-輸出：{{"steps":[{{"id":"s1","agent":"<負責笑話的村民 id>","instruction":"講一個關於狗的笑話","use":[]}}]}}
+輸出：{{"steps":[{{"id":"s1","agent":"<負責笑話的村民 id>","instruction":"講一個關於狗的笑話","use":[]}}],"loop":null}}
 
 請求：寫一首關於海的詩，再改成笑話
-輸出：{{"steps":[{{"id":"s1","agent":"<負責寫詩的村民 id>","instruction":"寫一首關於海的詩","use":[]}},{{"id":"s2","agent":"<負責笑話的村民 id>","instruction":"把這首詩改編成笑話","use":["s1"]}}]}}
+輸出：{{"steps":[{{"id":"s1","agent":"<負責寫詩的村民 id>","instruction":"寫一首關於海的詩","use":[]}},{{"id":"s2","agent":"<負責笑話的村民 id>","instruction":"把這首詩改編成笑話","use":["s1"]}}],"loop":null}}
+
+請求：寫一首關於海的詩，請審稿的村民檢查有沒有押韻，不通過就重寫，最多 3 輪
+輸出：{{"steps":[{{"id":"s1","agent":"<負責寫詩的村民 id>","instruction":"寫一首關於海的詩","use":[]}},{{"id":"s2","agent":"<負責審稿的村民 id>","instruction":"檢查這首詩有沒有押韻","use":["s1"]}}],"loop":{{"check":"s2","back_to":"s1","max_rounds":3}}}}
 
 請求：你好
-輸出：{{"steps":[]}}{history_block}{image_block}"""
+輸出：{{"steps":[],"loop":null}}{history_block}{image_block}"""
 
 
 def _extract_json(text: str) -> dict:
@@ -251,7 +270,35 @@ def parse_plan(text: str, agents: dict[str, AgentSpec], allow_prev: bool = False
     return steps
 
 
-def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSpec], notes: list[str]) -> list[Step]:
+def parse_loop(text: str) -> loops.Loop | None:
+    """LLM 計畫裡的 loop（格式不對就當作沒有，之後還有不靠 LLM 的判斷）。"""
+    try:
+        raw = _extract_json(text).get("loop")
+    except PlanError:
+        return None
+    if not isinstance(raw, dict) or not raw.get("check") or not raw.get("back_to"):
+        return None
+    try:
+        return loops.Loop(str(raw["check"]), str(raw["back_to"]), int(raw.get("max_rounds") or 0))
+    except (TypeError, ValueError):
+        return None
+
+
+def finish_loop(steps: list[Step], message: str, loop: loops.Loop | None, notes: list[str]) -> loops.Loop | None:
+    """確認 LLM 給的迴圈合理；沒有（或不合理）但請求像在要求「不通過就重做」時，由程式補上。"""
+    checked = loops.validate(loop, steps)
+    if loop and not checked:
+        notes.append(f"村長規劃的迴圈不合理（{loop.check} 退回 {loop.back_to}），改由程式判斷")
+    if checked is None and (guess := loops.from_message(steps, message)):
+        checked = loops.validate(guess, steps)
+        if checked:
+            notes.append(f"請求要求不通過就重做：{checked.check} 審查，不通過退回 {checked.back_to}")
+    return checked
+
+
+def prune_unrequested(
+    steps: list[Step], message: str, agents: dict[str, AgentSpec], notes: list[str], keep: set[str] | None = None,
+) -> list[Step]:
     """弱模型常會「多做」：例如只要詩卻順手加一步笑話。
 
     移除這種步驟（而且沒有其他步驟依賴它）：
@@ -262,6 +309,8 @@ def prune_unrequested(steps: list[Step], message: str, agents: dict[str, AgentSp
     lower = message.lower()
 
     def unrequested(s: Step) -> bool:
+        if keep and s.id in keep:  # 迴圈的審查步驟是請求要的
+            return False
         if _mentioned(s.instruction, message):  # 「畫一隻狗，再畫一隻兔子」的兩步都是原話
             return False
         kws = agents[s.agent].village.keywords
@@ -304,7 +353,7 @@ async def plan_with_llm(
     message: str, agents: list[AgentSpec], llm: ChatLLM, notes: Notes, history: list[Turn] | None = None,
     appraisal: str = "",
     documents: str = "",
-) -> list[Step] | None:
+) -> tuple[list[Step], loops.Loop | None] | None:
     by_id = {a.id: a for a in agents}
     messages = [ChatMessage("user", f"請求：{message}")]
     for attempt in range(PLAN_RETRIES + 1):
@@ -320,7 +369,10 @@ async def plan_with_llm(
             await notes.add(f"LLM 規劃無法使用：{e}")
             return None
         try:
-            return prune_unrequested(parse_plan(r.text, by_id, allow_prev=bool(history)), message, by_id, notes)
+            steps = parse_plan(r.text, by_id, allow_prev=bool(history))
+            loop = parse_loop(r.text)
+            steps = prune_unrequested(steps, message, by_id, notes, keep={loop.check} if loop else None)
+            return steps, finish_loop(steps, message, loop, notes)
         except PlanError as e:
             await notes.add(f"第 {attempt + 1} 次規劃無效：{e}，請村長重新規劃")
             messages += [
@@ -370,20 +422,23 @@ async def make_plan(
     by_id = {a.id: a for a in agents}
     if plan := plan_from_mentions(message, by_id):
         _link_previous(plan.steps, message, history, plan.notes)
+        plan.loop = finish_loop(plan.steps, message, None, plan.notes)
         return plan
     if not agents:
         return Plan(steps=[], source="direct", notes=["村裡還沒有任何村民"])
 
     notes = Notes(on_note)
-    steps = await plan_with_llm(message, agents, llm, notes, history, appraisal, documents)
-    if steps is not None:
-        return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes))
+    planned = await plan_with_llm(message, agents, llm, notes, history, appraisal, documents)
+    if planned is not None:
+        steps, loop = planned
+        return Plan(steps=steps, source="llm" if steps else "direct", notes=list(notes), loop=loop)
 
     steps = plan_from_keywords(message, agents)
     if steps:
         await notes.add("改用關鍵字備援規劃")
         _link_previous(steps, message, history, notes)
-        return Plan(steps=steps, source="keyword", notes=list(notes))
+        loop = finish_loop(steps, message, None, notes)
+        return Plan(steps=steps, source="keyword", notes=list(notes), loop=loop)
     return Plan(steps=[], source="direct", notes=list(notes))
 
 

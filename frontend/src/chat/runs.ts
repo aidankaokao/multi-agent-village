@@ -1,5 +1,5 @@
 import type { DocChip } from "./docs";
-import type { Attachment, MessageRow } from "../api";
+import type { Attachment, LoopInfo, MessageRow } from "../api";
 import type { VillageEvent } from "../events";
 
 export type StepStatus = "pending" | "running" | "done" | "error";
@@ -20,6 +20,20 @@ export interface StepView {
   retryReason?: string;
   warnings: string[];
   attachments?: Attachment[];
+  round?: number; // 迴圈的第幾輪
+  verdict?: LoopVerdictView; // 迴圈的審查步驟：這一輪的結論
+  rounds?: { round: number; output?: string; verdict?: LoopVerdictView }[]; // 迴圈前幾輪的成果
+}
+
+export interface LoopVerdictView {
+  passed: boolean;
+  feedback: string;
+  how: string;
+  round: number;
+  maxRounds: number;
+  backAgent: string;
+  retry: boolean;
+  stop?: string | null;
 }
 
 export interface AppraisalView {
@@ -55,6 +69,7 @@ export interface RunView {
   appraisal?: AppraisalView; // 鑑定師看圖
   reviews: ReviewView[];
   source?: PlanSource;
+  loop?: LoopInfo | null; // 改到過關為止
   notes: string[];
   steps: StepView[];
   liveAnswer?: string; // 村長直接回覆時的串流文字
@@ -151,13 +166,48 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
         ...run,
         status: "running",
         source: e.source as PlanSource,
+        loop: (e.loop as LoopInfo | null) ?? null,
         notes: (e.notes as string[]) ?? [],
         steps: steps.map((s) => ({ ...s, status: "pending", retries: 0, warnings: [] })),
       };
       break;
     }
-    case "agent.started": // 審核員退回重做時同一步會再 started 一次
-      run = patchStep(run, e.step_id, (s) => ({ ...s, status: "running", startedAt: s.startedAt ?? Date.now(), elapsed_ms: undefined }));
+    case "agent.started": {
+      // 審核員退回重做時同一步會再 started 一次；迴圈的下一輪（round 變大）把上一輪的成果收進 rounds
+      const round = (e.round as number) ?? 1;
+      run = patchStep(run, e.step_id, (s) =>
+        round > (s.round ?? 1)
+          ? {
+              ...s,
+              status: "running",
+              round,
+              rounds: [...(s.rounds ?? []), { round: s.round ?? 1, output: s.output, verdict: s.verdict }],
+              output: undefined,
+              live: "",
+              verdict: undefined,
+              attachments: [],
+              warnings: [],
+              startedAt: Date.now(),
+              elapsed_ms: undefined,
+            }
+          : { ...s, status: "running", startedAt: s.startedAt ?? Date.now(), elapsed_ms: undefined },
+      );
+      break;
+    }
+    case "loop.verdict":
+      run = patchStep(run, e.step_id, (s) => ({
+        ...s,
+        verdict: {
+          passed: !!e.passed,
+          feedback: (e.feedback as string) ?? "",
+          how: (e.how as string) ?? "",
+          round: (e.round as number) ?? 1,
+          maxRounds: (e.max_rounds as number) ?? 1,
+          backAgent: (e.back_agent as string) ?? "",
+          retry: !!e.retry,
+          stop: (e.stop as string | null) ?? null,
+        },
+      }));
       break;
     case "agent.delta":
       if (e.step_id == null) run = { ...run, liveAnswer: e.text as string };
@@ -248,5 +298,12 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
 /** 最後交給使用者的步驟（沒有其他步驟用到它的成果）；平行時可能有好幾個 */
 export function leafIds(run: RunView): Set<string> {
   const used = new Set(run.steps.flatMap((s) => s.use));
-  return new Set(run.steps.filter((s) => !used.has(s.id)).map((s) => s.id));
+  const out = new Set<string>();
+  for (const s of run.steps) {
+    if (used.has(s.id)) continue;
+    // 迴圈的審查步驟不是答案：答案是被審查的成果（審查意見留在執行過程）
+    if (run.loop && s.id === run.loop.check) s.use.forEach((u) => out.add(u));
+    else out.add(s.id);
+  }
+  return out;
 }

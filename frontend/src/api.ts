@@ -204,6 +204,22 @@ export interface TraceStep {
   rejected: { output: string; reason: string }[];
   attachments: Attachment[];
   tool_args: Record<string, unknown> | null;
+  round?: number; // 迴圈的第幾輪
+  verdict?: LoopVerdict | null; // 迴圈的審查步驟
+  history?: { round: number; output: string; verdict: LoopVerdict | null; elapsed_ms: number }[]; // 迴圈前幾輪
+}
+
+/** 迴圈：審查結論 */
+export interface LoopVerdict {
+  passed: boolean;
+  feedback: string;
+  how: string; // 結論 / LLM 判斷 / 判斷不出來，當作通過
+}
+
+export interface LoopInfo {
+  check: string;
+  back_to: string;
+  max_rounds: number; // 0 = 用村規的上限
 }
 
 export interface TraceReview {
@@ -225,6 +241,7 @@ export interface RunDetail extends RunSummary {
     source: string;
     notes: string[];
     appraisal?: AppraisalInfo; // 鑑定師看圖的結果
+    loop?: LoopInfo | null; // 改到過關為止
   } | null;
   steps: TraceStep[];
   reviews: TraceReview[];
@@ -240,6 +257,7 @@ export interface VillageRules {
   max_images: number;
   paint_per_run: number;
   paint_per_day: number;
+  loop_max_rounds: number; // 迴圈（審查不通過就重做）最多幾輪
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;

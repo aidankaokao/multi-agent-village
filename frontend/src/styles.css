@@ -1641,3 +1641,14 @@ button.mention-item .clamp {
   font-size: 11px;
   border-top: 2px solid var(--line);
 }
+
+/* ---------------------------------------------------------------- 迴圈 */
+
+.loop-feedback {
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+
+.loop-rounds summary {
+  cursor: pointer;
+}

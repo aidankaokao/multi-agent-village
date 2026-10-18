@@ -29,7 +29,9 @@
   村子這邊：💬 📎 附文件（`chat_files`、`core/docfiles.py`、`api/files.py`），只交給名片寫著收文件的駐村專家，
   回傳的 PDF 存 14 天並顯示下載；追問上一份報告會再交給同一位。
 
-**下一步**：① 迴圈（改到過關為止，先提設計方案）→ ② 網路研究員（外接 agent）→ ③ 語音轉文字（外接 agent）。詳見 `docs/ROADMAP.md`「接下來」。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
+- **迴圈（改到過關為止）**：計畫的 `loop`（審查步驟、退回哪一步、最多幾輪）、`core/loop.py`、內建村民「審稿人 @editor」。
+
+**下一步**：使用者實測迴圈 → ② 網路研究員（外接 agent）→ ③ 語音轉文字（外接 agent）。詳見 `docs/ROADMAP.md`「接下來」。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
 
@@ -47,7 +49,9 @@
 - LLM 可能是雲端，也可能是本地弱模型（Ollama）。任何依賴 LLM 的流程都要有結構化輸出約束、失敗重試與非 LLM 的退路。
   OpenAI 相容 client 會自動適應各家參數差異（max_completion_tokens、不收 temperature、reasoning_effort 的 none/minimal/low），
   JSON 輸出被截斷時換下一個模型；模型取消勾選「支援 JSON schema」= 不送約束照樣使用。
-- 規劃（LLM）與執行（程式碼）分開：村長只產生 Plan JSON（`steps`、`use`，`"prev"` = 上一輪的回答），Executor 負責執行。
+- 規劃（LLM）與執行（程式碼）分開：村長只產生 Plan JSON（`steps`、`use`，`"prev"` = 上一輪的回答；`loop` = 審查不通過就退回重做），
+  Executor 負責執行。迴圈的判定與上限都在程式：審查結論讀「結論：通過 / 不通過」→ 小模型判讀 → 判不出來當作通過；
+  輪數受村規 `loop_max_rounds` 限制、每次問答總步數 ≤ 15；迴圈狀態放 context variable `_LOOP`。
 - 系統角色（保留名稱，不會被派去做問答）：`mayor` 村長、`craftsman` 工匠（`core/workshop.py`，對話打造村民）、
   `reviewer` 審核員（`core/reviewer.py`）、`scribe` 書記（`core/scribe.py`，長期記憶）、
   `appraiser` 鑑定師（`core/appraiser.py`，有附圖時先看圖，結果放 context variable `_APPRAISAL` 交給村長 / 村民 / 審核員）。

@@ -24,6 +24,7 @@ class VillageRules(BaseModel):
     max_images: int = Field(default=3, ge=0, le=10)  # 問答每次最多附幾張圖（0 = 不開放附圖）
     paint_per_run: int = Field(default=1, ge=0, le=4)  # 畫家每次問答最多畫幾張（0 = 不開放畫圖）
     paint_per_day: int = Field(default=20, ge=0, le=500)  # 畫家每人每天（最近 24 小時）最多畫幾張
+    loop_max_rounds: int = Field(default=3, ge=1, le=5)  # 迴圈（審查不通過就重做）最多幾輪；計畫寫的輪數不能超過它
 
 
 class RulesStore:
