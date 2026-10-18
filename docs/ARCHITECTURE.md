@@ -358,7 +358,8 @@ class BaseAgent(Protocol):
 - 取件：下一步 `use` 了那一步、而且是收文件的駐村專家（`remote.accepts`）時，`Runner._parcels_for` 挑出它收的格式；
   那一步只有文字成果（摘要師、網路研究員）而對方收 txt 時，`drop_text` 把文字包成「{村民}的成果.txt」。
   出發前 `Depot.pick_up` 讀出內容（`load_file`：只讀得到提問者自己的檔案）→ `remote.handing` → `files_for`
-  （使用者附的文件優先，合計最多 3 份）→ A2A file part。訊息裡附上取件通知（`slip`：「中轉站有…#1 逐字稿.txt（來自聽打員）」）。
+  （使用者附的文件優先，合計最多 3 份）→ A2A file part。訊息裡附上取件通知（`slip`：「中轉站有…#1 逐字稿.txt（來自聽打員）」），
+  已經用檔案交付的步驟成果不再重複貼進文字訊息（`render_context(skip=…)`；文件彙整師的「要求」上限 2000 字）。
 - 駐村專家在別的容器、連不回村子，所以由村子代為取件、隨訊息送出（A2A 也支援 file part 只給 `uri`，
   以後檔案大到不適合隨訊息送、或專家能安全地回來拿時，可以改成給一次性的取件網址）。
 - `StepResult.received`、`agent.started` 的 `received`：執行過程與紀錄顯示「📦 從中轉站取件：#1 …」。

@@ -119,6 +119,7 @@ async def test_text_result_handed_to_report_maker(village):
     [call] = agent.calls
     assert _file_parts(call) == [("摘要師的成果.txt", "## 重點\n- 三點開會".encode())]
     assert "中轉站有前面步驟交給你的檔案" in _text(call) and "#1 摘要師的成果.txt（來自摘要師" in _text(call)
+    assert "參考資料（來自摘要師）" not in _text(call)  # 已經用檔案交付：文字訊息不重複全文（對方的要求有字數上限）
     trace = (await c.get(f"/api/runs/{r['run_id']}")).json()
     assert trace["steps"][1]["received"][0].startswith("#1 摘要師的成果.txt") and trace["steps"][0]["received"] == []
     assert [a["name"] for a in msgs[-1]["meta"]["attachments"]] == ["營運彙整.pdf"]

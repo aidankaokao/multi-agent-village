@@ -93,8 +93,9 @@ class StepResult:
 
 
 def render_context(
-    step: Step, results: dict[str, StepResult], registry: AgentRegistry, previous: str = ""
+    step: Step, results: dict[str, StepResult], registry: AgentRegistry, previous: str = "", skip: set[str] | None = None,
 ) -> str:
+    """skip：成果已經從中轉站用檔案交付的步驟（文字訊息裡不再重複全文，只留取件通知）。"""
     parts = []
     if memories := _MEMORIES.get():
         parts.append(memories)
@@ -106,6 +107,8 @@ def render_context(
         if note := state.note_for(step.id):
             parts.append(note)
     for ref in step.use:
+        if skip and ref in skip:
+            continue
         r = results.get(ref)
         if r and r.output:
             spec = registry.get(r.agent)
@@ -487,19 +490,20 @@ class Runner:
                 await self.bus.publish("agent.handoff", run_id=run_id, from_agent=d.agent, to_agent=step.agent)
         if deps and self.handoff_delay:
             await asyncio.sleep(self.handoff_delay)
-        context = render_context(step, results, self.registry, _PREVIOUS.get())
+        parcels = self._parcels_for(step, self.registry.get(step.agent), results)
+        context = render_context(step, results, self.registry, _PREVIOUS.get(), skip={p.step for p in parcels})
         state = _LOOP.get()
         is_check = bool(state and state.loop and step.id == state.loop.check)
         instruction = step.instruction + (loops.VERDICT_SUFFIX if is_check else "")
-        await self._run_step(run_id, step, r, rules, instruction, context, results)
+        await self._run_step(run_id, step, r, rules, instruction, context, parcels)
 
     async def _run_step(
         self, run_id: str, step: Step, r: StepResult, rules: VillageRules, instruction: str, context: str,
-        results: dict[str, StepResult],
+        parcels: list[Parcel],
     ) -> None:
+        """parcels：要從中轉站取件交給它的檔案（只有收文件的駐村專家會有）。"""
         emit = self.bus.publish
         spec = self.registry.get(step.agent)
-        parcels = self._parcels_for(step, spec, results)
         handed = await self._pick_up(parcels)
         if parcels:
             r.received = [p.label() for p in parcels]
@@ -607,9 +611,10 @@ class Runner:
             await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=f"審核員退回：{rv.reason}")
             await emit("agent.handoff", run_id=run_id, from_agent=REVIEWER_ID, to_agent=step.agent)
             instruction = f"{step.instruction}\n\n審核員退回了你上一次的成果。原因：{rv.reason}\n請這樣修正：{rv.fix or rv.reason}"
-            context = render_context(step, results, self.registry, _PREVIOUS.get())
+            parcels = self._parcels_for(step, self.registry.get(step.agent), results)
+            context = render_context(step, results, self.registry, _PREVIOUS.get(), skip={p.step for p in parcels})
             context = f"{context}\n\n你上一次的成果（被退回）：\n{r.output}".strip()
-            await self._run_step(run_id, step, r, rules, instruction, context, results)
+            await self._run_step(run_id, step, r, rules, instruction, context, parcels)
             if r.status != "done":
                 return
 
