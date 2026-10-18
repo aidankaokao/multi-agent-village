@@ -1,0 +1,41 @@
+# 網路研究員：獨立部署（和 Multi-Agent Village 分開）
+#   cp .env.example .env → ./build.sh → docker-compose up -d → 打開 http://localhost:${WR_PORT}
+# 搜尋引擎 SearXNG 一起跑，只在這個 compose 的內部網路，外面連不到。
+services:
+  web-researcher:
+    image: ${IMAGE_REGISTRY:-}${IMAGE_NAME:-web-researcher-agent}:${IMAGE_TAG:-0.1.0}
+    build:
+      context: .
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+        UV_VERSION: ${UV_VERSION:-0.6.14}
+    restart: unless-stopped
+    depends_on:
+      - searxng
+    ports:
+      # 預設只開給本機：呼叫時 header 裡有 LLM 的 API key，跨機器要走 HTTPS 才安全
+      - "${WR_BIND:-127.0.0.1}:${WR_PORT:-8102}:8102"
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      WR_ACCESS_TOKENS: ${WR_ACCESS_TOKENS:-}
+      WR_PUBLIC_URL: ${WR_PUBLIC_URL:-http://localhost:8102}
+      WR_SEARXNG_URL: http://searxng:8080
+      WR_LANGUAGE: ${WR_LANGUAGE:-zh-TW}
+      WR_ALLOWED_LLM_HOSTS: ${WR_ALLOWED_LLM_HOSTS:-}
+      WR_MAX_QUERIES: ${WR_MAX_QUERIES:-3}
+      WR_MAX_PAGES: ${WR_MAX_PAGES:-6}
+      WR_PASSAGES: ${WR_PASSAGES:-10}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Linux 也能連主機上的 Ollama
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  searxng:
+    image: ${SEARXNG_IMAGE:-searxng/searxng:2026.10.17-1c10abe2d}
+    restart: unless-stopped
+    # 不開 port：只有研究員連得到（http://searxng:8080）
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?請先執行 ./build.sh（會自動產生 SEARXNG_SECRET）}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro

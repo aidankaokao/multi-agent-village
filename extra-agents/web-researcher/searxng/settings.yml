@@ -1,0 +1,20 @@
+# SearXNG 設定（網路研究員專用，不對外開放）。其他沒寫的用 SearXNG 的預設值。
+# 金鑰用環境變數 SEARXNG_SECRET（./build.sh 會自動產生寫進 .env），這裡的值會被覆蓋。
+use_default_settings: true
+
+general:
+  instance_name: "village-web-researcher"
+
+search:
+  safe_search: 1
+  default_lang: "zh-TW"
+  # 研究員用 JSON API 查詢（預設只有 html）
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "change-me-by-SEARXNG_SECRET"
+  limiter: false        # 只有研究員自己會查，不需要防濫用（limiter 需要另外架 Valkey）
+  image_proxy: false
+  public_instance: false

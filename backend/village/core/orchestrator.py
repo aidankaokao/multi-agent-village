@@ -215,7 +215,8 @@ def planner_system_prompt(
 7. 如果沒有任何村民適合（例如打招呼、閒聊、詢問村子），steps 回傳空陣列。
 8. loop：只有請求要求「審查不通過就重做 / 改到通過為止 / 最多 N 輪」時才填，否則填 null。
    填法：安排一個審查步驟（use 填被審查的步驟），loop 填 {{"check": 審查步驟 id, "back_to": 不通過時退回的步驟 id
-   （只要改寫就填被審查的那一步；要重新查資料就填第一步）, "max_rounds": N（沒說就填 3）}}。{history_rule}{image_rule}
+   （只要改寫就填被審查的那一步；要重新查資料就填第一步）, "max_rounds": N（沒說就填 3）}}。
+   不通過時的重做（補資料、修改）由迴圈自動處理：審查步驟之後不要再排「依意見修改」的步驟。{history_rule}{image_rule}
 只輸出 JSON，不要任何說明。
 
 範例
@@ -289,6 +290,19 @@ def parse_loop(text: str) -> loops.Loop | None:
         return None
 
 
+def drop_redo_steps(steps: list[Step], loop: loops.Loop | None, notes: list[str]) -> None:
+    """迴圈之後又排了「依審查意見修改」（被退回的村民用到審查步驟的成果）：重做已經由迴圈處理，這步多餘。"""
+    if loop is None:
+        return
+    ids = [s.id for s in steps]
+    span = ids[ids.index(loop.back_to) : ids.index(loop.check) + 1]
+    agents = {s.agent for s in steps if s.id in span and s.id != loop.check}
+    for s in list(steps[ids.index(loop.check) + 1 :]):
+        if s.agent in agents and loop.check in s.use and not any(s.id in o.use for o in steps if o is not s):
+            steps.remove(s)
+            notes.append(f"移除多餘的重做步驟：{s.id}（不通過時迴圈會自動退回重做）")
+
+
 def finish_loop(steps: list[Step], message: str, loop: loops.Loop | None, notes: list[str]) -> loops.Loop | None:
     """確認 LLM 給的迴圈合理；沒有（或不合理）但請求像在要求「不通過就重做」時，由程式補上。"""
     checked = loops.validate(loop, steps)
@@ -303,6 +317,7 @@ def finish_loop(steps: list[Step], message: str, loop: loops.Loop | None, notes:
         checked = loops.validate(guess, steps)
         if checked:
             notes.append(f"請求要求不通過就重做：{checked.check} 審查，不通過退回 {checked.back_to}")
+    drop_redo_steps(steps, checked, notes)
     return checked
 
 

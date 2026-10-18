@@ -12,3 +12,4 @@
 |---|---|---|
 | [taiwan-history](taiwan-history/) | ✅ 完成（村子裡叫駐村專家） | 台灣史專家：以維基百科等公開資料做 RAG，回答附引用來源 |
 | [report-maker](report-maker/) | ✅ 完成（村子裡叫駐村專家，💬 📎 附文件） | 文件彙整師：上傳 Excel / CSV / txt / PDF（最多 3 份）→ 彙整報告 PDF |
+| [web-researcher](web-researcher/) | 本體完成，待使用者實測 | 網路研究員：自架 SearXNG 搜尋、讀網頁、附引用來源回答（即時資訊） |

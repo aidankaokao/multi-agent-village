@@ -80,6 +80,12 @@ async def test_planner_loop_and_fallbacks(registry):
     plan = await make_plan("寫一首海的詩，審稿人檢查押韻，改到通過為止", registry.all(), FakeLLM(lambda t, m, kw: json.dumps(no_loop)))
     assert plan.loop == loops.Loop("s2", "s1", 0) and any("不通過就重做" in n for n in plan.notes)
 
+    # 村長在審查之後又排了「研究員依意見再查」：迴圈會處理，移除
+    extra = json.loads(LOOP_PLAN)
+    extra["steps"].append({"id": "s3", "agent": "poet", "instruction": "依審稿意見修改", "use": ["s2"]})
+    plan = await make_plan("寫一首海的詩，審稿人檢查押韻，不通過就修改，最多 2 輪", registry.all(), FakeLLM(lambda t, m, kw: json.dumps(extra)))
+    assert [s.id for s in plan.steps] == ["s1", "s2"] and any("多餘的重做步驟" in n for n in plan.notes)
+
     # @指名
     plan = await make_plan("@poet 寫一首關於海的詩 → @editor 檢查押韻（不通過就重寫，最多 2 輪）", registry.all(), llm)
     assert plan.source == "mention" and plan.loop == loops.Loop("s2", "s1", 2)

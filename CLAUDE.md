@@ -31,7 +31,10 @@
 
 - **迴圈（改到過關為止）**：計畫的 `loop`（審查步驟、退回哪一步、最多幾輪）、`core/loop.py`、內建村民「審稿人 @editor」。
 
-**下一步**：② 網路研究員（外接 agent，先提設計方案）→ ③ 語音轉文字（外接 agent）。詳見 `docs/ROADMAP.md`「接下來」。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
+- **網路研究員（外接 agent）**：`extra-agents/web-researcher/`（規劃在它的 `PLAN.md`），自架 SearXNG（同一個 compose、不開 port）
+  → 讀網頁（擋內網）→ 挑段落 → 附引用回答；127.0.0.1:8102。村子不用改程式（引用格式同台灣史專家）。
+
+**下一步**：使用者部署實測網路研究員 → ③ 語音轉文字（外接 agent）。詳見 `docs/ROADMAP.md`「接下來」。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
 
@@ -100,6 +103,8 @@
 - 前端：`cd frontend && npm run dev`（5173，/api 與 /ws 代理到後端）；型別檢查 `npx tsc -b`
 - 忘記密碼：`village reset-password <帳號>`；直接建管理員：`village create-admin <帳號>`（容器內加 `docker-compose exec backend`）
 - 主金鑰輪替：`village rotate-key`（API key 與駐村專家的存取 token 一起重新加密）
+- 網路研究員（`extra-agents/web-researcher/`）：`uv run wr search | ask | serve | gen-token`；本機要先跑 SearXNG（README 有指令）。
+  本機 Ollama 上下文預設 4096 token，資料多時回答會被截斷（研究員會自動減半資料重寫）
 - 台灣史專家（`extra-agents/taiwan-history/`）：`uv run th index | search | ask | serve | gen-token`、`uv run pytest`；
   部署 `./build.sh` → 使用者自己 `docker-compose up -d`（在那個資料夾）。兩邊都要更新時：**先部署專家、再部署村子**
 - 重新產生 sprites（角色、裝飾、manifest）：`uv run --with pillow python scripts/gen_placeholder_sprites.py`；頁籤 icon：`scripts/gen_favicon.py`（同樣用法）
