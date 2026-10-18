@@ -38,6 +38,10 @@
   .note { color: #8a5a00; font-size: 9pt; }
   .warn { color: #b00020; font-size: 9pt; }
   .appendix { break-before: page; }
+  figure.chart { margin: 0 0 12pt; break-inside: avoid; }
+  figure.chart figcaption { font-weight: bold; font-size: 10pt; margin-bottom: 4pt; }
+  figure.chart svg { width: 100%; height: auto; }
+  figure.chart .s { font-size: 7.5pt; color: #888; }
 </style>
 </head>
 <body>
@@ -51,11 +55,13 @@
   {% if r.llm_error %}<div class="warn">※ 沒有用 LLM 整理（{{ r.llm_error }}），以下只有程式統計的內容。</div>{% endif %}
   {% for f in r.failed %}<div class="warn">※ 沒有讀到：{{ f.error }}</div>{% endfor %}
 
-  <h2>一、總結</h2>
+  {% set sec = namespace(n=1) %}
+  {% set nums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"] %}
+  <h2>{{ nums[sec.n] }}、總結</h2>{% set sec.n = sec.n + 1 %}
   {% for p in paragraphs %}<p>{{ p }}</p>{% endfor %}
 
   {% if r.key_figures %}
-  <h2>二、重點數字</h2>
+  <h2>{{ nums[sec.n] }}、重點數字</h2>{% set sec.n = sec.n + 1 %}
   <div class="figures">
     {% for k in r.key_figures %}
     <div class="figure"><div class="v">{{ k.value }}</div><div class="l">{{ k.label }}</div>{% if k.source %}<div class="s">出自 {{ k.source }}</div>{% endif %}</div>
@@ -63,8 +69,17 @@
   </div>
   {% endif %}
 
-  {% set sec = namespace(n=3 if r.key_figures else 2) %}
-  {% set nums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"] %}
+  {% if r.charts %}
+  <h2>{{ nums[sec.n] }}、圖表</h2>{% set sec.n = sec.n + 1 %}
+  {% for c in r.charts %}
+  <figure class="chart">
+    <figcaption>圖 {{ loop.index }}：{{ c.title }}</figcaption>
+    {{ c.svg | safe }}
+    <div class="s">出自 {{ c.source }}；數字由程式依原始資料計算</div>
+  </figure>
+  {% endfor %}
+  {% endif %}
+
   <h2>{{ nums[sec.n] }}、各檔重點</h2>{% set sec.n = sec.n + 1 %}
   {% for f in r.files %}
   <h3>{{ loop.index }}. {{ f.name }}</h3>

@@ -114,7 +114,7 @@ def pdf_name(title: str) -> str:
 
 
 def report_data(report: dict) -> dict:
-    keep = ("title", "model", "llm_error", "notes", "timings", "failed", "key_figures", "generated_at")
+    keep = ("title", "model", "llm_error", "notes", "timings", "failed", "key_figures", "charts", "generated_at")
     return {**{k: report[k] for k in keep}, "documents": [
         {k: d[k] for k in ("name", "kind", "size", "pages", "info", "notes")} for d in report["documents"]
     ]}

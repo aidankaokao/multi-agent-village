@@ -25,7 +25,7 @@
 - **地圖互動**：點村民開始問答（自動 @）、村民冒泡自我介紹、村民之間聊天（頻率使用者覺得剛好）。
 - **Phase 6R 文件彙整師（外接 agent）**：`extra-agents/report-maker/`（規劃與進度在它的 `PLAN.md`）。
   xlsx / csv / txt / pdf（最多 3 份）→ 程式讀檔與統計（含分組小計）→ 呼叫端自帶 LLM 整理成報告 JSON（重點數字和原始資料核對）
-  → WeasyPrint 報告 PDF；A2A file part 收發、串流進度、測試網頁、獨立 docker-compose（127.0.0.1:8101）。
+  → WeasyPrint 報告 PDF（含程式畫的 SVG 圖表，LLM 只挑要放哪幾張）；A2A file part 收發、串流進度、測試網頁、獨立 docker-compose（127.0.0.1:8101）。
   村子這邊：💬 📎 附文件（`chat_files`、`core/docfiles.py`、`api/files.py`），只交給名片寫著收文件的駐村專家，
   回傳的 PDF 存 14 天並顯示下載；追問上一份報告會再交給同一位。
 

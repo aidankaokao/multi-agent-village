@@ -21,7 +21,7 @@ def good_json(names: list[str]) -> str:
     return json.dumps({
         "title": "銷售彙整", "summary": "第一段\n\n第二段",
         "files": [{"name": n, "points": ["重點一"]} for n in names],
-        "comparison": ["差異"], "conclusions": ["結論"], "recommendations": [],
+        "comparison": ["差異"], "conclusions": ["結論"], "recommendations": [], "charts": ["c1", "c1", "c99"],
         "key_figures": [{"label": "總金額", "value": "8,000 元", "source": names[0]},
                         {"label": "成長率", "value": "37.5%", "source": names[0]}],  # 37.5 不在資料裡 → 移除
     }, ensure_ascii=False)
@@ -54,6 +54,8 @@ async def test_compose_with_llm(monkeypatch, sales_xlsx):
     assert calls[0][2]["schema"] is R.SCHEMA
     assert rep.comparison == []  # 只有一份文件：不放跨檔比較
     assert [k["value"] for k in rep.key_figures] == ["8,000 元"]
+    assert [c["title"] for c in rep.charts] == ["依部門的金額合計"] and rep.charts[0]["svg"].startswith("<svg")  # 去重、不認得的略過
+    assert "可以放進報告的圖表" in calls[0][1] and "[c1] 依部門的金額合計" in calls[0][1]
     assert any("對不上" in n for n in rep.notes)
     md = rep.to_markdown()
     assert md.startswith("📑 銷售彙整") and "・結論" in md and "**" not in md
@@ -72,6 +74,7 @@ async def test_compose_retries_then_falls_back(monkeypatch, sales_xlsx):
     rep = await R.compose(docs, "整理", LLM, settings())
     assert n == 2  # 重試一次
     assert rep.title.endswith("（統計版）") and "JSON" in rep.llm_error
+    assert rep.charts and rep.charts[0]["kind"] == "line"  # 沒有 LLM 的結果：程式自己挑（時間趨勢優先）
     assert any("金額總和 8,000" in p for p in rep.files[0]["points"])
 
 

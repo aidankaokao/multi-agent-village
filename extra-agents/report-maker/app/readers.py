@@ -49,10 +49,13 @@ class Table:
     # 分組小計：[{by: 欄名, sums: [欄名…], groups: [{key, count, sums: [合計…], means: [平均…]}]}]
     # （程式算好，報告裡的小計以這裡為準；客單價、比率這類欄位看平均，合計沒有意義）
     groups: list[dict] = field(default_factory=list)
+    # 依日期欄按月彙總（格式同 groups，key 是 YYYY-MM，依時間排序）：日期跨兩個月以上才有
+    series: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"name": self.name, "rows": self.rows, "truncated": self.truncated,
-                "columns": [c.to_dict() for c in self.columns], "sample": self.sample, "groups": self.groups}
+                "columns": [c.to_dict() for c in self.columns], "sample": self.sample, "groups": self.groups,
+                "series": self.series}
 
 
 @dataclass
@@ -247,7 +250,46 @@ def _table(name: str, rows, limits: Limits) -> Table | None:
         return None
     columns = [s.result() for s in stats]
     return Table(name=name, columns=columns, rows=count, sample=sample, truncated=truncated,
-                 groups=_groups(columns, stats, kept))
+                 groups=_groups(columns, stats, kept), series=_monthly(columns, kept))
+
+
+def _aggregate(rows: list[list], key_of, nums: list[int]) -> dict[str, list]:
+    acc: dict[str, list] = {}
+    for r in rows:
+        key = key_of(r)
+        if not key:
+            continue
+        g = acc.setdefault(key, [0, [0.0] * len(nums), [0] * len(nums)])
+        g[0] += 1
+        for j, n in enumerate(nums):
+            v = _number(r[n]) if n < len(r) else None
+            if v is not None:
+                g[1][j] += v
+                g[2][j] += 1
+    return acc
+
+
+def _rows_of(acc: dict[str, list], order) -> list[dict]:
+    return [{"key": key, "count": c, "sums": [_round(x) for x in sums],
+             "means": [_round(x / k) if k else 0 for x, k in zip(sums, counts, strict=True)]}
+            for key, (c, sums, counts) in sorted(acc.items(), key=order)]
+
+
+def _monthly(columns: list[Column], rows: list[list]) -> list[dict]:
+    """第一個日期欄按月彙總數字欄（給折線圖用）；只有一個月就不用。"""
+    nums = [i for i, c in enumerate(columns) if c.numeric][:GROUP_SUM_COLS]
+    dcol = next((i for i, c in enumerate(columns) if c.dates), None)
+    if dcol is None or not nums:
+        return []
+
+    def month(r) -> str:
+        v = r[dcol] if dcol < len(r) else None
+        return v.strftime("%Y-%m") if isinstance(v, (datetime, date)) else ""
+
+    acc = _aggregate(rows, month, nums)
+    if len(acc) < 2:
+        return []
+    return [{"by": columns[dcol].name, "sums": [columns[n].name for n in nums], "groups": _rows_of(acc, lambda kv: kv[0])}]
 
 
 def _groups(columns: list[Column], stats: list["_ColumnStats"], rows: list[list]) -> list[dict]:
@@ -258,22 +300,9 @@ def _groups(columns: list[Column], stats: list["_ColumnStats"], rows: list[list]
             and stats[i].distinct < stats[i].filled][:GROUP_BY_COLS]  # 每組只有一列就不用小計
     out = []
     for k in keys:
-        acc: dict[str, list] = {}
-        for r in rows:
-            key = _cell(r[k]) if k < len(r) else ""
-            if not key:
-                continue
-            g = acc.setdefault(key[:40], [0, [0.0] * len(nums), [0] * len(nums)])
-            g[0] += 1
-            for j, n in enumerate(nums):
-                v = _number(r[n]) if n < len(r) else None
-                if v is not None:
-                    g[1][j] += v
-                    g[2][j] += 1
-        groups = [{"key": key, "count": c, "sums": [_round(x) for x in sums],
-                   "means": [_round(x / k) if k else 0 for x, k in zip(sums, counts, strict=True)]}
-                  for key, (c, sums, counts) in sorted(acc.items(), key=lambda kv: -kv[1][0])]
-        out.append({"by": columns[k].name, "sums": [columns[n].name for n in nums], "groups": groups})
+        acc = _aggregate(rows, lambda r, k=k: (_cell(r[k]) if k < len(r) else "")[:40], nums)
+        out.append({"by": columns[k].name, "sums": [columns[n].name for n in nums],
+                    "groups": _rows_of(acc, lambda kv: -kv[1][0])})
     return out
 
 

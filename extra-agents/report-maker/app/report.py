@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app import charts as ch
 from app.config import Settings
 from app.llm import LLMConfig, LLMError, chat, parse_json
 from app.readers import Document, ReadError, Table, check_batch, read
@@ -30,7 +31,7 @@ PARALLEL = 3
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["title", "summary", "files", "comparison", "conclusions", "recommendations", "key_figures"],
+    "required": ["title", "summary", "files", "comparison", "conclusions", "recommendations", "key_figures", "charts"],
     "properties": {
         "title": {"type": "string"},
         "summary": {"type": "string"},
@@ -46,6 +47,7 @@ SCHEMA = {
         "comparison": {"type": "array", "items": {"type": "string"}},
         "conclusions": {"type": "array", "items": {"type": "string"}},
         "recommendations": {"type": "array", "items": {"type": "string"}},
+        "charts": {"type": "array", "items": {"type": "string"}},
         "key_figures": {
             "type": "array",
             "items": {
@@ -73,7 +75,9 @@ SYSTEM = """你是「文件彙整師」，把使用者提供的文件整理成�
    - comparison：跨文件的比較、關聯或差異（只有一份文件時給空陣列）
    - conclusions：結論，2～5 點
    - recommendations：建議，0～5 點（文件內容不足以提出建議時給空陣列）
-   - key_figures：最重要的數字，0～8 個 {label: 名稱, value: 數值（含單位，照抄）, source: 出自哪個檔名}"""
+   - key_figures：最重要的數字，0～8 個 {label: 名稱, value: 數值（含單位，照抄）, source: 出自哪個檔名}
+   - charts：從「可以放進報告的圖表」清單挑 0～4 個最能支持重點方向的圖表 id（例如 ["c1", "c9"]），
+     不要挑內容重複的；清單沒有或都不適合就給空陣列"""
 
 CHUNK_SYSTEM = """你負責把一段長文件摘要成重點，之後會和其他段落的摘要合併成報告。使用臺灣正體中文。
 條列重點（每點一行，以「- 」開頭），保留具體的數字、日期、名稱、金額；不要加入原文沒有的內容。
@@ -96,6 +100,7 @@ class Report:
     llm_error: str | None = None
     notes: list[str] = field(default_factory=list)  # 給讀者的提醒（例如數字被移除、文件被摘要過）
     timings: dict = field(default_factory=dict)
+    charts: list[dict] = field(default_factory=list)  # [{title, kind, source, svg}]（程式畫的）
     generated_at: str = field(default_factory=lambda: datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"))
 
     def to_markdown(self) -> str:
@@ -118,6 +123,7 @@ class Report:
             "conclusions": self.conclusions, "recommendations": self.recommendations, "key_figures": self.key_figures,
             "question": self.question, "failed": self.failed, "model": self.model, "llm_error": self.llm_error,
             "notes": self.notes, "timings": self.timings, "generated_at": self.generated_at,
+            "charts": [{k: c[k] for k in ("title", "kind", "source")} for c in self.charts],
             "documents": [d.to_dict() for d in self.docs],
         }
 
@@ -247,6 +253,21 @@ def _strs(v, limit: int, max_len: int = 400) -> list[str]:
     return [str(x).strip()[:max_len] for x in v if isinstance(x, (str, int, float)) and str(x).strip()][:limit]
 
 
+def pick_charts(ids, cands: list[ch.Candidate]) -> list[ch.Candidate]:
+    """LLM 挑的圖表 id → 候選圖表（不認得的略過、去重、最多 MAX_CHARTS）。"""
+    by_id = {c.id: c for c in cands}
+    picked: list[ch.Candidate] = []
+    for i in ids if isinstance(ids, list) else []:
+        c = by_id.get(str(i).strip().strip("[]"))
+        if c and c not in picked:
+            picked.append(c)
+    return picked[: ch.MAX_CHARTS]
+
+
+def draw(picked: list[ch.Candidate]) -> list[dict]:
+    return [{**c.to_dict(), "svg": ch.render(c)} for c in picked]
+
+
 def normalize(raw: dict, docs: list[Document], source: str, notes: list[str]) -> dict:
     """LLM 的 JSON → 固定骨架（缺的補空、太多的截斷、檔名對回實際檔案、核對重點數字）。"""
     names = [d.name for d in docs]
@@ -310,19 +331,24 @@ async def compose(docs: list[Document], question: str, llm: LLMConfig | None, se
     timings: dict = {}
     model = llm_error = None
     body: dict | None = None
+    cands = ch.candidates(docs)
+    picked: list[ch.Candidate] = []
     if llm:
         t0 = time.monotonic()
         digests = [await digest(d, i, llm, settings.doc_chars, progress, notes) for i, d in enumerate(docs, 1)]
         timings["digest_s"] = round(time.monotonic() - t0, 2)
         source = "\n\n".join(digests)
-        user = f"使用者的要求：{question}\n\n以下是文件內容（共 {len(docs)} 份）：\n\n{source}"
+        menu = ("\n\n可以放進報告的圖表（數字由程式畫，你只要挑 id）：\n" + "\n".join(c.describe() for c in cands)) if cands else ""
+        user = f"使用者的要求：{question}\n\n以下是文件內容（共 {len(docs)} 份）：\n\n{source}{menu}"
         if progress:
             await progress("撰寫報告中")
         t0 = time.monotonic()
         for attempt in range(2):
             try:
                 text, model = await chat(llm, SYSTEM, user, max_tokens=4000, schema=SCHEMA)
-                body = normalize(parse_json(text), docs, source, notes)
+                raw = parse_json(text)
+                body = normalize(raw, docs, source, notes)
+                picked = pick_charts(raw.get("charts"), cands)
                 break
             except LLMError as e:
                 llm_error = str(e)
@@ -336,7 +362,10 @@ async def compose(docs: list[Document], question: str, llm: LLMConfig | None, se
         llm_error = "沒有提供 LLM"
     if body is None:
         body = fallback(docs)
-    return Report(**body, question=question, docs=docs, model=model, llm_error=llm_error, notes=notes, timings=timings)
+    # 要求裡點名的欄位一定放（弱模型常常只照順序挑）；其餘用 LLM 挑的，沒挑就程式自己挑
+    picked = ch.merge(ch.mentioned(cands, question), picked or ch.default_picks(cands))
+    return Report(**body, question=question, docs=docs, model=model, llm_error=llm_error, notes=notes, timings=timings,
+                  charts=draw(picked))
 
 
 # ---------------------------------------------------------------- 整個流程
