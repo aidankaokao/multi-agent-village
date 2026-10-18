@@ -142,11 +142,25 @@ function Pictures({ items }: { items: Attachment[] }) {
 /** 使用者附的圖：小縮圖排一排，點一下放大 */
 export function ImageStrip({ urls }: { urls: string[] }) {
   const [zoom, setZoom] = useState<number | null>(null);
+  const [gone, setGone] = useState<Set<number>>(new Set());
   return (
     <div className="image-strip">
-      {urls.map((u, i) => (
-        <img key={u + i} src={u} alt={`附圖 ${i + 1}`} title="點一下放大" onClick={() => setZoom(i)} />
-      ))}
+      {urls.map((u, i) =>
+        gone.has(i) ? (
+          <div key={u + i} className="expired-image" title="附圖超過村規的保存天數，已被清理">
+            🖼️ 附圖已清理
+          </div>
+        ) : (
+          <img
+            key={u + i}
+            src={u}
+            alt={`附圖 ${i + 1}`}
+            title="點一下放大"
+            onClick={() => setZoom(i)}
+            onError={() => setGone((s) => new Set(s).add(i))}
+          />
+        ),
+      )}
       {zoom !== null && (
         <Modal title={`附圖 ${zoom + 1} / ${urls.length}`} onClose={() => setZoom(null)} wide>
           <img className="zoomed" src={urls[zoom]} alt={`附圖 ${zoom + 1}`} />

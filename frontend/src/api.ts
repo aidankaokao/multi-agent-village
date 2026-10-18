@@ -332,6 +332,7 @@ export interface VillageRules {
   paint_per_day: number;
   loop_max_rounds: number; // 迴圈（審查不通過就重做）最多幾輪
   transcribe_max_minutes: number; // 聽打員每份錄音最長幾分鐘（0 = 不開放）
+  attachment_keep_days: number; // 使用者附的圖與文件保存幾天（0 = 跟著對話永久保存）
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -351,7 +352,17 @@ export const traces = {
   clear: () => api<void>("/api/runs", { method: "DELETE" }),
 };
 
+export interface StorageUsage {
+  items: { key: string; label: string; count: number; bytes: number }[];
+  db_bytes: number | null; // 資料庫檔案大小（SQLite）
+  free_bytes: number | null; // 空著、之後會重複使用的空間
+  removed?: number; // 立即清理：刪了幾個檔案
+  vacuumed?: boolean; // 立即清理：有沒有壓縮資料庫
+}
+
 export const rules = {
+  storage: () => api<StorageUsage>("/api/rules/storage"),
+  cleanup: () => api<StorageUsage>("/api/rules/storage/cleanup", { method: "POST" }),
   get: () => api<VillageRules>("/api/rules"),
   save: (r: VillageRules) => api<VillageRules>("/api/rules", { method: "PUT", json: r }),
 };

@@ -366,6 +366,13 @@ class BaseAgent(Protocol):
 - 回答附上每一步產生的檔案（最後交給使用者的步驟排前面），所以中間的逐字稿也下載得到。
 - 附了錄音時 `with_typist` 也補齊漏排的後續：請求要報告 / PDF 卻沒有收文件的專家 → 接上它；只有聽打員卻要摘要 → 接上摘要師。
 
+#### 儲存空間
+
+中轉站本身只在一次問答的記憶體裡，不存東西；會累積的是 DB 裡的檔案（`store/storage.py`）：
+畫作、報告與逐字稿 14 天，錄音轉完就刪（最多 1 天），使用者附的圖與文件依村規 `attachment_keep_days`（預設 90 天，0 = 永久）。
+每 6 小時（與啟動時）清理一次；SQLite 刪資料後檔案不會變小，空出來的空間超過 32MB 且超過檔案 1/4 時自動 `VACUUM`。
+村規頁「🗄️ 儲存空間」顯示各類用量（`GET /api/rules/storage`），「立即清理」（`POST /api/rules/storage/cleanup`）會強制壓縮。
+
 #### 語音轉文字模型（audio 分級）與聽打員
 
 - `LLMClient.transcribe` / `list_audio_models`（只有 OpenAI 相容 client 實作）：`POST {base_url}/audio/transcriptions`（multipart）。

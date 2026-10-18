@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { llm, rules as rulesApi, type Model, type VillageRules } from "../api";
+import { llm, rules as rulesApi, type Model, type StorageUsage, type VillageRules } from "../api";
+import { fmtSize } from "../chat/docs";
 import { Field, NumInput } from "../villagers/fields";
 
 /** 村規：整個村子的運作方式（審核員、逾時、平行執行、紀錄保留），存 DB，下一次問答就生效 */
@@ -146,6 +147,17 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>🗄️ 儲存空間</h3>
+        <Field
+          label="使用者附的圖與文件保存幾天"
+          hint="0～3650；0 = 跟著對話永久保存。超過天數的附件會被清掉（對話文字還在，只是看不到原圖、追問時不能再交給駐村專家）"
+        >
+          <NumInput value={draft.attachment_keep_days} min={0} max={3650} step={30} onChange={(v) => set({ attachment_keep_days: v ?? 90 })} />
+        </Field>
+        <Storage onError={setError} />
+      </section>
+
+      <section>
         <h3>📜 執行紀錄</h3>
         <Field label="保留最近幾筆" hint="超過的舊紀錄會自動刪除；10～10000">
           <NumInput value={draft.keep_runs} min={10} max={10000} step={100} onChange={(v) => set({ keep_runs: v ?? 500 })} />
@@ -174,6 +186,80 @@ export function RulesPanel() {
           </button>
         )}
         {dirty ? <span className="hint">● 有未儲存的變更</span> : notice && <span className="hint">{notice}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** 儲存空間用量：各類檔案占多少、資料庫檔案多大；可以立即清理 */
+function Storage({ onError }: { onError: (m: string) => void }) {
+  const [usage, setUsage] = useState<StorageUsage | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState("");
+  useEffect(() => {
+    rulesApi.storage().then(setUsage).catch((e) => onError(e.message));
+  }, [onError]);
+  if (!usage) return <p className="muted">讀取用量中…</p>;
+  const total = usage.items.reduce((n, x) => n + x.bytes, 0);
+  return (
+    <div className="storage">
+      <table className="storage-table">
+        <tbody>
+          {usage.items.map((x) => (
+            <tr key={x.key}>
+              <td>{x.label}</td>
+              <td className="muted">{x.count} 個</td>
+              <td>{fmtSize(x.bytes)}</td>
+            </tr>
+          ))}
+          {usage.items.length === 0 && (
+            <tr>
+              <td className="muted">目前沒有任何檔案</td>
+            </tr>
+          )}
+          <tr>
+            <td>
+              <strong>檔案合計</strong>
+            </td>
+            <td />
+            <td>
+              <strong>{fmtSize(total)}</strong>
+            </td>
+          </tr>
+          {usage.db_bytes != null && (
+            <tr>
+              <td>資料庫檔案</td>
+              <td className="muted">{usage.free_bytes ? `其中 ${fmtSize(usage.free_bytes)} 空著` : ""}</td>
+              <td>{fmtSize(usage.db_bytes)}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <span className="hint">
+        畫作、報告與逐字稿保存 14 天，錄音轉完就刪，每 6 小時自動清理；清掉的空間很多時會自動壓縮資料庫檔案。
+        「立即清理」會依上面<strong>已儲存</strong>的天數清掉太舊的附件，並壓縮資料庫。
+      </span>
+      <div className="row">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setDone("");
+            try {
+              const r = await rulesApi.cleanup();
+              setUsage(r);
+              setDone(`清掉 ${r.removed ?? 0} 個過期檔案${r.vacuumed ? "，已壓縮資料庫" : ""}`);
+            } catch (e) {
+              onError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "清理中…" : "🧹 立即清理"}
+        </button>
+        {done && <span className="muted">{done}</span>}
       </div>
     </div>
   );

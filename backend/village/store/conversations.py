@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from village.core.context import Turn
 from village.core.docfiles import DocFile
+from village.store import storage
 from village.store.models import ChatFile, ChatImage, Conversation, Message
 
 GENERATED_DAYS = 14  # 畫家畫的圖保存兩週：很少回頭查，「上週那張」還找得到
@@ -207,13 +208,9 @@ class ConversationStore:
                 .where(ChatImage.user_id == user_id, ChatImage.kind == "generated", ChatImage.created_at >= since)
             ) or 0
 
-    async def purge_expired(self) -> int:
-        """清掉過期的畫作與報告。"""
-        async with self._sm() as s:
-            n = (await s.execute(delete(ChatImage).where(ChatImage.expires_at < _now()))).rowcount or 0
-            n += (await s.execute(delete(ChatFile).where(ChatFile.expires_at < _now()))).rowcount or 0
-            await s.commit()
-        return n
+    async def purge_expired(self, attachment_days: int = 0) -> int:
+        """清掉過期的畫作、報告、錄音（attachment_days > 0 時也清掉太舊的使用者附件）；細節在 store/storage.py。"""
+        return await storage.purge(self._sm, attachment_days)
 
     async def last_painting(self, conversation_id: str, user_id: str) -> tuple[str, bytes] | None:
         """上一輪回答裡的畫作（修圖追問「再改亮一點」用它當底圖）；過期或沒有就回 None。"""

@@ -1765,3 +1765,20 @@ button.mention-item .clamp {
 .output .cursor {
   display: inline-block;
 }
+
+/* 村規：儲存空間用量 */
+.storage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.storage-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.storage-table td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}

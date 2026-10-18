@@ -119,7 +119,7 @@ export function pickDocs(files: File[], current: DocFile[], exts: string[]): { o
 /** 下載（帶登入 cookie）；過期或找不到時丟出錯誤，不會下載到一個錯誤頁 */
 export async function download(url: string, name: string): Promise<void> {
   const r = await fetch(url, { credentials: "same-origin" });
-  if (r.status === 404) throw new Error("檔案已過期或不存在（報告保存 14 天）");
+  if (r.status === 404) throw new Error("檔案已過期或已被清理（報告保存 14 天；附件依村規的天數保存）");
   if (!r.ok) throw new Error(`下載失敗（HTTP ${r.status}）`);
   const href = URL.createObjectURL(await r.blob());
   const a = document.createElement("a");

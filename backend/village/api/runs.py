@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
+from village.store import storage
 from village.security.auth import CurrentUser, require_admin, require_user
 from village.store.models import RunTrace, User
 from village.store.settings import VillageRules
@@ -99,6 +100,21 @@ async def clear_runs(request: Request, me: CurrentUser = Depends(require_user)) 
 @router.get("/rules", dependencies=[Depends(require_admin)])
 async def get_rules(request: Request) -> VillageRules:
     return request.app.state.ctx.rules.current
+
+
+@router.get("/rules/storage", dependencies=[Depends(require_admin)])
+async def get_storage(request: Request) -> dict:
+    """儲存空間用量：各類檔案的筆數與大小、資料庫檔案大小。"""
+    return await storage.usage(request.app.state.ctx.sessionmaker)
+
+
+@router.post("/rules/storage/cleanup", dependencies=[Depends(require_admin)])
+async def cleanup_storage(request: Request) -> dict:
+    """立即清理：刪掉過期的檔案（附件依村規天數），再壓縮資料庫檔案。"""
+    ctx = request.app.state.ctx
+    removed = await ctx.conversations.purge_expired(ctx.rules.current.attachment_keep_days)
+    vacuumed = await storage.vacuum_if_needed(ctx.sessionmaker, force=True)
+    return {"removed": removed, "vacuumed": vacuumed, **await storage.usage(ctx.sessionmaker)}
 
 
 @router.put("/rules", dependencies=[Depends(require_admin)])

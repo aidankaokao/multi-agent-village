@@ -26,6 +26,7 @@ class VillageRules(BaseModel):
     paint_per_day: int = Field(default=20, ge=0, le=500)  # 畫家每人每天（最近 24 小時）最多畫幾張
     loop_max_rounds: int = Field(default=3, ge=1, le=5)  # 迴圈（審查不通過就重做）最多幾輪；計畫寫的輪數不能超過它
     transcribe_max_minutes: int = Field(default=180, ge=0, le=600)  # 聽打員每份錄音最長幾分鐘（0 = 不開放轉寫）
+    attachment_keep_days: int = Field(default=90, ge=0, le=3650)  # 使用者附的圖與文件保存幾天（0 = 跟著對話永久保存）
 
 
 class RulesStore:

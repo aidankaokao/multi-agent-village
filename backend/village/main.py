@@ -28,6 +28,7 @@ from village.llm.service import ClientFactory, LLMService
 from village.security.auth import websocket_user
 from village.security.crypto import SecretBox, load_keyring
 from village.security.redact import install_log_redaction
+from village.store import storage
 from village.store.agents import load_registry, seed_builtin
 from village.store.db import init_db, make_engine, make_sessionmaker
 from village.store.conversations import ConversationStore
@@ -60,14 +61,15 @@ class AppContext:
 PURGE_EVERY_S = 6 * 3600
 
 
-async def _purge_generated(conversations: ConversationStore) -> None:
-    """定期清掉過期的畫作（啟動時先清一次）。"""
+async def _purge_generated(ctx: "AppContext") -> None:
+    """定期清掉過期的畫作、報告、錄音與太舊的附件（啟動時先清一次），空出很多空間時壓縮資料庫。"""
     while True:
         try:
-            if n := await conversations.purge_expired():
-                log.info("清掉過期的畫作 %d 張", n)
+            if n := await ctx.conversations.purge_expired(ctx.rules.current.attachment_keep_days):
+                log.info("清掉過期的檔案 %d 個", n)
+            await storage.vacuum_if_needed(ctx.sessionmaker)
         except Exception:
-            log.exception("清理過期畫作失敗")
+            log.exception("清理過期檔案失敗")
         await asyncio.sleep(PURGE_EVERY_S)
 
 
@@ -112,7 +114,7 @@ def create_app(
             conversations=ConversationStore(sm),
             memories=MemoryStore(sm),
         )
-        purger = asyncio.create_task(_purge_generated(app.state.ctx.conversations))
+        purger = asyncio.create_task(_purge_generated(app.state.ctx))
         checker = asyncio.create_task(health_loop(app.state.ctx))  # 駐村專家每分鐘檢查一次
         yield
         purger.cancel()
