@@ -225,6 +225,8 @@ async def village(tmp_path, monkeypatch):
 
     def handler(request: httpx.Request):
         if request.method == "POST" and request.url.path == "/a2a":
+            if json.loads(request.content)["method"] == "village/ping":  # 邀請時檢查 token
+                return httpx.Response(200, json={"jsonrpc": "2.0", "id": "x", "error": {"code": -32601, "message": "不支援"}})
             agent.requests.append(request)
             if agent.health == 401:
                 return httpx.Response(401, json={"detail": "bad token"})
@@ -360,3 +362,36 @@ async def test_stream_request_answered_with_plain_json(village):
     agent.card["_mode"] = "json"  # 對方不串流、直接回完整 Message：照樣接受
     msg, _ = await _ask(c)
     assert "敬酒風波" in msg["content"] and len(a2a_calls(agent)) == 1
+
+
+async def test_token_checked_when_inviting(tmp_path, monkeypatch):
+    """邀請 / 換 token 時先試一次：對方拒絕（401）或填成 LLM 的 API key 就直接擋下來。"""
+    good = "right-token"
+
+    def handler(request: httpx.Request):
+        if request.url.path.endswith("/.well-known/agent-card.json"):
+            return httpx.Response(200, json=CARD)
+        if request.url.path.endswith("/health"):
+            return httpx.Response(200, json={"ok": True})
+        if request.method == "POST" and request.url.path == "/a2a":
+            if request.headers.get("authorization") != f"Bearer {good}":
+                return httpx.Response(401, json={"detail": "bad token"})
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": "x", "error": {"code": -32601, "message": "不支援"}})
+        return httpx.Response(404)
+
+    for k in ("VILLAGE_MASTER_KEYS", "VILLAGE_MASTER_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(remote, "_client", lambda timeout=10: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    app = create_app(Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'v.db'}", config_dir=tmp_path / "cfg"), handoff_delay=0)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/auth/register", json={"username": "admin", "password": "password123"})
+            body = {"id": "th", "url": "http://localhost:8100"}
+            r = await c.post("/api/residents", json={**body, "token": "wrong"})
+            assert r.status_code == 422 and "拒絕了這個存取 token" in r.json()["detail"]
+            r = await c.post("/api/residents", json={**body, "token": "sk-or-v1-abc"})
+            assert r.status_code == 422 and "LLM 的 API key" in r.json()["detail"]
+            assert (await c.post("/api/residents", json={**body, "token": good})).status_code == 201
+            r = await c.patch("/api/residents/th", json={"token": "wrong"})
+            assert r.status_code == 422 and "拒絕" in r.json()["detail"]
+            assert (await c.patch("/api/residents/th", json={"token": good})).status_code == 200

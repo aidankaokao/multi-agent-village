@@ -82,6 +82,26 @@ def a2a_path(card: dict) -> str:
     return path if path and path != "/" else "/a2a"
 
 
+async def check_token(base: str, path: str, token: str | None) -> str | None:
+    """邀請 / 換 token 時先試一次：送一個對方不認得的 JSON-RPC 方法，看對方收不收這個 token。
+
+    token 不對會在驗證那一關就被擋（401 / 403），token 對的話對方只會回「不支援的方法」——不會真的叫它做事、也不花錢。
+    回傳問題（給管理員看），沒問題或連不上（交給健康檢查）都回 None。
+    """
+    if token and token.strip().startswith(("sk-", "sk_")):
+        return "這看起來像 LLM 的 API key（sk-…），不是駐村專家的存取 token：請填對方 .env 裡 *_ACCESS_TOKENS 的值"
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    body = {"jsonrpc": "2.0", "id": "village-token-check", "method": "village/ping", "params": {}}
+    try:
+        async with _client() as http:
+            r = await http.post(base.rstrip("/") + path, json=body, headers=headers)
+    except httpx.HTTPError:
+        return None
+    if r.status_code in (401, 403):
+        return "對方拒絕了這個存取 token：請確認填的是對方 .env 裡 *_ACCESS_TOKENS 的值" if token else "對方需要存取 token"
+    return None
+
+
 async def check_health(base: str) -> tuple[bool, str | None]:
     """回傳 (在線, 錯誤說明)。先看 /health，沒有這個路徑就改讀 agent card。"""
     try:

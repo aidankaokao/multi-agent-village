@@ -135,6 +135,9 @@ async def invite(body: InviteBody, request: Request) -> ResidentOut:
     spec = parse_spec(
         remote.spec_from_card(card, body.id, base, name=body.name, sprite=body.sprite, share_llm=body.share_llm).to_doc()
     )
+    token = body.token.get_secret_value() if body.token else ""
+    if problem := await remote.check_token(base, remote.a2a_path(card), token or None):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
     async with ctx.sessionmaker() as s:
         existing = await s.get(AgentDef, body.id)
         if existing is not None and not existing.deleted:
@@ -175,6 +178,8 @@ async def update(agent_id: str, body: UpdateBody, request: Request) -> ResidentO
         if body.clear_token:
             ra.token_ct = ra.token_nonce = ra.key_version = ra.token_hint = None
         elif body.token and body.token.get_secret_value():
+            if problem := await remote.check_token(r["url"], r.get("a2a_path") or "/a2a", body.token.get_secret_value()):
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
             _set_token(request, ra, body.token.get_secret_value())
         if body.url is not None:
             await _apply_health(ctx, ra, r["url"])

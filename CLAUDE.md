@@ -163,6 +163,9 @@
   卡住後記得 `pkill -f pytest`。
 - 村子在容器裡：連主機上的服務（Ollama、駐村專家）要用 `host.docker.internal`，不能用 localhost；主機本身不認得這個名稱
   （本機開發模式的 e2e 測試要用 localhost）。綁 127.0.0.1 的服務從容器用 host.docker.internal 連得到（已實測）。
+- 邀請報社時 token 欄位被填成 LLM 的 API key（`sk-…`，可能是瀏覽器自動填入或貼錯），名片與健康檢查不需要 token 所以顯示在村，
+  到真正派工才 401。現在邀請 / 換 token 時會先送一個 `village/ping`（`remote.check_token`）：401 / 403 或 `sk-` 開頭直接擋下。
+  排查 token 時比對 `remote_agents.token_hint` 和對方 `.env` 的開頭結尾，不要印出整個 token。
 - 駐村專家不支援串流時村子會記住（`remote._NO_STREAM`，記憶體），重啟村子才會再試；所以要先部署新版專家再部署村子。
 - 停用中的村民不在名冊（`registry.all()`），村長以前不知道它們存在，會把工作硬派給不適合的村民
   （實例：詩人停用，「寫詩＋審稿人檢查」兩步都派給審稿人，自己審自己三輪都不過）。現在 `registry.disabled` 會告訴村長

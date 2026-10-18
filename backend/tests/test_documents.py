@@ -51,6 +51,8 @@ class FakeAgent:
         if request.url.path.endswith("/health"):
             return httpx.Response(200, json={"ok": True})
         if request.method == "POST" and request.url.path == "/a2a":
+            if json.loads(request.content)["method"] == "village/ping":  # 邀請時檢查 token
+                return httpx.Response(200, json={"jsonrpc": "2.0", "id": "x", "error": {"code": -32601, "message": "不支援"}})
             self.calls.append(json.loads(request.content))
             return httpx.Response(200, text=REPORT_SSE, headers={"content-type": "text/event-stream"})
         return httpx.Response(404)

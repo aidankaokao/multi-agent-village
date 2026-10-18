@@ -187,7 +187,7 @@ async def test_paper_preview_shown_inline(village, monkeypatch):
     original = agent.handler
 
     def handler(request):
-        if request.method == "POST" and request.url.path == "/a2a":
+        if request.method == "POST" and request.url.path == "/a2a" and json.loads(request.content)["method"] != "village/ping":
             agent.calls.append(json.loads(request.content))
             return httpx.Response(200, text=paper, headers={"content-type": "text/event-stream"})
         return original(request)
