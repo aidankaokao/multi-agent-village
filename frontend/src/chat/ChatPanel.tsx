@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentInfo, ConversationRow } from "../api";
 import { Attachments, DocChips, ImageStrip } from "../ui/Attachments";
 import { acceptedExts, docAgents, pickDocs, readDoc, type DocFile } from "./docs";
+import { findMention, insertMention, isAway, matchAgents, type MentionQuery } from "./mention";
 import { imageFiles, prepareImage } from "./prepareImage";
 import { leafIds, type AppraisalView, type RunsState, type RunView, type StepView } from "./runs";
 
@@ -81,6 +82,29 @@ export function ChatPanel({
     });
   }, [prefill]);
   const [sending, setSending] = useState(false);
+  const [mention, setMention] = useState<MentionQuery | null>(null); // 正在打的 @xxx
+  const [mentionAt, setMentionAt] = useState(0); // 清單裡目前選到第幾個
+  const choices = mention ? matchAgents(agents, mention.query) : [];
+  const menuOpen = choices.length > 0;
+  const syncMention = (el: HTMLTextAreaElement) => {
+    const m = el.selectionStart === el.selectionEnd ? findMention(el.value, el.selectionStart) : null;
+    setMention((old) => {
+      if (!m || old?.start !== m.start || old.query !== m.query) setMentionAt(0);
+      return m;
+    });
+  };
+  const pickMention = (a: AgentInfo) => {
+    if (!mention || isAway(a)) return;
+    const next = insertMention(text, mention, a.id);
+    setText(next.text);
+    setMention(null);
+    requestAnimationFrame(() => {
+      const el = input.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.caret, next.caret);
+    });
+  };
   const [error, setError] = useState("");
   const [images, setImages] = useState<string[]>([]); // 準備附上的圖（已縮圖的 data URL）
   const [preparing, setPreparing] = useState(false);
@@ -314,6 +338,30 @@ export function ChatPanel({
           </div>
         )}
         {docs.length > 0 && <DocChips files={docs} onRemove={(i) => setDocs((xs) => xs.filter((_, j) => j !== i))} />}
+        {menuOpen && (
+          <div className="mention-menu" role="listbox">
+            {choices.map((a, i) => (
+              <button
+                key={a.id}
+                type="button"
+                role="option"
+                aria-selected={i === mentionAt}
+                className={`mention-item ${i === mentionAt ? "active" : ""} ${isAway(a) ? "away" : ""}`}
+                disabled={isAway(a)}
+                onMouseDown={(e) => e.preventDefault()} // 不要讓輸入框失去焦點
+                onMouseEnter={() => setMentionAt(i)}
+                onClick={() => pickMention(a)}
+              >
+                <strong>{a.name}</strong>
+                <code>@{a.id}</code>
+                {isAway(a) && <span className="tag warn">外出中</span>}
+                {a.kind === "remote" && !isAway(a) && <span className="tag">🧳 駐村專家</span>}
+                <span className="muted clamp">{a.description}</span>
+              </button>
+            ))}
+            <div className="mention-hint muted">↑↓ 選擇・Enter / Tab 確定・Esc 關閉</div>
+          </div>
+        )}
         <textarea
           ref={input}
           rows={3}
@@ -325,7 +373,12 @@ export function ChatPanel({
               ? "問問關於這張圖的問題（留空 = 這張圖片裡有什麼？）"
               : "輸入問題，Enter 送出、Shift+Enter 換行；可用 @poet、@jester 直接指名"
           }
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            syncMention(e.target);
+          }}
+          onSelect={(e) => syncMention(e.currentTarget)}
+          onBlur={() => setTimeout(() => setMention(null), 150)}
           onPaste={(e) => {
             const files = [...e.clipboardData.files];
             if (files.length) {
@@ -334,6 +387,26 @@ export function ChatPanel({
             }
           }}
           onKeyDown={(e) => {
+            if (menuOpen && !e.nativeEvent.isComposing) {
+              const n = choices.length;
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setMentionAt((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                pickMention(choices[Math.min(mentionAt, n - 1)]);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation(); // 只關清單，不要連問答視窗一起關
+                e.nativeEvent.stopImmediatePropagation();
+                setMention(null);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               send(text);

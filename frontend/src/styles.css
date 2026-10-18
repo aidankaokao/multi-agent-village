@@ -1564,3 +1564,80 @@ button.conv-open {
 .file-card .file-icon {
   font-size: 18px;
 }
+
+/* ---------------------------------------------------------------- 輸入框的 @ 自動完成 */
+
+.chat-input {
+  position: relative;
+}
+
+.mention-menu {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% - 2px);
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 3px solid var(--line);
+  box-shadow: 4px 4px 0 var(--line);
+  z-index: 5;
+}
+
+.chat-window.big .mention-menu {
+  left: max(14px, calc((100% - 960px) / 2));
+  right: max(14px, calc((100% - 960px) / 2));
+}
+
+button.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--text);
+  text-align: left;
+  min-width: 0;
+}
+
+button.mention-item:active {
+  transform: none;
+}
+
+button.mention-item.active {
+  background: var(--card);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+button.mention-item.away {
+  opacity: 0.55;
+}
+
+button.mention-item strong {
+  white-space: nowrap;
+}
+
+button.mention-item code {
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+button.mention-item .clamp {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mention-hint {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-top: 2px solid var(--line);
+}
