@@ -252,6 +252,40 @@ button.fab-item:hover .fab-label {
   transform-origin: bottom right;
 }
 
+/* 放大：畫面中央、四周留邊的大視窗（和右下小視窗是同一個問答，切換不會遺失內容） */
+.chat-window.big {
+  inset: 0;
+  margin: auto;
+  width: min(1200px, calc(100vw - 64px));
+  height: calc(100vh - 64px);
+  z-index: 39;
+  transform-origin: center;
+}
+
+.chat-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 24, 36, 0.55);
+  z-index: 38;
+  animation: fade-in 150ms ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.chat-window-head button.chat-size {
+  font-size: 16px;
+  padding: 0 6px;
+}
+
+.chat-window.big .chat-log,
+.chat-window.big .chat-input {
+  padding-inline: max(14px, calc((100% - 960px) / 2)); /* 很寬的螢幕：內容置中，不要拉得太長 */
+}
+
 .chat-window-head {
   display: flex;
   align-items: center;

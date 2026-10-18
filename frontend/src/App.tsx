@@ -104,6 +104,22 @@ function VillageApp({
   const [page, setPage] = useState<Page | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  // 問答的兩種樣子：右下小視窗，或畫面中央接近滿版的大視窗（記住使用者上次用哪種）
+  const [chatBig, setChatBigState] = useState(() => {
+    try {
+      return localStorage.getItem("chat-size") === "big";
+    } catch {
+      return false;
+    }
+  });
+  const setChatBig = (big: boolean) => {
+    setChatBigState(big);
+    try {
+      localStorage.setItem("chat-size", big ? "big" : "small");
+    } catch {
+      /* 無痕模式等存不了：只是下次不記得 */
+    }
+  };
   const [unseen, setUnseen] = useState(false); // 問答視窗收著時有問答完成 → 💬 上的紅點
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [runs, dispatch] = useReducer(runsReducer, initialRuns);
@@ -175,11 +191,12 @@ function VillageApp({
       if (e.key !== "Escape" || document.querySelector(".modal-backdrop")) return;
       if (menuOpen) setMenuOpen(false);
       else if (page) openPage(null);
+      else if (chatOpen && chatBig) setChatBig(false); // 大視窗先縮回右下
       else if (chatOpen) setChatOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen, page, chatOpen]);
+  }, [menuOpen, page, chatOpen, chatBig]);
 
   const clearTraceId = useCallback(() => setTraceId(null), []);
 
@@ -321,13 +338,25 @@ function VillageApp({
       )}
 
       {/* 右下：問答。收起時用 display 隱藏而不卸載，進行中的問答與輸入的文字都保留 */}
-      <div className="chat-window" style={{ display: chatOpen ? "flex" : "none" }}>
+      {chatOpen && chatBig && <div className="chat-backdrop" onMouseDown={() => setChatBig(false)} />}
+      <div className={`chat-window ${chatBig ? "big" : ""}`} style={{ display: chatOpen ? "flex" : "none" }}>
         <div className="chat-window-head">
           <strong>💬 問答</strong>
           <span style={{ flex: 1 }} />
-          <button className="link" onClick={toggleChat} title="收起（Esc）">
-            ▾
-          </button>
+          {chatBig ? (
+            <button className="link chat-size" onClick={() => setChatBig(false)} title="關閉大視窗，回到右下（Esc）">
+              ✕
+            </button>
+          ) : (
+            <>
+              <button className="link chat-size" onClick={() => setChatBig(true)} title="放大到畫面中央（適合連續問答）">
+                ⛶
+              </button>
+              <button className="link" onClick={toggleChat} title="收起（Esc）">
+                ▾
+              </button>
+            </>
+          )}
         </div>
         <ChatPanel
           runs={runs}
