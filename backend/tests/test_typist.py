@@ -40,6 +40,7 @@ def test_audio_checks_and_layout():
     assert audio.to_traditional("我們討論軟體") == "我們討論軟體" and audio.to_traditional("hello") == "hello"
     assert audio.to_traditional("会議は三時からです") == "会議は三時からです"  # 日文不轉
     assert audio.to_traditional("好,我們開始?營收 1,200 萬, OK") == "好，我們開始？營收 1,200 萬， OK"
+    assert audio.to_traditional("超過25%?我算過,升到24%,還在") == "超過25%？我算過，升到24%，還在"
     assert audio.join(["Hello", "world.", "你好", "世界"]) == "Hello world.你好世界"
     assert audio.join(["（第一句）好。", "（第二句）"]) == "（第一句）好。（第二句）"
 
@@ -255,6 +256,8 @@ async def test_transcribe_flow(village):
     assert answer["status"] == "done", answer
     assert "〔00:00〕今天下午三點開會" in answer["content"] and "錄音已刪除" in answer["content"]
     assert answer["meta"]["agents"] == ["typist"]
+    trace = (await c.get(f"/api/runs/{r['run_id']}")).json()
+    assert trace["steps"][0]["model"] == "whisper-1"  # 顯示轉寫模型，不是整理參數的 LLM
     files = {a["name"]: a for a in answer["meta"]["attachments"]}
     assert set(files) == {"會議_逐字稿.txt", "會議_字幕.srt"}
     txt = await c.get(files["會議_逐字稿.txt"]["url"])

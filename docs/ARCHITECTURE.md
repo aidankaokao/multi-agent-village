@@ -366,6 +366,7 @@ class BaseAgent(Protocol):
   ffprobe 長度（村規 `transcribe_max_minutes`）→ ffmpeg 轉 16kHz 單聲道 48kbps mp3、每 600 秒一段（`-f segment`，csv 記起訖）
   → 同時 3 段送 `tier:audio`（提示「以下是繁體中文的逐字稿。可能出現的名詞：…」）→ 時間加上段落起點 → OpenCC `s2twp`（有假名不轉）
   → 約一分鐘一段的「〔mm:ss〕…」→ 存 `{檔名}_逐字稿.txt`、`{檔名}_字幕.srt`（`kind=report`，14 天）→ 刪錄音。
+  執行過程顯示的模型是轉寫模型（`ToolResult.model`），不是整理參數的 LLM。
   進度用 `tools.base.report`（`PROGRESS` context variable，`run_tool_agent` 設定）顯示「⏳ 轉寫：2 / 6 段…」；
   工具 `timeout_s = 1800` 放寬步驟逾時；`costly = True`；同一次問答重做時用快取不再轉一次。
 - 附了錄音：村長規劃提示加上「錄音只有聽打員聽得到，第一步一定是它」；村長漏派時 `with_typist` 在最前面補上

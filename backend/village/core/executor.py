@@ -688,6 +688,8 @@ async def run_tool_agent(
 
     r.output = result.text
     r.attachments = [a.to_dict() for a in result.attachments]
+    if result.model:
+        r.model = result.model
     if spec.tool.explain:
         await _explain(llm, spec, instruction, result, r, target, say)
 

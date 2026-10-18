@@ -86,6 +86,7 @@ class Typist(Tool):
             text=f"{head}\n\n" + "\n\n".join(blocks) + tail + note,
             attachments=files,
             detail=f"{', '.join(dict.fromkeys(t.model for t in done))}・{audio.length_text(total)}{cost}",
+            model=", ".join(dict.fromkeys(t.model for t in done)),
         )
 
     def fallback(self, instruction: str, context: str) -> dict[str, Any] | None:

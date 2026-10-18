@@ -44,6 +44,7 @@ class ToolResult:
     text: str  # 給使用者看、也會交給下一位村民當參考資料
     attachments: list[Attachment] = field(default_factory=list)
     detail: str = ""  # 給 explain 用的精簡事實，例如「35*12*0.9 = 378」
+    model: str = ""  # 真正做事的模型（例如聽打員的 whisper-1）；空的 = 顯示整理參數的 LLM
 
 
 class Tool:
