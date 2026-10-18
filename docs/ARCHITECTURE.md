@@ -302,6 +302,19 @@ class BaseAgent(Protocol):
 - 停用中的村民：`registry.disabled`（id →「名字（說明）」）放進村長的規劃提示（不能派工、不要找別人代替）與直接回覆
   （請使用者到村民頁啟用）。
 
+#### A2A：村子和駐村專家怎麼溝通
+
+- **中樞式**：專家之間不直接對話，也不知道彼此存在。多位專家合作（研究員 → 審稿人 → 退回研究員）是村長排計畫、
+  執行器把上一步的成果（＋審查意見、附的文件）放進下一步的訊息轉交。
+- **Agent Card**（`GET /.well-known/agent-card.json`，公開）：`name` / `description` / `skills`（含 examples）→ 村民定義，
+  村長靠這些文字決定派工；`url` 只取路徑（主機用管理員填的網址）；`capabilities.streaming` → 先用 `message/stream`；
+  `securitySchemes` bearer → 存取 token；`inputModes` / `x-file-limits` → 收哪些文件；`x-llm-headers`（自訂）→ 需要呼叫端提供 LLM。
+- **呼叫**（`POST {網址}{路徑}`，JSON-RPC 2.0）：header 帶 Bearer token 與（打開共享時）X-LLM-*；訊息 parts＝text（指示＋參考資料）
+  ＋ file（base64）。SSE 回覆：task → status-update（進度，⏳ 顯示）→ artifact-update（text append、file、data）→ final。
+  data 的 `citations`（n、title、section、url）三位專家格式相同，村子統一整理成「資料來源」。
+- **無狀態**：每次呼叫獨立（不用 contextId 延續）；追問 / 迴圈重做時村子重新帶上下文與文件。
+- 還沒用到：`input-required`（專家反問使用者）、`tasks/get` 與推播（長任務，語音轉文字會需要）。
+
 #### 附文件（交給收文件的駐村專家）
 
 - 村子自己不讀文件內容。名片寫著收哪些檔案的駐村專家（`x-file-limits.extensions`，或 inputModes 的 mime；
@@ -438,17 +451,19 @@ multi-agent-village/
 │       └── store/               # models、migrations（Alembic）、agents、runs、settings（村規）、conversations、memories
 ├── agents/                      # 內建範例村民（第一次啟動匯入 DB）：poet、jester、calculator、chart、painter
 ├── extra-agents/                # 獨立開發、獨立部署的外接 agent（村子裡叫駐村專家）
-│   └── taiwan-history/          # 台灣史專家：corpus（維基 175 篇）、app（RAG、A2A、測試網頁）、自己的 docker-compose
+│   ├── taiwan-history/          # 台灣史專家：corpus（維基 175 篇）、app（RAG、A2A、測試網頁）、自己的 docker-compose（:8100）
+│   ├── report-maker/            # 文件彙整師：讀檔與統計、報告 JSON、圖表、WeasyPrint PDF、範例檔 samples/（:8101）
+│   └── web-researcher/          # 網路研究員：自架 SearXNG（同一個 compose）、安全讀網頁、附引用回答（:8102）
 ├── frontend/
 │   ├── public/assets/sprites/   # 角色四向圖、裝飾（deco/）、UI 泡泡、manifest.json
 │   └── src/
 │       ├── App.tsx              # 登入閘門、滿版村子、⚙️ 選單、抽屜、💬 問答視窗
 │       ├── auth/                # 登入頁（示範村落劇本 demo.ts）
 │       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色、冒泡與村民互動、點村民）
-│       ├── chat/                # 問答面板、事件 reducer、附圖前處理
+│       ├── chat/                # 問答面板、事件 reducer、附圖前處理、附文件（docs.ts）、@ 自動完成（mention.ts）
 │       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定
-│       └── ui/                  # Modal、Attachments（圖片放大）
+│       └── ui/                  # Modal、Attachments（圖片放大、報告下載、文件標籤）、Markdown（marked＋DOMPurify）
 ├── scripts/gen_placeholder_sprites.py
 ├── build.sh                     # 只 build image；部署由使用者執行 docker-compose up -d
 ├── docker-compose.yaml / .env.example

@@ -34,6 +34,8 @@
 - **網路研究員（外接 agent）**：`extra-agents/web-researcher/`（規劃在它的 `PLAN.md`），自架 SearXNG（同一個 compose、不開 port）
   → 讀網頁（擋內網）→ 挑段落 → 附引用回答；127.0.0.1:8102。村子不用改程式（引用格式同台灣史專家）。
 
+- **介面改善**：村民列表搜尋 / 篩選 / 分頁、頁籤 icon、問答視窗放大、打 @ 選村民、回答顯示 Markdown（見 ROADMAP「介面改善」）。
+
 **下一步**：③ 語音轉文字（外接 agent，先提設計方案）。詳見 `docs/ROADMAP.md`「接下來」。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
@@ -58,7 +60,9 @@
 - 系統角色（保留名稱，不會被派去做問答）：`mayor` 村長、`craftsman` 工匠（`core/workshop.py`，對話打造村民）、
   `reviewer` 審核員（`core/reviewer.py`）、`scribe` 書記（`core/scribe.py`，長期記憶）、
   `appraiser` 鑑定師（`core/appraiser.py`，有附圖時先看圖，結果放 context variable `_APPRAISAL` 交給村長 / 村民 / 審核員）。
-- 駐村專家（外接的獨立 agent）：村民 `kind: remote`（`core/remote.py`、`api/residents.py`），
+- 駐村專家（外接的獨立 agent）：目前三位——台灣史專家 :8100、文件彙整師 :8101、網路研究員 :8102（各自的 compose，綁 127.0.0.1）。
+  A2A 的整體說明（中樞式、名片欄位怎麼用、呼叫與串流事件）在 `docs/ARCHITECTURE.md`「A2A：村子和駐村專家怎麼溝通」。
+  村民 `kind: remote`（`core/remote.py`、`api/residents.py`），
   存取 token 加密存 `remote_agents`；呼叫網址用「管理員填的網址 ＋ card 的路徑」；村子容器連主機服務用 `host.docker.internal`。
   收文件的駐村專家（名片的 `x-file-limits` / inputModes → `remote.accepts`）才拿得到問答附的文件（A2A file part），
   對方回傳的檔案存 `chat_files`（14 天）。

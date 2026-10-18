@@ -7,11 +7,17 @@
 - 帳號系統：每個人用自己的 LLM 與額度、自己的對話紀錄與長期記憶（書記）
 - 看圖：在問答附圖，鑑定師用視覺模型看圖，再交給村長和村民處理（例如收據加總、菜單翻譯）
 - 生圖：畫家用 OpenRouter 的生圖模型畫插畫、修圖，可以和詩人、鑑定師串接；畫作保存 14 天
-- 駐村專家：把在別處獨立部署的 agent（A2A）邀請進村，例如 `extra-agents/taiwan-history`（台灣史專家，維基資料 RAG、附引用）
-- 附文件：💬 📎 附 Excel / CSV / txt / PDF，交給「文件彙整師」（`extra-agents/report-maker`）整理成可下載的報告 PDF
+- 迴圈：「審稿人檢查，不通過就退回重做，最多 3 輪」——審查者可以是任何村民或駐村專家，每一輪的版本與審查意見都看得到
+- 駐村專家：把在別處獨立部署的 agent（A2A）邀請進村（`extra-agents/`，各自有 docker-compose）：
+  - 台灣史專家（`taiwan-history`）：維基百科 175 篇的 RAG，回答附引用
+  - 文件彙整師（`report-maker`）：💬 📎 附 Excel / CSV / txt / PDF → 附圖表的彙整報告 PDF
+  - 網路研究員（`web-researcher`）：自架 SearXNG 搜尋、讀網頁，即時資訊附來源
+- 問答視窗：可以放大成畫面中央的大視窗；打 `@` 跳出村民清單；回答顯示成 Markdown（表格、條列、連結）
 - 地圖互動：點村民就能直接問他；村民會冒泡自我介紹、彼此聊天
 
-![sprites](docs/images/sprites_preview.png)
+![像素村落（登入頁的示範村落：村民走動、交接、冒泡）](docs/images/village_demo.png)
+
+![角色](docs/images/sprites_preview.png)
 
 ## 快速開始
 
