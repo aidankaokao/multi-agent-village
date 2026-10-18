@@ -98,7 +98,7 @@ async def test_tiers_and_fallback(env):
     m_good = (await c.post("/api/llm/models", json={"provider_id": good["id"], "model": "qwen-7b"})).json()
 
     r = await c.put("/api/llm/tiers", json={"large": [m_bad["id"]], "small": [m_good["id"]]})
-    assert r.json() == {"large": [m_bad["id"]], "small": [m_good["id"]], "vision": [], "image": []}
+    assert r.json() == {"large": [m_bad["id"]], "small": [m_good["id"]], "vision": [], "image": [], "audio": []}
 
     # large 失敗 → 自動退到 small
     r = await c.post("/api/llm/try", json={"target": "tier:large", "prompt": "hi"})
@@ -115,7 +115,7 @@ async def test_delete_provider_cascades_models_and_tiers(env):
     await c.put("/api/llm/tiers", json={"large": [m["id"]]})
     assert (await c.delete(f"/api/llm/providers/{p['id']}")).status_code == 204
     assert (await c.get("/api/llm/models")).json() == []
-    assert (await c.get("/api/llm/tiers")).json() == {"large": [], "small": [], "vision": [], "image": []}
+    assert (await c.get("/api/llm/tiers")).json() == {"large": [], "small": [], "vision": [], "image": [], "audio": []}
 
 
 async def test_truncated_empty_output_falls_back_and_effort_is_passed(env):
@@ -364,7 +364,7 @@ async def test_llm_settings_are_per_user(env):
         await bob.post("/api/auth/register", json={"username": "bob", "password": "password123"})
         assert (await bob.get("/api/auth/status")).json()["llm_ready"] is False
         assert (await bob.get("/api/llm/providers")).json() == [] and (await bob.get("/api/llm/models")).json() == []
-        assert (await bob.get("/api/llm/tiers")).json() == {"large": [], "small": [], "vision": [], "image": []}
+        assert (await bob.get("/api/llm/tiers")).json() == {"large": [], "small": [], "vision": [], "image": [], "audio": []}
         # 拿別人的 id 什麼都做不了
         assert (await bob.patch(f"/api/llm/providers/{p['id']}", json={"enabled": False})).status_code == 404
         assert (await bob.delete(f"/api/llm/models/{m['id']}")).status_code == 404

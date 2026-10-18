@@ -128,6 +128,14 @@ export function RulesPanel() {
       </section>
 
       <section>
+        <h3>🎙️ 聽打員</h3>
+        <Field label="每份錄音最長幾分鐘" hint="0～600；0 = 不開放附錄音。轉寫按分鐘計費（OpenAI whisper-1 每分鐘約 0.006 美元，一小時約 0.36 美元）">
+          <NumInput value={draft.transcribe_max_minutes} min={0} max={600} step={30} onChange={(v) => set({ transcribe_max_minutes: v ?? 180 })} />
+        </Field>
+        <span className="hint">每個人用自己的 API key 轉寫。錄音轉完就刪除，逐字稿檔案保存 14 天；審核員退件時聽打員不會重轉。</span>
+      </section>
+
+      <section>
         <h3>🔁 迴圈（改到過關為止）</h3>
         <Field
           label="最多幾輪"

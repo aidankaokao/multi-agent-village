@@ -142,7 +142,7 @@ async def test_image_models_never_used_for_chat(env):
     with llm_user(me):
         assert [m.model for m in await llm.candidates("tier:large", me)] == ["chat-model"]
         assert await llm.candidates("tier:image", me) == []  # 沒測驗過
-        with pytest.raises(LLMError, match="生圖模型不能拿來對話"):
+        with pytest.raises(LLMError, match="模型不能拿來對話"):
             await llm.chat(ids["img-model"], [])  # 指定模型 id 也不行
         with pytest.raises(LLMError, match="生圖模型"):
             await llm.generate_image("tier:image", "a cat")  # 沒有可用的生圖模型

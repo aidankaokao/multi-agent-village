@@ -16,6 +16,7 @@ from village.core import appraiser, scribe
 from village.core.context import refers_back
 from village.core.docfiles import for_agent
 from village.core.painter import PaintEnv, Reference
+from village.core.transcriber import AudioFile, TranscribeEnv
 from village.store.models import RemoteAgent
 from village.llm.base import ImagePart
 from village.llm.service import NO_VISION, NOT_CONFIGURED, llm_user
@@ -27,6 +28,7 @@ log = logging.getLogger("village.chat")
 
 DEFAULT_IMAGE_QUESTION = "這張圖片裡有什麼？"
 DEFAULT_FILE_QUESTION = "請彙整這些文件的重點"
+DEFAULT_AUDIO_QUESTION = "請把這段錄音轉成逐字稿"
 
 # 追問時像在「修改上一張畫」：改、調、換、加上、去掉、再…一點、背景、顏色、風格…
 # 追問上一份報告（「改成著重成本」「第二段寫詳細一點」）
@@ -39,6 +41,7 @@ class ChatBody(BaseModel):
     conversation_id: str | None = None  # 接著哪段對話；不填 = 開新對話
     images: list[image_api.ImageIn] = Field(default_factory=list, max_length=image_api.HARD_MAX_IMAGES)
     files: list[file_api.FileIn] = Field(default_factory=list, max_length=10)  # 文件（xlsx / csv / txt / pdf）
+    audio_ids: list[str] = Field(default_factory=list, max_length=3)  # 先用 POST /api/files/audio 上傳好的錄音
 
 
 class AgentOut(BaseModel):
@@ -52,6 +55,7 @@ class AgentOut(BaseModel):
     tags: list[str]
     status: str | None = None  # 駐村專家：online / offline / unknown
     accepts: list[str] = []  # 駐村專家收哪些文件（副檔名）
+    tool: str | None = None  # 工具型村民用哪個工具（前端用來判斷能不能附錄音：有 typist 才行）
 
 
 @router.get("/agents")
@@ -72,6 +76,7 @@ async def list_agents(request: Request):
             tags=a.card.tags,
             status=status_of.get(a.id) if a.kind == "remote" else None,
             accepts=a.remote.accepts if a.kind == "remote" and a.remote else [],
+            tool=a.tool.id if a.kind == "tool" and a.tool else None,
         )
         for a in registry.all()
     ]
@@ -88,15 +93,24 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     message = body.message.strip()
     images = image_api.decode(body.images, rules.max_images)
     docs = file_api.decode(body.files)
-    if not message and not images and not docs:
+    recordings = await ctx.conversations.pending_audio(me.id, body.audio_ids)
+    if len(recordings) != len(set(body.audio_ids)):
+        raise HTTPException(422, "有錄音已經過期或用過了：請重新附上錄音")
+    if recordings and (problem := await file_api.audio_problem(ctx, me.id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+    if not message and not images and not docs and not recordings:
         raise HTTPException(422, "請輸入問題")
     if images and not await ctx.llm.has_vision(me.id):
         raise HTTPException(status.HTTP_409_CONFLICT, NO_VISION)  # 沒有視覺模型看不懂圖，先提醒
     if docs:
         await _check_doc_agents(ctx, docs)
-    message = message or (DEFAULT_FILE_QUESTION if docs else DEFAULT_IMAGE_QUESTION)
+    message = message or (
+        DEFAULT_AUDIO_QUESTION if recordings else DEFAULT_FILE_QUESTION if docs else DEFAULT_IMAGE_QUESTION
+    )
     run_id = uuid.uuid4().hex[:12]
-    started = await ctx.conversations.start_turn(me.id, body.conversation_id, message, images, docs)
+    started = await ctx.conversations.start_turn(
+        me.id, body.conversation_id, message, images, docs, audio=[f.id for f in recordings]
+    )
     conv_id = started.conversation_id
     history = await ctx.conversations.recent_turns(conv_id, rules.context_turns)
     # 文件：這次附的；沒附但前幾輪附過 → 也帶著（追問報告時村長可以再交給收文件的駐村專家）
@@ -131,12 +145,18 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     async def save_file(name: str, mime: str, data: bytes) -> str:
         return await ctx.conversations.save_report(me.id, conv_id, name, mime, data)
 
+    transcribe = TranscribeEnv(
+        ctx.llm, [AudioFile(f.id, f.name, f.data) for f in recordings], rules.transcribe_max_minutes,
+        save_file=save_file, discard=ctx.conversations.delete_file,
+    ) if recordings else None
+
     async def job():
         """執行問答，結束（含失敗、取消）後把回答存回對話。"""
         try:
             out = await ctx.runner.run(
                 run_id, message, traced=True, user_id=me.id, history=history, memories=memories,
                 images=parts, relook=relook, paint=paint, docs=docs, fresh_docs=fresh_docs, doc_agent=doc_agent, save_file=save_file,
+                transcribe=transcribe,
             )
         except asyncio.CancelledError:
             await ctx.conversations.finish_turn(conv_id, run_id, "", "cancelled")

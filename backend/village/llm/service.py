@@ -24,6 +24,7 @@ from village.llm.base import (
     LLMClient,
     LLMError,
     TextCallback,
+    Transcript,
 )
 from village.llm.openai_compat import OpenAICompatClient
 from village.security.crypto import SecretBox
@@ -52,9 +53,14 @@ def llm_user(user_id: str | None) -> Iterator[None]:
 TIERS = ("large", "small")  # 一般分級：村長、村民、審核員、書記，互為備援
 VISION = "vision"  # 視覺分級：只給鑑定師看圖，不和一般分級互相備援
 IMAGE = "image"  # 生圖分級：只給畫家用，放的是生圖模型（不能拿來對話）
-ALL_TIERS = (*TIERS, VISION, IMAGE)
+AUDIO = "audio"  # 語音分級：只給聽打員用，放的是語音轉文字模型（不能拿來對話）
+ALL_TIERS = (*TIERS, VISION, IMAGE, AUDIO)
 NO_VISION = "你還沒有設定視覺模型：請到「LLM 設定」對模型做看圖測驗，通過後加入 vision 分級"
 NO_IMAGE = "你還沒有設定生圖模型：請到「LLM 設定」註冊生圖模型並做生圖測驗，通過後加入 image 分級"
+NO_AUDIO = (
+    "你還沒有設定語音轉文字模型：請到「LLM 設定」的 OpenAI（或 Groq）供應商按「🎙️ 列出語音模型」註冊"
+    "（例如 whisper-1），做轉寫測驗，通過後加入 audio 分級"
+)
 
 ClientFactory = Callable[[str, str | None, str | None], LLMClient]
 
@@ -105,6 +111,8 @@ class LLMService:
             models = [m for m in await self.tier_models(VISION, user_id) if m.vision_verified_at is not None]
         elif target == f"tier:{IMAGE}":
             models = [m for m in await self.tier_models(IMAGE, user_id) if m.image_verified_at is not None]
+        elif target == f"tier:{AUDIO}":
+            models = [m for m in await self.tier_models(AUDIO, user_id) if m.audio_verified_at is not None]
         elif target.startswith("tier:"):
             tier = target.removeprefix("tier:")
             other = "small" if tier == "large" else "large"
@@ -114,8 +122,8 @@ class LLMService:
             async with self._sm() as s:
                 m = await s.get(LlmModel, target, options=[selectinload(LlmModel.provider)])
                 models = [m] if m and m.provider.user_id == user_id else []  # 指定模型只能用自己的
-        if target != f"tier:{IMAGE}" and target.startswith("tier:"):
-            models = [m for m in models if m.output != "image"]  # 生圖模型不能拿來對話 / 看圖
+        if target not in (f"tier:{IMAGE}", f"tier:{AUDIO}") and target.startswith("tier:"):
+            models = [m for m in models if m.output == "text"]  # 生圖 / 語音模型不能拿來對話、看圖
         return [m for m in models if m.enabled and m.provider.enabled]
 
     async def has_models(self, user_id: str) -> bool:
@@ -141,6 +149,31 @@ class LLMService:
 
     async def has_image(self, user_id: str) -> bool:
         return bool(await self.candidates(f"tier:{IMAGE}", user_id))
+
+    async def has_audio(self, user_id: str) -> bool:
+        return bool(await self.candidates(f"tier:{AUDIO}", user_id))
+
+    async def transcribe(
+        self, target: str, data: bytes, filename: str, *, language: str | None = None, prompt: str | None = None
+    ) -> Transcript:
+        """語音轉文字：依 audio 分級的順序試，失敗換下一個（target 也可以是模型 id，轉寫測驗用）。"""
+        user_id = LLM_USER.get()
+        if user_id is None:
+            raise LLMError("沒有指定要用哪個帳號的 LLM")
+        models = [m for m in await self.candidates(target, user_id) if m.output == "audio"]
+        if not models:
+            raise NoModelError(NO_AUDIO)
+        errors: list[str] = []
+        for m in models:
+            client = self.client_for(m.provider)
+            try:
+                return await client.transcribe(m.model, data, filename, language=language, prompt=prompt)
+            except LLMError as e:
+                log.warning("audio model %s failed, trying next: %s", m.model, e)
+                errors.append(f"{m.model}: {e}")
+            finally:
+                await client.aclose()
+        raise LLMError("all audio models failed: " + " | ".join(errors))
 
     async def generate_image(
         self, target: str, prompt: str, *, aspect_ratio: str | None = None, references: list[ImagePart] | None = None
@@ -185,8 +218,8 @@ class LLMService:
             models = await self.candidates(fallback, user_id)
         if not models:
             raise NoModelError(NO_VISION if target == f"tier:{VISION}" else NOT_CONFIGURED)
-        if any(m.output == "image" for m in models):
-            raise LLMError("生圖模型不能拿來對話")
+        if any(m.output != "text" for m in models):
+            raise LLMError("生圖 / 語音轉文字模型不能拿來對話")
         errors: list[str] = []
         for m in models:
             call_kw = dict(kw)

@@ -161,13 +161,24 @@ def render_documents(docs, fresh: bool, doc_agents: list[AgentSpec]) -> str:
     )
 
 
+def render_audio(files, typist: AgentSpec | None) -> str:
+    """附的錄音（給村長規劃用）：只有聽打員聽得到，其他村民拿到的是它的逐字稿。"""
+    names = "、".join(f.describe() for f in files)
+    who = f"{typist.id}（{typist.name}）" if typist else "聽打員"
+    return (
+        f"使用者這次附了錄音：{names}。錄音只有 {who} 聽得到，其他村民看不到。"
+        f"第一步一定是派 {who} 轉成逐字稿；使用者還要重點、摘要、會議記錄、翻譯或報告時，"
+        f"再派適合的村民處理逐字稿（那一步的 use 填聽打員那一步的 id）。"
+    )
+
+
 def planner_system_prompt(
     agents: list[AgentSpec], history: list[Turn] | None = None, appraisal: str = "", documents: str = "", disabled: str = "",
 ) -> str:
     lines = []
     for a in agents:
         examples = "；".join(e for s in a.card.skills for e in s.examples[:3])
-        costly = "【每次都要花錢：使用者沒有明確要求畫好幾張時，只安排一個步驟】" if is_costly(a) else ""
+        costly = "【每次都要花錢：使用者沒有明確要求做好幾次時，只安排一個步驟】" if is_costly(a) else ""
         tool = TOOLS.get(a.tool.id) if a.kind == "tool" and a.tool else None
         hint = f"（{tool.planner_hint}）" if tool and tool.planner_hint else ""
         if a.kind == "remote" and a.remote and a.remote.accepts:

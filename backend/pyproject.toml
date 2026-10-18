@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "alembic>=1.13",
     "asyncpg>=0.29",
+    "opencc-python-reimplemented>=0.1.7",
 ]
 
 [project.scripts]

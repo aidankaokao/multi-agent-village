@@ -9,7 +9,7 @@
 
 ## 目前進度
 
-全部經使用者部署實測。DB 遷移到 0010。
+除了最後的「聽打員」，全部經使用者部署實測。DB 遷移到 0011。
 
 - **Phase 0～5**：村民管理與工坊（工匠）、審核員 / 執行紀錄 / 村規 / 平行 / 停止、工具型村民（計算機、圖表 SVG、日期）、
   帳號（登入頁示範村落）、每個帳號自己的 LLM、對話與多輪上下文、書記與長期記憶。
@@ -36,7 +36,13 @@
 
 - **介面改善**：村民列表搜尋 / 篩選 / 分頁、頁籤 icon、問答視窗放大、打 @ 選村民、回答顯示 Markdown（見 ROADMAP「介面改善」）。
 
-**下一步**：③ 語音轉文字（外接 agent，先提設計方案）。詳見 `docs/ROADMAP.md`「接下來」。本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
+- **聽打員（語音轉文字）**：使用者決定用雲端（OpenAI 相容 `/audio/transcriptions`），做成內建工具型村民 `typist`（同畫家），
+  不是駐村專家。`audio` 分級＋轉寫測驗（沒有就不能附錄音）、錄音單獨上傳（`POST /api/files/audio`，200MB）、
+  ffmpeg 切 10 分鐘一段同時轉寫、OpenCC 繁體、txt / srt、轉完刪錄音、村規 `transcribe_max_minutes`。只做逐字稿，摘要交給其他村民。
+  範例錄音 `samples/門市營運週會.mp3`。**待使用者部署實測**。
+
+**下一步**：等使用者實測聽打員。之後的候選見 `docs/ROADMAP.md`「接下來」（檔案在步驟之間傳遞、專家反問、資料分析師）。
+本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
 
@@ -71,6 +77,9 @@
   `REMOTE_ENV`（問答與村民試打各自設定）。
 - 視覺模型自成 `vision` 分級（`tier:vision`），不和 large / small 互相備援；只有通過看圖測驗（`llm/vision_test.py`，
   `llm_models.vision_verified_at`）的模型會被用到。一般 LLM 流程不可以用到視覺模型。
+- 語音轉文字模型（`output="audio"`）同理：只能放 `audio` 分級、只能透過 `LLMService.transcribe` 使用，通過轉寫測驗
+  （`audio_verified_at`）才會被用到。聽打員的錄音環境放 context variable `TRANSCRIBE_ENV`（只有問答會設定，試打不能轉寫）；
+  工具要回報進度用 `tools.base.report`。backend 容器要有 ffmpeg（Dockerfile 已裝；本機 `brew install ffmpeg`）。
 - 生圖模型（`llm_models.output="image"`）只能放 `image` 分級、只能透過 `LLMService.generate_image` 使用（OpenRouter `POST /images`），
   不能拿來對話；只有通過生圖測驗（`image_verified_at`）的會被用到。只收點陣圖（看檔頭），SVG 不收。
   畫作存 `chat_images`（kind=generated），14 天後過期（`GENERATED_DAYS`，main.py 定期清理）。

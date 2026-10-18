@@ -16,12 +16,13 @@ from village.core.appraiser import APPRAISER_ID, Appraisal, appraise
 from village.core.card import AgentSpec
 from village.core import remote
 from village.core.painter import PaintEnv, painting
+from village.core.transcriber import TRANSCRIBE_ENV, TranscribeEnv, transcribing
 from village.core.context import PREV, Turn
 from village.core import loop as loops
 from village.core.docfiles import DocFile
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import (
-    ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan, render_documents,
+    ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan, render_audio, render_documents,
 )
 from village.core.registry import AgentRegistry
 from village.core.scribe import render_memories
@@ -32,7 +33,7 @@ from village.llm.service import llm_user
 from village.store.runs import TraceStore
 from village.store.settings import RulesStore, VillageRules
 from village.tools import TOOLS, ToolError, ToolResult
-from village.tools.base import Attachment
+from village.tools.base import PROGRESS, Attachment
 
 log = logging.getLogger("village.executor")
 
@@ -165,6 +166,26 @@ DOC_STEP_TIMEOUT_S = 900  # 收文件的駐村專家（產生報告）比一般�
 DEFAULT_RULES = VillageRules(reviewer_enabled=False, parallel=False)  # 沒接 DB 時（測試）維持最單純的行為
 
 
+def _recordings() -> list:
+    env = TRANSCRIBE_ENV.get()
+    return env.files if env else []
+
+
+def with_typist(plan: Plan, typist_id: str, message: str, note: str = "") -> Plan:
+    """在計畫最前面加上聽打員的步驟；原本沒有依賴的步驟改成用它的逐字稿。"""
+    ids = {s.id for s in plan.steps}
+    first = next(i for i in ("s0", "t0", "typist") if i not in ids)
+    head = Step(id=first, agent=typist_id, instruction="把使用者附的錄音轉成逐字稿")
+    if not plan.steps:
+        head.instruction = message
+    steps = [head] + [
+        Step(id=s.id, agent=s.agent, instruction=s.instruction, use=s.use if [u for u in s.use if u in ids] else [first, *s.use])
+        for s in plan.steps
+    ]
+    return Plan(steps=steps, source="llm" if plan.source == "direct" else plan.source,
+                notes=plan.notes + ([note] if note else []), loop=plan.loop)
+
+
 class Runner:
     def __init__(
         self,
@@ -190,6 +211,7 @@ class Runner:
         images: list[ImagePart] | None = None, relook: bool = False, paint: PaintEnv | None = None,
         docs: list[DocFile] | None = None, fresh_docs: bool = False, doc_agent: str | None = None,
         save_file: Callable[[str, str, bytes], Awaitable[str]] | None = None,
+        transcribe: TranscribeEnv | None = None,
     ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。
 
@@ -198,6 +220,7 @@ class Runner:
         docs：文件（這次附的，fresh_docs=True；或前幾輪附的，追問時再交給收文件的駐村專家）。
         doc_agent：追問上一份報告時，一定要交給的駐村專家（上一輪做報告的那位）。
         save_file：存駐村專家回傳的檔案（例如報告 PDF），回傳檔案 id。
+        transcribe：這次附的錄音（聽打員轉逐字稿用）；有錄音時第一步一定是聽打員。
         """
         self.bus.claim(run_id, user_id)
         try:
@@ -205,7 +228,7 @@ class Runner:
                 remote.RemoteEnv(self.directory, self.llm, user_id, docs=docs or [], save_file=save_file)
                 if self.directory else None
             )
-            with llm_user(user_id), painting(paint), remote.remote_calls(env):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
+            with llm_user(user_id), painting(paint), remote.remote_calls(env), transcribing(transcribe):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
                 _MEMORIES.set(render_memories(memories) if memories else "")
                 _APPRAISAL.set("")
                 _DOCS.set(_DocNote(docs or [], fresh_docs, doc_agent))
@@ -260,6 +283,10 @@ class Runner:
             note = _DOCS.get()
             doc_agents = [a for a in agents if a.kind == "remote" and a.remote and a.remote.accepts]
             documents = render_documents(note.docs, note.fresh, doc_agents) if note.docs else ""
+            heard = _recordings()
+            typist = next((a for a in agents if a.kind == "tool" and a.tool and a.tool.id == "typist"), None)
+            if heard:
+                documents = " ".join(x for x in (documents, render_audio(heard, typist)) if x)
             plan = await make_plan(
                 message, agents, self.llm, on_note=on_note, history=history, appraisal=_APPRAISAL.get(), documents=documents,
                 disabled=self.registry.disabled_text(),
@@ -274,6 +301,11 @@ class Runner:
                             source="llm" if plan.source == "direct" else plan.source,
                             notes=plan.notes + [f"{why}：交給{agent.name}處理"])
                 await on_note(f"{why}：交給{agent.name}處理")
+            if heard and typist and not any(s.agent == typist.id for s in plan.steps):
+                # 附了錄音，村長卻沒派聽打員（弱模型常見）：第一步補上聽打員，其他步驟改成處理它的逐字稿
+                why = f"附了錄音：先交給{typist.name}轉成逐字稿"
+                plan = with_typist(plan, typist.id, message, why)
+                await on_note(why)
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:
@@ -422,6 +454,8 @@ class Runner:
         timeout = rules.step_timeout_s
         if spec is not None and remote.files_for(spec):  # 要處理文件、產生報告：放寬時間上限
             timeout = max(timeout, DOC_STEP_TIMEOUT_S)
+        if spec is not None and spec.kind == "tool" and spec.tool and spec.tool.id in TOOLS:
+            timeout = max(timeout, TOOLS[spec.tool.id].timeout_s)  # 例如聽打員轉寫長錄音
         try:
             if spec is None:
                 raise LLMError(f"村民「{step.agent}」不存在")
@@ -615,7 +649,7 @@ async def run_tool_agent(
         try:
             args = _extract_json(res.text)
             await say(f"🔧 交給{tool.name}：{json.dumps(args, ensure_ascii=False)[:200]}")
-            result, r.tool_args = await tool.arun(args), args
+            result, r.tool_args = await _arun(tool, args, say), args
             break
         except (PlanError, ToolError) as e:
             problem = str(e)
@@ -631,7 +665,7 @@ async def run_tool_agent(
         args = tool.fallback(instruction, context)
         if args is not None:
             try:
-                result, r.tool_args = await tool.arun(args), args
+                result, r.tool_args = await _arun(tool, args, say), args
                 r.warnings.append("LLM 沒整理出可用的參數，改由程式直接從文字抓取")
             except ToolError as e:
                 problem = f"{problem}；程式直接抓取也失敗：{e}" if problem else str(e)
@@ -642,6 +676,15 @@ async def run_tool_agent(
     r.attachments = [a.to_dict() for a in result.attachments]
     if spec.tool.explain:
         await _explain(llm, spec, instruction, result, r, target, say)
+
+
+async def _arun(tool, args: dict, say: Callable[[str], Awaitable[None]]) -> ToolResult:
+    """執行工具；花很久的工具（聽打員）可以透過 tools.base.report 回報進度，顯示在執行過程。"""
+    token = PROGRESS.set(say)
+    try:
+        return await tool.arun(args)
+    finally:
+        PROGRESS.reset(token)
 
 
 async def _explain(llm: ChatLLM, spec: AgentSpec, instruction: str, result: ToolResult, r: StepResult, target, say) -> None:

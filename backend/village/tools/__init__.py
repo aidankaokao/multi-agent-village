@@ -5,7 +5,8 @@ from village.tools.calculator import Calculator
 from village.tools.chart import Chart
 from village.tools.clock import Clock
 from village.tools.painter import Painter
+from village.tools.typist import Typist
 
-TOOLS: dict[str, Tool] = {t.id: t for t in (Calculator(), Chart(), Clock(), Painter())}
+TOOLS: dict[str, Tool] = {t.id: t for t in (Calculator(), Chart(), Clock(), Painter(), Typist())}
 
 __all__ = ["TOOLS", "Attachment", "Tool", "ToolError", "ToolResult"]

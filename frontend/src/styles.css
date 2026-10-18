@@ -1534,6 +1534,11 @@ button.conv-open {
   background: #1c2030;
 }
 
+.doc-chip.uploading {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
 .doc-chip button.link {
   padding: 0 2px;
   color: inherit;

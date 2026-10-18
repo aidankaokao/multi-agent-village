@@ -349,13 +349,35 @@ class BaseAgent(Protocol):
   工具 `context()` 告訴畫家有沒有參考圖與寬高（`imagefmt.dimensions`），畫家用 `use_reference` 決定是否以它為底；
   送出時 `input_references` = data URL。模型回 400（不收參考圖）時改成只依描述重畫並在結果註明。
 
+#### 語音轉文字模型（audio 分級）與聽打員
+
+- `LLMClient.transcribe` / `list_audio_models`（只有 OpenAI 相容 client 實作）：`POST {base_url}/audio/transcriptions`（multipart）。
+  要時間戳用 `verbose_json`＋`timestamp_granularities[]=segment`（whisper-1、Groq whisper）；gpt-4o 系列直接要 `json`，
+  其他模型回 400 時也改要 `json` 並記在 `_QUIRKS`。語音模型從一般模型清單依名字挑（whisper / transcribe…）。
+- 註冊時標記 `llm_models.output="audio"`：只能放 `audio` 分級（`LLMService.transcribe` 依序備援），不能對話。
+  轉寫測驗（`POST /api/llm/models/{id}/audio-test`）：送 `llm/assets/audio_test.mp3`（macOS 台灣語音念的一句話），
+  統一繁體、去標點、數字換國字後，相鄰兩字的吻合 ≥ 60% 才通過（`audio_verified_at`）。
+- 錄音上傳：`POST /api/files/audio?name=…`（body 是檔案原始內容，邊收邊數大小，每份 200MB；看檔頭）→ `chat_files`
+  （`kind=audio`、沒有對話、1 天後過期）；`GET /api/files/audio/ready` 先問能不能轉寫（村規、聽打員有沒有啟用、有沒有 audio 模型）。
+  問答帶 `audio_ids` → `start_turn` 接到對話（`meta.files` 標 `audio: true`，追問文件時不會被當成文件）。
+  nginx 對這個路徑另外放寬 `client_max_body_size 210m`、不暫存 body。
+- 聽打員（內建村民 `typist`，工具型，工具 `tools/typist.py`）：LLM 只整理 `{language, terms}`；
+  `core/transcriber.py` 的 `TranscribeEnv`（context variable `TRANSCRIBE_ENV`，api/chat.py 設定）→ `core/audio.py`：
+  ffprobe 長度（村規 `transcribe_max_minutes`）→ ffmpeg 轉 16kHz 單聲道 48kbps mp3、每 600 秒一段（`-f segment`，csv 記起訖）
+  → 同時 3 段送 `tier:audio`（提示「以下是繁體中文的逐字稿。可能出現的名詞：…」）→ 時間加上段落起點 → OpenCC `s2twp`（有假名不轉）
+  → 約一分鐘一段的「〔mm:ss〕…」→ 存 `{檔名}_逐字稿.txt`、`{檔名}_字幕.srt`（`kind=report`，14 天）→ 刪錄音。
+  進度用 `tools.base.report`（`PROGRESS` context variable，`run_tool_agent` 設定）顯示「⏳ 轉寫：2 / 6 段…」；
+  工具 `timeout_s = 1800` 放寬步驟逾時；`costly = True`；同一次問答重做時用快取不再轉一次。
+- 附了錄音：村長規劃提示加上「錄音只有聽打員聽得到，第一步一定是它」；村長漏派時 `with_typist` 在最前面補上
+  聽打員步驟，原本沒有依賴的步驟改成用它的逐字稿。
+
 #### 資料表
 
 | 表 | 主要欄位 |
 |---|---|
 | `llm_providers` | id, **user_id**, name（同一人不可重複）, kind, base_url, `api_key_ct`, `api_key_nonce`, `key_version`, `api_key_hint`(如 `sk-…a1b2`), enabled, created_at, updated_at |
-| `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, reasoning_effort, vision_verified_at, output(`text`/`image`), image_verified_at, enabled |
-| `model_tiers` | **user_id**, tier(`large`/`small`/`vision`/`image`), position, model_id |
+| `llm_models` | id, provider_id, model, display_name, supports_json_schema, context_window, reasoning_effort, vision_verified_at, output(`text`/`image`/`audio`), image_verified_at, audio_verified_at, enabled |
+| `model_tiers` | **user_id**, tier(`large`/`small`/`vision`/`image`/`audio`), position, model_id |
 | `remote_agents` | agent_id（agents.id）, `token_ct`, `token_nonce`, `key_version`, `token_hint`, card, card_fetched_at, status, checked_at, last_error |
 
 #### 加密設計（信封加密的簡化版）
@@ -442,14 +464,16 @@ multi-agent-village/
 │       │   ├── painter.py       # 畫家的作畫環境：生圖、張數上限、畫作保存、參考圖
 │       │   ├── remote.py        # 駐村專家：agent card、健康檢查、A2A 呼叫（send / stream、文件與回傳檔案）
 │       │   ├── docfiles.py      # 附文件：格式與大小檢查、哪些駐村專家收哪些檔案
+│       │   ├── audio.py         # 錄音：格式、ffmpeg 切段、逐字稿排版（時間、SRT）、簡轉繁
+│       │   ├── transcriber.py   # 聽打員的轉寫環境：切段同時轉寫、存逐字稿、刪錄音
 │       │   ├── loop.py          # 迴圈：審查結論判讀、從請求補迴圈、輪次狀態
 │       │   ├── imagefmt.py      # 圖片格式判斷、寬高
 │       │   └── context.py       # 多輪上下文（Turn、prev、指稱判斷）
-│       ├── tools/               # 工具箱：calculator、chart（SVG）、clock、painter（生圖）
-│       ├── llm/                 # openai_compat、anthropic_client、service（每個帳號的模型 + 備援）、vision_test
+│       ├── tools/               # 工具箱：calculator、chart（SVG）、clock、painter（生圖）、typist（聽打）
+│       ├── llm/                 # openai_compat、anthropic_client、service（每個帳號的模型 + 備援）、vision_test、audio_test（＋assets/）
 │       ├── security/            # crypto（AES-256-GCM、主金鑰）、auth（帳號 / session / 權限）、redact
 │       └── store/               # models、migrations（Alembic）、agents、runs、settings（村規）、conversations、memories
-├── agents/                      # 內建範例村民（第一次啟動匯入 DB）：poet、jester、calculator、chart、painter
+├── agents/                      # 內建範例村民（啟動時補進 DB 沒有的）：poet、jester、calculator、chart、painter、editor、typist
 ├── extra-agents/                # 獨立開發、獨立部署的外接 agent（村子裡叫駐村專家）
 │   ├── taiwan-history/          # 台灣史專家：corpus（維基 175 篇）、app（RAG、A2A、測試網頁）、自己的 docker-compose（:8100）
 │   ├── report-maker/            # 文件彙整師：讀檔與統計、報告 JSON、圖表、WeasyPrint PDF、範例檔 samples/（:8101）
@@ -464,6 +488,7 @@ multi-agent-village/
 │       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定
 │       └── ui/                  # Modal、Attachments（圖片放大、報告下載、文件標籤）、Markdown（marked＋DOMPurify）
+├── samples/                     # 測試用的示範會議錄音（make_meeting_audio.py 用 macOS say 產生）
 ├── scripts/gen_placeholder_sprites.py
 ├── build.sh                     # 只 build image；部署由使用者執行 docker-compose up -d
 ├── docker-compose.yaml / .env.example

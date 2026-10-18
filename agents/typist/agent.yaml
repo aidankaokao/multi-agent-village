@@ -1,0 +1,30 @@
+# 聽打員：工具型村民。把使用者附的錄音轉成逐字稿（audio 分級的語音轉文字模型，例如 OpenAI whisper-1）。
+# LLM 只判斷語言、整理專有名詞；切段、轉寫、排版在程式。只做逐字稿：要重點、報告由村長再排下一位村民。
+# 轉寫按分鐘計費：沒有測試題，審核員退件也不會重轉；每份錄音最長幾分鐘在「村規」。
+card:
+  id: typist
+  name: 聽打員
+  description: 把使用者附的錄音檔（會議、訪談、課程、演講）轉成逐字稿，段落標上時間，並附逐字稿與字幕檔下載。只有它聽得到錄音；只做逐字稿，不做摘要（要重點、會議記錄、報告時，把逐字稿交給下一位村民整理）。
+  version: 0.1.0
+  skills:
+    - id: transcribe
+      description: 把錄音轉成逐字稿
+      examples:
+        - 把這段錄音轉成逐字稿
+        - 幫我聽打這段會議錄音
+        - 把訪談錄音轉成文字，再整理重點
+  tags: [tool, audio]
+
+x-village:
+  sprite: typist
+  home: [17, 15]
+  keywords: [逐字稿, 聽打, 錄音, 轉文字, 語音轉文字, 音檔, 會議錄音, 字幕]
+
+kind: tool
+tool:
+  id: typist
+
+model:
+  tier: small
+  temperature: 0.1
+  max_tokens: 400

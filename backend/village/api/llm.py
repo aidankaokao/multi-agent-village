@@ -1,4 +1,4 @@
-"""LLM 設定 API：provider / 模型註冊、模型分級、試打、看圖測驗、生圖測驗。
+"""LLM 設定 API：provider / 模型註冊、模型分級、試打、看圖測驗、生圖測驗、轉寫測驗。
 
 每個帳號各自管理自己的 LLM（自己的 API key 與額度），只看得到、改得到自己的；
 用別人的 id 一律當作不存在（404），不透露是否存在。
@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from village.llm.base import DEFAULT_BASE_URLS, ChatMessage, ImagePart, LLMError, ProviderKind, ReasoningEffort
 from village.core.painter import check_generated
-from village.llm import vision_test
+from village.llm import audio_test, vision_test
 from village.llm.service import ALL_TIERS, VISION, LLMService, llm_user
 from village.security.auth import CurrentUser, require_user
 from village.security.crypto import SecretBox, secret_hint
@@ -82,7 +82,7 @@ class RemoteModelOut(BaseModel):
 class ModelCreate(BaseModel):
     provider_id: str
     model: str = Field(min_length=1, max_length=200)
-    output: Literal["text", "image"] = "text"  # image = 生圖模型（從「列出生圖模型」註冊）
+    output: Literal["text", "image", "audio"] = "text"  # image = 生圖模型、audio = 語音轉文字模型
     display_name: str | None = None
     supports_json_schema: bool = True
     context_window: int | None = None
@@ -109,6 +109,7 @@ class ModelOut(BaseModel):
     vision_verified_at: datetime | None
     output: str
     image_verified_at: datetime | None
+    audio_verified_at: datetime | None
     enabled: bool
 
 
@@ -117,6 +118,17 @@ class TiersBody(BaseModel):
     small: list[str] = []
     vision: list[str] = []  # 只能放通過看圖測驗的模型
     image: list[str] = []  # 只能放通過生圖測驗的生圖模型
+    audio: list[str] = []  # 只能放通過轉寫測驗的語音轉文字模型
+
+
+class AudioTestOut(BaseModel):
+    passed: bool
+    reason: str
+    answer: str
+    expected: str
+    score: float
+    elapsed_ms: int
+    model: "ModelOut"
 
 
 class ImageTestOut(BaseModel):
@@ -201,6 +213,7 @@ def _model_out(m: LlmModel) -> ModelOut:
         vision_verified_at=m.vision_verified_at,
         output=m.output,
         image_verified_at=m.image_verified_at,
+        audio_verified_at=m.audio_verified_at,
         enabled=m.enabled,
     )
 
@@ -269,9 +282,12 @@ async def delete_provider(provider_id: str, request: Request, me: CurrentUser = 
 
 @router.get("/providers/{provider_id}/remote-models", response_model=list[RemoteModelOut])
 async def remote_models(
-    provider_id: str, request: Request, output: Literal["text", "image"] = "text", me: CurrentUser = Me
+    provider_id: str, request: Request, output: Literal["text", "image", "audio"] = "text", me: CurrentUser = Me
 ):
-    """測試連線：向 provider 查詢可用模型，並標示哪些已註冊。output=image 列出生圖模型（OpenRouter）。"""
+    """測試連線：向 provider 查詢可用模型，並標示哪些已註冊。
+
+    output=image 列出生圖模型（OpenRouter）；output=audio 列出語音轉文字模型（OpenAI、Groq 等，從名字挑）。
+    """
     async with _sm(request)() as s:
         p = await _own_provider(s, provider_id, me)
         registered = set(
@@ -279,7 +295,11 @@ async def remote_models(
         )
     client = _llm(request).client_for(p)
     try:
-        models = await (client.list_image_models() if output == "image" else client.list_models())
+        models = await (
+            client.list_image_models() if output == "image"
+            else client.list_audio_models() if output == "audio"
+            else client.list_models()
+        )
     except LLMError as e:
         raise HTTPException(502, f"連線失敗：{e}") from None
     finally:
@@ -353,7 +373,7 @@ async def get_tiers(request: Request, me: CurrentUser = Me):
 @router.put("/tiers", response_model=TiersBody)
 async def put_tiers(body: TiersBody, request: Request, me: CurrentUser = Me):
     async with _sm(request)() as s:
-        ids = set(body.large) | set(body.small) | set(body.vision) | set(body.image)
+        ids = set(body.large) | set(body.small) | set(body.vision) | set(body.image) | set(body.audio)
         rows = (await s.execute(
             select(LlmModel).join(LlmProvider).where(LlmModel.id.in_(ids), LlmProvider.user_id == me.id)
         )).scalars()
@@ -362,8 +382,12 @@ async def put_tiers(body: TiersBody, request: Request, me: CurrentUser = Me):
             raise HTTPException(422, f"unknown model ids: {sorted(missing)}")
         if unverified := [found[i].model for i in body.vision if found[i].vision_verified_at is None]:
             raise HTTPException(422, f"還沒通過看圖測驗，不能放進 vision 分級：{', '.join(unverified)}")
-        if wrong := [found[i].model for i in body.large + body.small + body.vision if found[i].output == "image"]:
-            raise HTTPException(422, f"生圖模型只能放進 image 分級：{', '.join(wrong)}")
+        if wrong := [found[i].model for i in body.large + body.small + body.vision if found[i].output != "text"]:
+            raise HTTPException(422, f"生圖 / 語音轉文字模型只能放進 image / audio 分級：{', '.join(wrong)}")
+        if wrong := [found[i].model for i in body.audio if found[i].output != "audio"]:
+            raise HTTPException(422, f"audio 分級只能放語音轉文字模型：{', '.join(wrong)}")
+        if unverified := [found[i].model for i in body.audio if found[i].audio_verified_at is None]:
+            raise HTTPException(422, f"還沒通過轉寫測驗，不能放進 audio 分級：{', '.join(unverified)}")
         if wrong := [found[i].model for i in body.image if found[i].output != "image"]:
             raise HTTPException(422, f"image 分級只能放生圖模型：{', '.join(wrong)}")
         if unverified := [found[i].model for i in body.image if found[i].image_verified_at is None]:
@@ -467,3 +491,34 @@ async def _vision_check(request: Request, image: tuple[str, bytes]) -> str | Non
         return r.text.strip()[:200] or None
     except LLMError:
         return None
+
+
+@router.post("/models/{model_id}/audio-test", response_model=AudioTestOut)
+async def audio_test_model(model_id: str, request: Request, me: CurrentUser = Me):
+    """轉寫測驗：送一段約 5 秒、內容已知的中文錄音，轉出來的字對得上才通過（可以放進 audio 分級）。"""
+    async with _sm(request)() as s:
+        m = await _own_model(s, model_id, me)
+        if m.output != "audio":
+            raise HTTPException(422, "這不是語音轉文字模型：請從供應商的「🎙️ 列出語音模型」註冊")
+        if not (m.enabled and m.provider.enabled):
+            raise HTTPException(409, "這個模型（或它的供應商）已停用，先啟用再測驗")
+    t0 = time.monotonic()
+    try:
+        with llm_user(me.id):
+            r = await _llm(request).transcribe(model_id, audio_test.audio(), audio_test.FILENAME, language="zh",
+                                               prompt="以下是繁體中文的逐字稿。")
+        answer = r.text.strip()
+        result = audio_test.grade(answer)
+    except LLMError as e:
+        answer = f"（呼叫失敗）{e}"
+        result = audio_test.AudioResult(False, 0.0, "模型回報錯誤：可能不是語音轉文字模型，或供應商沒有 /audio/transcriptions")
+    elapsed = int((time.monotonic() - t0) * 1000)
+    async with _sm(request)() as s:
+        m = await _own_model(s, model_id, me)
+        m.audio_verified_at = datetime.now(UTC) if result.passed else None
+        await s.commit()
+        out = _model_out(m)
+    return AudioTestOut(
+        passed=result.passed, reason=result.reason, answer=answer, expected=audio_test.EXPECTED, score=result.score,
+        elapsed_ms=elapsed, model=out,
+    )

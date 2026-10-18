@@ -2,6 +2,7 @@
 
 附圖存在 chat_images（跟著對話保存），使用者訊息的 meta.images 記圖片 id。
 附的文件存在 chat_files（跟著對話保存），meta.files 記 [{id, name, size}]；駐村專家回傳的報告也存這裡（14 天過期）。
+錄音（kind=audio）先上傳、問答時才接到對話（meta.files 標 audio: true）；1 天後過期，聽打員轉完就刪掉。
 """
 
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from village.store.models import ChatFile, ChatImage, Conversation, Message
 
 GENERATED_DAYS = 14  # 畫家畫的圖保存兩週：很少回頭查，「上週那張」還找得到
 REPORT_DAYS = 14  # 駐村專家回傳的報告（PDF）保存期限同畫作
+AUDIO_DAYS = 1  # 上傳的錄音：沒用到（或轉寫失敗）的 1 天後清掉
 TITLE_CHARS = 40
 TURN_CHARS = 1500  # 每則訊息帶進上下文的上限，避免很長的回答把 prompt 撐爆
 
@@ -46,7 +48,7 @@ class ConversationStore:
 
     async def start_turn(
         self, user_id: str, conversation_id: str | None, message: str, images: list[tuple[str, bytes]] | None = None,
-        files: list[DocFile] | None = None,
+        files: list[DocFile] | None = None, audio: list[str] | None = None,
     ) -> Started:
         """存使用者的訊息（和附圖 (mime, data)、附的文件）；沒有指定對話就開新對話（標題用第一句話）。"""
         async with self._sm() as s:
@@ -69,6 +71,10 @@ class ConversationStore:
             await s.flush()
             ids = [r.id for r in rows]
             listed = [{"id": d.id, "name": d.name, "size": d.size} for d in docs]
+            if audio:  # 先上傳好的錄音：接到這段對話
+                for f in await s.scalars(select(ChatFile).where(ChatFile.id.in_(audio), ChatFile.user_id == user_id)):
+                    f.conversation_id = conv.id
+                    listed.append({"id": f.id, "name": f.name, "size": f.size, "audio": True})
             meta = {k: v for k, v in (("images", ids), ("files", listed)) if v}
             s.add(Message(conversation_id=conv.id, role="user", content=message, meta=meta or None))
             await s.commit()
@@ -86,10 +92,12 @@ class ConversationStore:
                 )
             )
             for m in rows[1:]:  # rows[0] 是目前這一輪的提問
-                ids = [f["id"] for f in (m.meta or {}).get("files") or []]
+                ids = [f["id"] for f in (m.meta or {}).get("files") or [] if not f.get("audio")]
                 if ids:
                     found = {f.id: f for f in await s.scalars(
-                        select(ChatFile).where(ChatFile.id.in_(ids), ChatFile.conversation_id == conversation_id)
+                        select(ChatFile).where(
+                            ChatFile.id.in_(ids), ChatFile.conversation_id == conversation_id, ChatFile.kind != "audio"
+                        )
                     )}
                     return [DocFile(found[i].name, found[i].mime, found[i].data) for i in ids if i in found]
         return []
@@ -113,6 +121,35 @@ class ConversationStore:
             s.add(row)
             await s.commit()
             return row.id
+
+    async def save_audio(self, user_id: str, name: str, mime: str, data: bytes) -> str:
+        """存上傳的錄音（還沒接到對話；AUDIO_DAYS 天後自動清掉），回傳檔案 id。"""
+        row = ChatFile(
+            user_id=user_id, conversation_id=None, kind="audio", name=name, mime=mime, data=data, size=len(data),
+            expires_at=_now() + timedelta(days=AUDIO_DAYS),
+        )
+        async with self._sm() as s:
+            s.add(row)
+            await s.commit()
+            return row.id
+
+    async def pending_audio(self, user_id: str, ids: list[str]) -> list[ChatFile]:
+        """這次問答要用的錄音：本人上傳、還沒接到別的對話、還沒過期的（依 ids 的順序）。"""
+        if not ids:
+            return []
+        async with self._sm() as s:
+            rows = {f.id: f for f in await s.scalars(
+                select(ChatFile).where(
+                    ChatFile.id.in_(ids), ChatFile.user_id == user_id, ChatFile.kind == "audio",
+                    ChatFile.conversation_id.is_(None), ChatFile.expires_at > _now(),
+                )
+            )}
+        return [rows[i] for i in dict.fromkeys(ids) if i in rows]
+
+    async def delete_file(self, file_id: str) -> None:
+        async with self._sm() as s:
+            await s.execute(delete(ChatFile).where(ChatFile.id == file_id))
+            await s.commit()
 
     async def get_file(self, file_id: str, user_id: str) -> ChatFile | None:
         """只有本人拿得到（管理員也一樣）；過期的報告即使還沒被清掉也當作不存在。"""

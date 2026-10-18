@@ -357,6 +357,30 @@ def acc_painter(d, view, frame, dy):
         px(d, [(9, 21 + dy)], dots[2])
 
 
+def acc_typist(d, view, frame, dy):
+    band, cup, pad = hexc("#2a2a33"), hexc("#3a8fd0"), hexc("#1d5f94")
+    body, screen, key = hexc("#5a5f6a"), hexc("#bfe6ff"), hexc("#d8dce4")
+    r(d, 10, 2 + dy, 21, 3 + dy, band)  # 耳機的頭帶
+    px(d, [(9, 4 + dy), (22, 4 + dy), (8, 5 + dy), (23, 5 + dy), (8, 6 + dy), (23, 6 + dy), (8, 7 + dy), (23, 7 + dy)], band)
+    if view in ("down", "up"):
+        r(d, 7, 8 + dy, 9, 12 + dy, cup)  # 兩邊的耳罩
+        r(d, 22, 8 + dy, 24, 12 + dy, cup)
+        px(d, [(8, 9 + dy), (8, 10 + dy), (8, 11 + dy), (23, 9 + dy), (23, 10 + dy), (23, 11 + dy)], pad)
+    elif view == "left":
+        r(d, 13, 8 + dy, 16, 12 + dy, cup)
+        r(d, 14, 9 + dy, 15, 11 + dy, pad)
+    else:
+        r(d, 15, 8 + dy, 18, 12 + dy, cup)
+        r(d, 16, 9 + dy, 17, 11 + dy, pad)
+    if view == "down":
+        r(d, 9, 19 + dy, 22, 22 + dy, body)  # 筆電
+        r(d, 10, 20 + dy, 21, 21 + dy, screen)
+        r(d, 8, 23 + dy, 23, 24 + dy, key)
+    elif view == "left":
+        r(d, 5, 20 + dy, 11, 23 + dy, body)
+        r(d, 6, 21 + dy, 10, 22 + dy, screen)
+
+
 CHARACTERS = {
     # id: (中文名, 外觀說明（工匠挑外觀時參考）, 調色盤, 配件, 系統角色？)
     "poet": ("詩人", "貝雷帽、羽毛筆，文藝創作", dict(hair="#5a3a22", cloth="#3f8f5a", cloth2="#2c6640", shoe="#3a2a20"), acc_poet, False),
@@ -368,6 +392,7 @@ CHARACTERS = {
     "farmer": ("農夫", "草帽、稻穗，生活實用、自然", dict(hair="#5a3a22", cloth="#7a9a3a", cloth2="#4a6a2a", shoe="#3a2a20"), acc_farmer, False),
     "chef": ("廚師", "高帽、湯匙，料理食譜", dict(hair="#3a2a1e", cloth="#e8e8ee", cloth2="#3a3a4a", shoe="#222222"), acc_chef, False),
     "painter": ("畫家", "紅色貝雷帽、調色盤、畫筆，畫插畫", dict(hair="#2a1e14", cloth="#e8e2d0", cloth2="#9a8a6a", shoe="#3a2a20"), acc_painter, False),
+    "typist": ("聽打員", "耳機、筆電，把錄音打成逐字稿", dict(hair="#2a1e14", cloth="#e0a43a", cloth2="#a8742a", shoe="#2a2a2a"), acc_typist, False),
     "mayor": ("村長", "王冠、法杖", dict(hair="#c8c8c8", cloth="#a8323e", cloth2="#6e1f28", shoe="#2a1a1a"), acc_mayor, True),
     "craftsman": ("工匠", "安全帽、槌子", dict(hair="#3a2a1e", cloth="#4a6a8a", cloth2="#2a3a4a", shoe="#2a1a1a"), acc_craftsman, True),
     "scribe": ("書記", "頭巾、筆記本、羽毛筆", dict(hair="#3a2a1e", cloth="#8a6a3a", cloth2="#5a4424", shoe="#2a1a1a"), acc_scribe, True),

@@ -4,12 +4,15 @@ import json
 import logging
 import re
 
-import httpx
-
 import base64
 import binascii
+import mimetypes
 
-from village.llm.base import ChatMessage, ChatResult, GeneratedImage, ImageResult, LLMClient, LLMError, RemoteModel
+import httpx
+
+from village.llm.base import (
+    ChatMessage, ChatResult, GeneratedImage, ImageResult, LLMClient, LLMError, RemoteModel, Segment, Transcript,
+)
 from village.security.redact import redact
 
 # 各家「OpenAI 相容」API 支援的參數不一樣（例如 OpenAI 的 gpt-5 / o 系列不收 max_tokens 與 temperature）。
@@ -20,6 +23,11 @@ log = logging.getLogger("village.llm")
 _QUIRKS: dict[tuple[str, str], set[str]] = {}
 MAX_PARAM_RETRIES = 4
 IMAGE_TIMEOUT = 180.0
+TRANSCRIBE_TIMEOUT = 300.0  # 一段（約 10 分鐘的錄音）
+# 語音轉文字模型的名字（OpenAI 的 /models 沒有標類型，只能看名字）
+_AUDIO_MODEL = re.compile(r"whisper|transcri|speech-to|stt|asr", re.I)
+# 這些模型沒有時間戳（verbose_json）：直接要 json，不用先失敗一次
+_NO_VERBOSE = re.compile(r"gpt-4o.*transcribe", re.I)
 
 
 class ParamError(LLMError):
@@ -250,6 +258,53 @@ class OpenAICompatClient(LLMClient):
             raise LLMError("生圖模型沒有回傳圖片")
         cost = (data.get("usage") or {}).get("cost")
         return ImageResult(images=images, model=data.get("model") or model, cost=cost if isinstance(cost, int | float) else None)
+
+    async def list_audio_models(self) -> list[RemoteModel]:
+        """從一般的模型清單挑出語音轉文字模型（whisper-1、gpt-4o-transcribe、Groq whisper-large-v3…）。"""
+        return [m for m in await self.list_models() if _AUDIO_MODEL.search(m.id)]
+
+    async def transcribe(self, model, data, filename, *, language=None, prompt=None):
+        """POST /audio/transcriptions（multipart）。
+
+        要時間戳用 verbose_json（whisper-1、Groq whisper 支援）；不支援的模型（gpt-4o-transcribe）回 400 時改要 json，
+        並記住這個模型，下次直接要 json。
+        """
+        quirks = _QUIRKS.setdefault((self._base_url, model), set())
+        verbose = "no_verbose" not in quirks and not _NO_VERBOSE.search(model)
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        while True:
+            form: dict = {"model": model, "response_format": "verbose_json" if verbose else "json"}
+            if verbose:
+                form["timestamp_granularities[]"] = "segment"
+            if language:
+                form["language"] = language
+            if prompt:
+                form["prompt"] = prompt
+            try:
+                out = await self._request(
+                    "POST", "audio/transcriptions", data=form, files={"file": (filename, data, mime)},
+                    timeout=TRANSCRIBE_TIMEOUT,
+                )
+                break
+            except LLMError as e:
+                msg = str(e)
+                if verbose and "HTTP 400" in msg and re.search(r"response_format|verbose_json|timestamp", msg):
+                    log.info("%s 不支援 verbose_json，改要 json（沒有時間戳）", model)
+                    quirks.add("no_verbose")
+                    verbose = False
+                    continue
+                raise
+        if not isinstance(out, dict) or not isinstance(out.get("text"), str):
+            raise LLMError("語音轉文字的回應格式不對（沒有 text）")
+        segments = [
+            Segment(float(x.get("start") or 0), float(x.get("end") or 0), str(x.get("text") or "").strip())
+            for x in out.get("segments") or [] if isinstance(x, dict)
+        ]
+        duration = out.get("duration")
+        return Transcript(
+            text=out["text"].strip(), model=model, segments=[x for x in segments if x.text],
+            duration=float(duration) if isinstance(duration, int | float) else None,
+        )
 
     async def aclose(self) -> None:
         await self._http.aclose()

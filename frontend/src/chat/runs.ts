@@ -112,7 +112,7 @@ export function runsFromMessages(messages: MessageRow[]): RunsState {
     const run: RunView = {
       ...newRun(id, q.content),
       images: q.meta?.images?.map((i) => `/api/images/${i}`),
-      files: q.meta?.files?.map((f) => ({ name: f.name, size: f.size, url: `/api/files/${f.id}` })),
+      files: q.meta?.files?.map((f) => ({ name: f.name, size: f.size, audio: f.audio, url: f.audio ? undefined : `/api/files/${f.id}` })),
       startedAt: t0,
       finishedAt: a ? Date.parse(a.created_at) : t0,
       fromHistory: true,

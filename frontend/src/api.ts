@@ -65,18 +65,31 @@ export interface Model {
   context_window: number | null;
   reasoning_effort: ReasoningEffort | null;
   vision_verified_at: string | null; // 看圖測驗通過的時間
-  output: "text" | "image"; // image = 生圖模型（只能放 image 分級）
+  output: ModelOutput; // image = 生圖模型、audio = 語音轉文字模型（只能放各自的分級）
   image_verified_at: string | null; // 生圖測驗通過的時間
+  audio_verified_at: string | null; // 轉寫測驗通過的時間
   enabled: boolean;
 }
 
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
+export type ModelOutput = "text" | "image" | "audio";
 
 export interface Tiers {
   large: string[];
   small: string[];
   vision: string[]; // 鑑定師看圖專用，不和 large / small 互相備援
   image: string[]; // 畫家生圖專用（生圖模型）
+  audio: string[]; // 聽打員專用（語音轉文字模型）
+}
+
+export interface AudioTestResult {
+  passed: boolean;
+  reason: string;
+  answer: string;
+  expected: string;
+  score: number; // 0～1：和錄音內容的吻合程度
+  elapsed_ms: number;
+  model: Model;
 }
 
 export interface ImageTestResult {
@@ -119,7 +132,7 @@ export const llm = {
   updateProvider: (id: string, body: Partial<{ name: string; base_url: string; api_key: string; clear_api_key: boolean; enabled: boolean }>) =>
     api<Provider>(`/api/llm/providers/${id}`, { method: "PATCH", json: body }),
   deleteProvider: (id: string) => api<void>(`/api/llm/providers/${id}`, { method: "DELETE" }),
-  remoteModels: (id: string, output: "text" | "image" = "text") =>
+  remoteModels: (id: string, output: ModelOutput = "text") =>
     api<RemoteModel[]>(`/api/llm/providers/${id}/remote-models?output=${output}`),
   models: () => api<Model[]>("/api/llm/models"),
   createModel: (body: {
@@ -127,7 +140,7 @@ export const llm = {
     model: string;
     display_name?: string | null;
     context_window?: number | null;
-    output?: "text" | "image";
+    output?: ModelOutput;
   }) =>
     api<Model>("/api/llm/models", { method: "POST", json: body }),
   updateModel: (id: string, body: Partial<Pick<Model, "display_name" | "supports_json_schema" | "reasoning_effort" | "enabled">>) =>
@@ -136,6 +149,7 @@ export const llm = {
   tiers: () => api<Tiers>("/api/llm/tiers"),
   saveTiers: (t: Tiers) => api<Tiers>("/api/llm/tiers", { method: "PUT", json: t }),
   imageTest: (id: string) => api<ImageTestResult>(`/api/llm/models/${id}/image-test`, { method: "POST" }),
+  audioTest: (id: string) => api<AudioTestResult>(`/api/llm/models/${id}/audio-test`, { method: "POST" }),
   visionTest: (id: string) => api<VisionTestResult>(`/api/llm/models/${id}/vision-test`, { method: "POST" }),
   tryModel: (target: string, prompt: string) =>
     api<{ text: string; model: string }>("/api/llm/try", { method: "POST", json: { target, prompt } }),
@@ -154,17 +168,75 @@ export interface AgentInfo {
   tags: string[];
   status?: ResidentStatus | null; // 駐村專家才有
   accepts?: string[]; // 駐村專家收哪些文件（副檔名）
+  tool?: string | null; // 工具型村民用的工具（有 typist = 可以附錄音）
+}
+
+export interface AudioReady {
+  ok: boolean;
+  reason: string | null; // 不能轉寫的原因
+  max_bytes: number;
+  extensions: string[];
+  max_minutes: number;
+}
+
+export interface UploadedAudio {
+  id: string;
+  name: string;
+  size: number;
+}
+
+/** 上傳錄音（檔案原始內容當 body）；用 XHR 才拿得到上傳進度。signal 中止時 reject。 */
+export function uploadAudio(file: File, onProgress: (ratio: number) => void, signal?: AbortSignal): Promise<UploadedAudio> {
+  return new Promise((ok, fail) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/files/audio?name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let body: { detail?: unknown } & Partial<UploadedAudio> = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        /* 非 JSON（例如 nginx 的 413 頁面） */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return ok(body as UploadedAudio);
+      if (xhr.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED));
+      const detail = typeof body.detail === "string" ? body.detail : xhr.status === 413 ? "檔案太大" : `上傳失敗（HTTP ${xhr.status}）`;
+      fail(new ApiError(xhr.status, detail));
+    };
+    xhr.onerror = () => fail(new Error("上傳失敗：連線中斷"));
+    xhr.onabort = () => fail(new DOMException("aborted", "AbortError"));
+    signal?.addEventListener("abort", () => xhr.abort());
+    xhr.send(file);
+  });
 }
 
 export const village = {
   agents: () => api<{ agents: AgentInfo[]; errors: Record<string, string> }>("/api/agents"),
   /** images：data URL（前端已縮圖成 JPEG） */
   /** files：文件（base64），只交給收文件的駐村專家 */
-  chat: (message: string, conversation_id: string | null, images: string[] = [], files: { name: string; data: string }[] = []) =>
-    api<{ run_id: string; conversation_id: string; image_ids: string[]; files: { id: string; name: string; size: number }[] }>("/api/chat", {
-      method: "POST",
-      json: { message, conversation_id, images: images.map((data) => ({ data })), files: files.map(({ name, data }) => ({ name, data })) },
-    }),
+  /** audioIds：先用 uploadAudio 上傳好的錄音 */
+  chat: (
+    message: string,
+    conversation_id: string | null,
+    images: string[] = [],
+    files: { name: string; data: string }[] = [],
+    audioIds: string[] = [],
+  ) =>
+    api<{ run_id: string; conversation_id: string; image_ids: string[]; files: { id: string; name: string; size: number; audio?: boolean }[] }>(
+      "/api/chat",
+      {
+        method: "POST",
+        json: {
+          message,
+          conversation_id,
+          images: images.map((data) => ({ data })),
+          files: files.map(({ name, data }) => ({ name, data })),
+          audio_ids: audioIds,
+        },
+      },
+    ),
+  audioReady: () => api<AudioReady>("/api/files/audio/ready"),
   cancel: (runId: string) => api<{ ok: boolean }>(`/api/chat/${runId}/cancel`, { method: "POST" }),
 };
 
@@ -258,6 +330,7 @@ export interface VillageRules {
   paint_per_run: number;
   paint_per_day: number;
   loop_max_rounds: number; // 迴圈（審查不通過就重做）最多幾輪
+  transcribe_max_minutes: number; // 聽打員每份錄音最長幾分鐘（0 = 不開放）
   reviewer_enabled: boolean;
   reviewer_target: string;
   review_redo: number;
@@ -515,7 +588,7 @@ export interface MessageRow {
     agents?: string[];
     review?: boolean | null;
     images?: string[];
-    files?: { id: string; name: string; size: number }[];
+    files?: { id: string; name: string; size: number; audio?: boolean }[]; // audio：錄音（轉完就刪掉，不能下載）
   } | null;
   created_at: string;
 }

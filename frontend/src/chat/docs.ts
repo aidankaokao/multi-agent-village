@@ -20,6 +20,47 @@ export interface DocChip {
   name: string;
   size?: number;
   url?: string;
+  audio?: boolean; // 錄音（轉完就刪掉，不能下載）
+  note?: string; // 例如「上傳中 45%」
+}
+
+/**
+ * 錄音：交給聽打員（工具型村民，工具 typist）轉逐字稿。檔案大，先單獨上傳（有進度），問答時只帶 id。
+ * 上限和後端一樣（core/audio.py）。
+ */
+export const AUDIO_EXTS = [".mp3", ".m4a", ".mp4", ".wav", ".webm", ".ogg", ".opus", ".flac", ".aac"];
+export const MAX_AUDIO = 3;
+export const MAX_AUDIO_BYTES = 200 * 1024 * 1024;
+
+export interface AudioUpload {
+  key: string;
+  name: string;
+  size: number;
+  progress: number; // 0～1
+  id?: string; // 上傳完成後的檔案 id
+  abort: AbortController;
+}
+
+export const isAudio = (name: string) => AUDIO_EXTS.includes(extOf(name));
+
+/** 負責轉寫的村民（停用時名冊裡沒有它） */
+export const typistOf = (agents: AgentInfo[]) => agents.find((a) => a.tool === "typist");
+
+export function pickAudio(files: File[], current: AudioUpload[]): { ok: File[]; error: string } {
+  const ok: File[] = [];
+  const errors: string[] = [];
+  for (const f of files) {
+    if (f.size > MAX_AUDIO_BYTES) {
+      errors.push(`「${f.name}」超過每份 ${fmtSize(MAX_AUDIO_BYTES)} 的上限`);
+      continue;
+    }
+    if (current.length + ok.length >= MAX_AUDIO) {
+      errors.push(`一次最多附 ${MAX_AUDIO} 份錄音`);
+      break;
+    }
+    ok.push(f);
+  }
+  return { ok, error: errors.join("；") };
 }
 
 export const extOf = (name: string) => {

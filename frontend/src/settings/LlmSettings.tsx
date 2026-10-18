@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
 import {
   llm,
+  type AudioTestResult,
   type ImageTestResult,
+  type ModelOutput,
   type Model,
   type Provider,
   type ProviderKind,
@@ -27,7 +29,7 @@ const FALLBACK_URL: Record<ProviderKind, string> = {
 export function LlmSettings() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
-  const [tiers, setTiers] = useState<Tiers>({ large: [], small: [], vision: [], image: [] });
+  const [tiers, setTiers] = useState<Tiers>({ large: [], small: [], vision: [], image: [], audio: [] });
   const [error, setError] = useState("");
   const [sub, setSub] = useState<Sub | null>(null);
 
@@ -131,12 +133,12 @@ function ProviderSection({ providers, models, run }: { providers: Provider[]; mo
 
 function ProviderModal({ p, models, run, onClose }: { p: Provider; models: Model[]; run: Run; onClose: () => void }) {
   const [remote, setRemote] = useState<RemoteModel[] | string | null>(null);
-  const [output, setOutput] = useState<"text" | "image">("text"); // 列的是對話模型還是生圖模型
+  const [output, setOutput] = useState<ModelOutput>("text"); // 列的是對話、生圖還是語音模型
   const [filter, setFilter] = useState("");
   const [editingKey, setEditingKey] = useState(false);
   const registered = models.filter((m) => m.provider_id === p.id);
 
-  const listRemote = async (kind: "text" | "image") => {
+  const listRemote = async (kind: ModelOutput) => {
     setOutput(kind);
     setRemote("連線中…");
     try {
@@ -201,10 +203,21 @@ function ProviderModal({ p, models, run, onClose }: { p: Provider; models: Model
               🎨 列出生圖模型
             </button>
           )}
+          {p.kind === "openai_compat" && (
+            <button onClick={() => listRemote("audio")} title="OpenAI、Groq 的語音轉文字模型（給聽打員用）">
+              🎙️ 列出語音模型
+            </button>
+          )}
           <span className="muted">已註冊 {registered.length} 個</span>
         </div>
         {output === "image" && Array.isArray(remote) && (
           <span className="hint">生圖模型只能放進 image 分級給畫家用，不能拿來對話。註冊後到「模型」做生圖測驗。</span>
+        )}
+        {output === "audio" && Array.isArray(remote) && (
+          <span className="hint">
+            語音轉文字模型只能放進 audio 分級給聽打員用，不能拿來對話。OpenAI 建議註冊 whisper-1（逐字稿有時間、可以做字幕）；
+            gpt-4o-transcribe 比較準但沒有時間。註冊後到「模型」做轉寫測驗。
+          </span>
         )}
         {typeof remote === "string" && <div className="muted">{remote}</div>}
         {Array.isArray(remote) && (
@@ -319,7 +332,7 @@ const EFFORT_HELP =
   "思考型模型（qwen3.5、gpt-5、DeepSeek…）設 none 可大幅加速，也避免 token 全花在思考上。gpt-5 沒有 none 會自動改用 minimal；一定要思考的模型（GLM 5.3）會自動改用 low；不支援思考的模型（gpt-4o-mini）會自動略過。";
 
 function tierBadges(id: string, tiers: Tiers) {
-  return (["large", "small", "vision", "image"] as const)
+  return (["large", "small", "vision", "image", "audio"] as const)
     .filter((t) => tiers[t].includes(id))
     .map((t) => `${t} #${tiers[t].indexOf(id) + 1}`);
 }
@@ -357,6 +370,7 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
               ))}
               {m.vision_verified_at && <span className="tag">👁️ 可看圖</span>}
               {m.output === "image" && <span className="tag">{m.image_verified_at ? "🎨 生圖 ✓" : "🎨 生圖（未測驗）"}</span>}
+              {m.output === "audio" && <span className="tag">{m.audio_verified_at ? "🎙️ 語音 ✓" : "🎙️ 語音（未測驗）"}</span>}
             </div>
             <div className="muted">
               {m.provider_name}
@@ -408,7 +422,13 @@ function ModelSection({ models, tiers, run, goto }: { models: Model[]; tiers: Ti
             <input type="checkbox" checked={current.enabled} onChange={(e) => run(() => llm.updateModel(current.id, { enabled: e.target.checked }))} />
             啟用
           </label>
-          {current.output === "image" ? <ImageTest key={current.id} model={current} run={run} /> : <VisionTest key={current.id} model={current} run={run} />}
+          {current.output === "image" ? (
+            <ImageTest key={current.id} model={current} run={run} />
+          ) : current.output === "audio" ? (
+            <AudioTest key={current.id} model={current} run={run} />
+          ) : (
+            <VisionTest key={current.id} model={current} run={run} />
+          )}
           <div className="row modal-foot">
             <button
               className="danger"
@@ -526,6 +546,54 @@ function ImageTest({ model, run }: { model: Model; run: Run }) {
   );
 }
 
+/** 轉寫測驗：送一段約 5 秒、內容已知的中文錄音，轉出來的字對得上才通過 */
+function AudioTest({ model, run }: { model: Model; run: Run }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<AudioTestResult | string | null>(null);
+
+  const test = async () => {
+    setBusy(true);
+    setResult(null);
+    await run(async () => {
+      try {
+        setResult(await llm.audioTest(model.id));
+      } catch (e) {
+        setResult((e as Error).message);
+      }
+    });
+    setBusy(false);
+  };
+
+  return (
+    <div className="field">
+      <span className="field-label">轉寫測驗</span>
+      <div className="row">
+        <span className={model.audio_verified_at ? "" : "muted"} style={{ flex: 1 }}>
+          {model.audio_verified_at ? `🎙️ 通過（${new Date(model.audio_verified_at).toLocaleString("zh-TW")}）` : "還沒通過：不能放進 audio 分級"}
+        </span>
+        <button type="button" disabled={busy} onClick={test}>
+          {busy ? "轉寫中…" : model.audio_verified_at ? "重新測驗" : "開始測驗"}
+        </button>
+      </div>
+      <span className="hint">送一段約 5 秒的中文錄音，轉出來的字和內容吻合六成以上就通過。費用不到 0.001 美元。</span>
+      {typeof result === "string" && <p className="error">{result}</p>}
+      {result && typeof result !== "string" && (
+        <div className={`card vision-result ${result.passed ? "ok" : "fail"}`}>
+          <div>
+            <strong>{result.passed ? "✅ 通過" : "❌ 沒通過"}</strong>
+            <div className="muted">
+              {(result.elapsed_ms / 1000).toFixed(1)} 秒・吻合 {Math.round(result.score * 100)}%
+            </div>
+            <div className="muted">錄音內容：{result.expected}</div>
+            <div className="clamp">模型轉出：{result.answer}</div>
+            <div className="hint">{result.reason}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- tiers
 
 const TIER_LABEL = {
@@ -533,16 +601,19 @@ const TIER_LABEL = {
   small: "small（村民日常、備援）",
   vision: "👁️ vision（鑑定師看圖）",
   image: "🎨 image（畫家生圖）",
+  audio: "🎙️ audio（聽打員轉逐字稿）",
 } as const;
 
 const TIER_HINT: Partial<Record<keyof Tiers, string>> = {
   vision: "鑑定師看圖專用：村長、村民、審核員、書記都不會用到它；也不和 large / small 互相備援。",
   image: "畫家生圖專用：只能放生圖模型（從供應商「🎨 列出生圖模型」註冊），一般問答不會用到。",
+  audio: "聽打員專用：只能放語音轉文字模型（從 OpenAI / Groq 供應商「🎙️ 列出語音模型」註冊），沒有這一級就不能附錄音。",
 };
 
 /** 每個分級可以加入哪些模型 */
 function poolFor(tier: keyof Tiers, models: Model[]): Model[] {
   if (tier === "image") return models.filter((m) => m.output === "image" && m.image_verified_at);
+  if (tier === "audio") return models.filter((m) => m.output === "audio" && m.audio_verified_at);
   const text = models.filter((m) => m.output === "text");
   return tier === "vision" ? text.filter((m) => m.vision_verified_at) : text;
 }
@@ -577,15 +648,17 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
     <section>
       <p className="hint">村長、工匠用 large；村民依自己的設定用 large 或 small。排在前面的優先使用，失敗依序往下；兩級互為備援。</p>
       <div className="tiers">
-        {(["large", "small", "vision", "image"] as const).map((tier) => {
+        {(["large", "small", "vision", "image", "audio"] as const).map((tier) => {
           const pool = poolFor(tier, models);
           const untested =
             tier === "vision"
               ? models.filter((m) => m.output === "text" && !m.vision_verified_at).length
               : tier === "image"
                 ? models.filter((m) => m.output === "image" && !m.image_verified_at).length
-                : 0;
-          const special = tier === "vision" || tier === "image";
+                : tier === "audio"
+                  ? models.filter((m) => m.output === "audio" && !m.audio_verified_at).length
+                  : 0;
+          const special = tier === "vision" || tier === "image" || tier === "audio";
           return (
             <div key={tier} className={`card ${special ? "tier-vision" : ""}`}>
               <strong>{TIER_LABEL[tier]}</strong>
@@ -595,7 +668,8 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
                   <li key={id}>
                     <code className={byId[id]?.enabled === false ? "muted" : ""}>{byId[id]?.model ?? id}</code>
                     {((tier === "vision" && byId[id] && !byId[id].vision_verified_at) ||
-                      (tier === "image" && byId[id] && !byId[id].image_verified_at)) && <span className="tag warn">測驗沒過，會略過</span>}
+                      (tier === "image" && byId[id] && !byId[id].image_verified_at) ||
+                      (tier === "audio" && byId[id] && !byId[id].audio_verified_at)) && <span className="tag warn">測驗沒過，會略過</span>}
                     <button className="link" onClick={() => move(tier, i, -1)}>↑</button>
                     <button className="link" onClick={() => move(tier, i, 1)}>↓</button>
                     <button className="link danger" onClick={() => setDraft((t) => ({ ...t, [tier]: t[tier].filter((x) => x !== id) }))}>✕</button>
@@ -604,7 +678,13 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
               </ol>
               <select value="" onChange={(e) => e.target.value && setDraft((t) => ({ ...t, [tier]: [...t[tier], e.target.value] }))}>
                 <option value="">
-                  {special && pool.length === 0 ? (tier === "vision" ? "（還沒有通過看圖測驗的模型）" : "（還沒有通過生圖測驗的生圖模型）") : "＋加入模型…"}
+                  {special && pool.length === 0
+                    ? tier === "vision"
+                      ? "（還沒有通過看圖測驗的模型）"
+                      : tier === "image"
+                        ? "（還沒有通過生圖測驗的生圖模型）"
+                        : "（還沒有通過轉寫測驗的語音模型）"
+                    : "＋加入模型…"}
                 </option>
                 {pool
                   .filter((m) => !draft[tier].includes(m.id))
@@ -614,6 +694,15 @@ function TierSection({ models, tiers, run, goto }: { models: Model[]; tiers: Tie
                     </option>
                   ))}
               </select>
+              {tier === "audio" && untested > 0 && (
+                <span className="hint">
+                  有 {untested} 個語音模型還沒通過測驗：到「
+                  <button className="link" onClick={() => goto("models")}>
+                    模型
+                  </button>
+                  」按「設定」→「開始測驗」。
+                </span>
+              )}
               {tier === "image" && untested > 0 && (
                 <span className="hint">
                   有 {untested} 個生圖模型還沒通過測驗：到「

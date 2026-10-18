@@ -7,6 +7,11 @@ FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 FROM python:${PYTHON_VERSION}-slim
 COPY --from=uv /uv /usr/local/bin/uv
 
+# ffmpeg：聽打員把錄音轉成小檔、切段（雲端轉寫單檔上限 25 MB）
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

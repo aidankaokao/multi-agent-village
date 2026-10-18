@@ -241,11 +241,12 @@ function VillageApp({
       .catch(() => {});
   }, [openConversation]);
 
-  const send = async (message: string, images: string[], docs: DocFile[]) => {
-    const { run_id, conversation_id } = await village.chat(message, convId, images, docs);
+  const send = async (message: string, images: string[], docs: DocFile[], audio: { id: string; name: string; size: number }[]) => {
+    const { run_id, conversation_id } = await village.chat(message, convId, images, docs, audio.map((a) => a.id));
     if (conversation_id !== convId) setConvId(conversation_id);
-    const fallback = docs.length ? "請彙整這些文件的重點" : "這張圖片裡有什麼？";
-    dispatch({ type: "local", run_id, message: message || fallback, images, files: docs.map(({ name, size }) => ({ name, size })) });
+    const fallback = audio.length ? "請把這段錄音轉成逐字稿" : docs.length ? "請彙整這些文件的重點" : "這張圖片裡有什麼？";
+    const files = [...docs.map(({ name, size }) => ({ name, size })), ...audio.map(({ name, size }) => ({ name, size, audio: true }))];
+    dispatch({ type: "local", run_id, message: message || fallback, images, files });
     loadConvs();
   };
 

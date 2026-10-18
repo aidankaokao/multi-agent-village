@@ -55,15 +55,18 @@ export function DocChips({ files, onRemove }: { files?: DocChip[]; onRemove?: (i
   return (
     <div className="doc-chips">
       {files.map((f, i) => (
-        <span key={i} className="doc-chip" title={f.url ? "點一下下載原檔" : f.name}>
+        <span key={i} className={`doc-chip ${f.note ? "uploading" : ""}`} title={f.url ? "點一下下載原檔" : f.name}>
           {f.url ? (
             <button type="button" className="link" onClick={() => download(f.url!, f.name).catch((e) => setError((e as Error).message))}>
               📄 {f.name}
             </button>
           ) : (
-            <span>📄 {f.name}</span>
+            <span title={f.audio ? "錄音（交給聽打員轉逐字稿；轉完就刪掉）" : undefined}>
+              {f.audio ? "🎙️" : "📄"} {f.name}
+            </span>
           )}
           {f.size != null && <span className="muted">{fmtSize(f.size)}</span>}
+          {f.note && <span className="muted">{f.note}</span>}
           {onRemove && (
             <button type="button" className="link" title="移除" onClick={() => onRemove(i)}>
               ✕

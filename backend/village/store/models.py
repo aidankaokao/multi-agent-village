@@ -59,9 +59,10 @@ class LlmModel(Base):
     reasoning_effort: Mapped[str | None] = mapped_column(String(16))
     # 看圖測驗通過的時間；None = 沒測過或沒通過。只有通過的模型能放進 vision 分級（鑑定師專用）
     vision_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # 輸出什麼：text（對話 / 看圖）或 image（生圖）。生圖模型只能放 image 分級，不能拿來對話
+    # 輸出什麼：text（對話 / 看圖）、image（生圖）或 audio（語音轉文字）。後兩種只能放各自的分級，不能拿來對話
     output: Mapped[str] = mapped_column(String(8), default="text", server_default="text")
     image_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 生圖測驗通過的時間
+    audio_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 轉寫測驗通過的時間
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -203,7 +204,8 @@ class ChatFile(Base):
     """問答的文件，只有本人拿得到；刪對話或帳號時一起刪。
 
     kind=upload：使用者附的文件（xlsx / csv / txt / pdf），跟著對話保存；追問時再交給駐村專家（對方不存檔）。
-    kind=report：駐村專家回傳的檔案（例如文件彙整師的報告 PDF），expires_at 到了自動清掉（同畫作）。
+    kind=report：駐村專家回傳的檔案（例如文件彙整師的報告 PDF）或聽打員的逐字稿，expires_at 到了自動清掉（同畫作）。
+    kind=audio：上傳的錄音（先上傳、問答時才接到對話；沒接上的 1 天後清掉，轉完逐字稿就刪掉）。
     """
 
     __tablename__ = "chat_files"

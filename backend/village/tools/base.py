@@ -6,8 +6,18 @@
 使用者不需要寫程式：在介面上把村民設成「工具型」並挑一個工具即可。
 """
 
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
+
+# 執行中的進度（例如「轉寫第 2 / 6 段」）：run_tool_agent 設定，花很久的工具在 arun 裡呼叫
+PROGRESS: ContextVar[Callable[[str], Awaitable[None]] | None] = ContextVar("tool_progress", default=None)
+
+
+async def report(text: str) -> None:
+    if (cb := PROGRESS.get()) is not None:
+        await cb(text)
 
 
 class ToolError(ValueError):
@@ -45,6 +55,7 @@ class Tool:
     examples: list[str] = []
     costly = False  # 每次執行都要花錢（例如生圖）：審核員退件時不重做，避免重複計費
     planner_hint = ""  # 附在村長名冊裡的能力說明（不受管理員改村民說明影響）
+    timeout_s = 0  # 要跑很久的工具（例如轉寫一小時的錄音）：步驟逾時至少給這麼久
 
     def schema(self) -> dict:
         """LLM 輸出參數的 JSON schema（strict：所有欄位必填、不允許多餘欄位）。"""

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentInfo, ConversationRow } from "../api";
+import { uploadAudio, village, type AgentInfo, type ConversationRow } from "../api";
 import { Attachments, DocChips, ImageStrip } from "../ui/Attachments";
 import { Markdown } from "../ui/Markdown";
-import { acceptedExts, docAgents, pickDocs, readDoc, type DocFile } from "./docs";
+import { AUDIO_EXTS, acceptedExts, docAgents, isAudio, pickAudio, pickDocs, readDoc, typistOf, type AudioUpload, type DocFile } from "./docs";
 import { findMention, insertMention, isAway, matchAgents, type MentionQuery } from "./mention";
 import { imageFiles, prepareImage } from "./prepareImage";
 import { leafIds, type AppraisalView, type LoopVerdictView, type RunsState, type RunView, type StepView } from "./runs";
@@ -37,7 +37,7 @@ const EXAMPLES = [
 interface Props {
   runs: RunsState;
   agents: AgentInfo[];
-  onSend: (message: string, images: string[], docs: DocFile[]) => Promise<void>;
+  onSend: (message: string, images: string[], docs: DocFile[], audio: { id: string; name: string; size: number }[]) => Promise<void>;
   vision: Vision;
   prefill?: { text: string; nonce: number } | null; // 點地圖上的村民：輸入框預先填好「@id 」
   onReset: () => void;
@@ -115,6 +115,10 @@ export function ChatPanel({
   const docInput = useRef<HTMLInputElement>(null);
   const docExts = acceptedExts(agents);
   const docHelpers = docAgents(agents).map((a) => a.name).join("、");
+  const typist = typistOf(agents);
+  const [audio, setAudio] = useState<AudioUpload[]>([]); // 準備附上的錄音（先上傳，問答時只帶 id）
+  const uploading = audio.some((a) => !a.id);
+  const pickExts = [...docExts, ...(typist ? AUDIO_EXTS : [])];
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // 使用者往上捲去看舊內容時，串流不要把畫面拉回底部
   const names: Record<string, string> = { mayor: "村長", reviewer: "審核員", appraiser: "鑑定師", ...Object.fromEntries(agents.map((a) => [a.id, a.name])) };
@@ -132,11 +136,44 @@ export function ChatPanel({
       ? "村規目前不開放附圖"
       : `附圖（最多 ${vision.maxImages} 張；也可以直接貼上或拖曳進來）`;
 
-  const docHint = docExts.length
-    ? `附文件（${docExts.join("、")}，最多 3 份）：交給${docHelpers}整理`
-    : "附文件需要「在村」的文件彙整師這類駐村專家（管理員到村民頁邀請；外出中的也不行）";
+  const docHint = [
+    docExts.length
+      ? `附文件（${docExts.join("、")}，最多 3 份）：交給${docHelpers}整理`
+      : "附文件需要「在村」的文件彙整師這類駐村專家（管理員到村民頁邀請；外出中的也不行）",
+    typist ? `附錄音（mp3、m4a、wav…，每份最多 200 MB）：交給${typist.name}轉成逐字稿` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const addAudio = async (files: File[]) => {
+    if (!typist) return setError("附錄音需要聽打員：請管理員到村民頁啟用聽打員");
+    const { ok, error: why } = pickAudio(files, audio);
+    setError(why);
+    if (!ok.length) return;
+    try {
+      const ready = await village.audioReady();
+      if (!ready.ok) return setError(ready.reason ?? "目前不能轉寫錄音");
+    } catch (e) {
+      return setError((e as Error).message);
+    }
+    for (const f of ok) {
+      const item: AudioUpload = { key: `${f.name}-${Date.now()}-${Math.random()}`, name: f.name, size: f.size, progress: 0, abort: new AbortController() };
+      setAudio((xs) => [...xs, item]);
+      const update = (patch: Partial<AudioUpload>) => setAudio((xs) => xs.map((x) => (x.key === item.key ? { ...x, ...patch } : x)));
+      uploadAudio(f, (progress) => update({ progress }), item.abort.signal)
+        .then((r) => update({ id: r.id, progress: 1 }))
+        .catch((e) => {
+          setAudio((xs) => xs.filter((x) => x.key !== item.key));
+          if ((e as Error).name !== "AbortError") setError(`「${f.name}」${(e as Error).message}`);
+        });
+    }
+  };
 
   const addDocs = async (files: File[]) => {
+    if (!files.length) return;
+    const sounds = files.filter((f) => isAudio(f.name));
+    if (sounds.length) addAudio(sounds);
+    files = files.filter((f) => !isAudio(f.name));
     if (!files.length) return;
     if (!docExts.length) return setError(docHint);
     const { ok, error: why } = pickDocs(files, docs, docExts);
@@ -176,15 +213,16 @@ export function ChatPanel({
 
   const send = async (message: string) => {
     const m = message.trim();
-    if ((!m && !images.length && !docs.length) || sending || preparing) return;
+    if ((!m && !images.length && !docs.length && !audio.length) || sending || preparing || uploading) return;
     setSending(true);
     setError("");
     stick.current = true;
     try {
-      await onSend(m, images, docs);
+      await onSend(m, images, docs, audio.map((a) => ({ id: a.id!, name: a.name, size: a.size })));
       setText("");
       setImages([]);
       setDocs([]);
+      setAudio([]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -216,9 +254,10 @@ export function ChatPanel({
     >
       {dragging && (
         <div className="drop-hint">
-          {[vision.ready && vision.maxImages > 0 ? "圖片" : "", docExts.length ? `文件（${docExts.join("、")}）` : ""].filter(Boolean).join("或") ||
-            attachHint}
-          {(vision.ready && vision.maxImages > 0) || docExts.length ? "：放開就附上" : ""}
+          {[vision.ready && vision.maxImages > 0 ? "圖片" : "", docExts.length ? `文件（${docExts.join("、")}）` : "", typist ? "錄音" : ""]
+            .filter(Boolean)
+            .join("、") || attachHint}
+          {(vision.ready && vision.maxImages > 0) || pickExts.length ? "：放開就附上" : ""}
         </div>
       )}
       <div className="chat-bar">
@@ -339,6 +378,15 @@ export function ChatPanel({
           </div>
         )}
         {docs.length > 0 && <DocChips files={docs} onRemove={(i) => setDocs((xs) => xs.filter((_, j) => j !== i))} />}
+        {audio.length > 0 && (
+          <DocChips
+            files={audio.map((a) => ({ name: a.name, size: a.size, audio: true, note: a.id ? "" : `上傳中 ${Math.round(a.progress * 100)}%` }))}
+            onRemove={(i) => {
+              audio[i].abort.abort();
+              setAudio((xs) => xs.filter((_, j) => j !== i));
+            }}
+          />
+        )}
         {menuOpen && (
           <div className="mention-menu" role="listbox">
             {choices.map((a, i) => (
@@ -368,7 +416,9 @@ export function ChatPanel({
           rows={3}
           value={text}
           placeholder={
-            docs.length
+            audio.length
+              ? "要怎麼處理這段錄音，例如「轉成逐字稿，再整理會議重點」（留空 = 轉成逐字稿）"
+              : docs.length
               ? "報告的重點方向，例如「著重各分店的比較」（留空 = 請彙整這些文件的重點）"
               : images.length
               ? "問問關於這張圖的問題（留空 = 這張圖片裡有什麼？）"
@@ -438,7 +488,7 @@ export function ChatPanel({
           <input
             ref={docInput}
             type="file"
-            accept={docExts.join(",")}
+            accept={pickExts.join(",")}
             multiple
             hidden
             onChange={(e) => {
@@ -446,11 +496,15 @@ export function ChatPanel({
               e.target.value = "";
             }}
           />
-          <button type="button" className="attach" title={docHint} disabled={!docExts.length} onClick={() => docInput.current?.click()}>
+          <button type="button" className="attach" title={docHint} disabled={!pickExts.length} onClick={() => docInput.current?.click()}>
             📎
           </button>
-          <button type="submit" disabled={sending || preparing || (!text.trim() && !images.length && !docs.length)} style={{ flex: 1 }}>
-            {sending ? "送出中…" : busy ? "送出（村民忙碌中）" : "送出"}
+          <button
+            type="submit"
+            disabled={sending || preparing || uploading || (!text.trim() && !images.length && !docs.length && !audio.length)}
+            style={{ flex: 1 }}
+          >
+            {sending ? "送出中…" : uploading ? "錄音上傳中…" : busy ? "送出（村民忙碌中）" : "送出"}
           </button>
           {busy && (
             <button

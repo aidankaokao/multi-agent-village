@@ -59,6 +59,11 @@
       "desc": "紅色貝雷帽、調色盤、畫筆，畫插畫",
       "path": "characters/painter.png"
     },
+    "typist": {
+      "name": "聽打員",
+      "desc": "耳機、筆電，把錄音打成逐字稿",
+      "path": "characters/typist.png"
+    },
     "mayor": {
       "name": "村長",
       "desc": "王冠、法杖",

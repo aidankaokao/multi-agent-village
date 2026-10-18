@@ -62,6 +62,23 @@ class ImageResult:
 
 
 @dataclass
+class Segment:
+    """逐字稿的一段（秒）。"""
+
+    start: float
+    end: float
+    text: str
+
+
+@dataclass
+class Transcript:
+    text: str
+    model: str
+    segments: list[Segment] = field(default_factory=list)  # 有時間戳的模型才有（whisper-1、Groq whisper）
+    duration: float | None = None  # 供應商回報的音檔長度（秒）
+
+
+@dataclass
 class RemoteModel:
     id: str
     display_name: str | None = None
@@ -101,6 +118,15 @@ class LLMClient(ABC):
 
     async def list_image_models(self) -> list[RemoteModel]:
         raise LLMError("這個供應商沒有生圖模型可以列出（目前只支援 OpenRouter）")
+
+    async def transcribe(
+        self, model: str, data: bytes, filename: str, *, language: str | None = None, prompt: str | None = None
+    ) -> Transcript:
+        """語音轉文字（OpenAI 的 /audio/transcriptions，Groq 等相容服務也一樣）。"""
+        raise LLMError("這個供應商不支援語音轉文字（目前支援 OpenAI 相容的 /audio/transcriptions，例如 OpenAI、Groq）")
+
+    async def list_audio_models(self) -> list[RemoteModel]:
+        raise LLMError("這個供應商沒有語音轉文字模型可以列出")
 
     async def aclose(self) -> None:
         pass
