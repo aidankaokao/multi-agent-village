@@ -28,7 +28,7 @@ import httpx
 from sqlalchemy import select
 
 from village.core.card import AgentSpec
-from village.core.docfiles import MAX_TOTAL_BYTES, DocFile, accepts_from_card, for_agent, safe_name
+from village.core.docfiles import MAX_FILES, MAX_TOTAL_BYTES, DocFile, accepts_from_card, for_agent, safe_name
 from village.llm.base import LLMError, TextCallback
 from village.security.redact import register_secret
 
@@ -388,12 +388,25 @@ async def _stream(http: httpx.AsyncClient, url: str, rpc: dict, headers: dict, o
     return reply
 
 
+# 這一步從中轉站取來的檔案（前面步驟的成果；executor 在呼叫前設定）
+_HANDED: ContextVar[list[DocFile]] = ContextVar("handed_files", default=[])
+
+
+@contextmanager
+def handing(files: list[DocFile]) -> Iterator[None]:
+    token = _HANDED.set(files)
+    try:
+        yield
+    finally:
+        _HANDED.reset(token)
+
+
 def files_for(spec) -> list[DocFile]:
-    """這位駐村專家這次會拿到的文件（名片上寫著收的類型才給）。"""
+    """這位駐村專家這次會拿到的文件（名片上寫著收的類型才給）：使用者附的優先，再來是中轉站取來的，最多 MAX_FILES 份。"""
     env = REMOTE_ENV.get()
     if env is None or spec.remote is None or not spec.remote.accepts:
         return []
-    return for_agent(env.docs, spec.remote.accepts)
+    return for_agent(env.docs + _HANDED.get(), spec.remote.accepts)[:MAX_FILES]
 
 
 async def call(spec, instruction: str, context: str, on_text: TextCallback | None = None) -> tuple[Reply, list[str]]:

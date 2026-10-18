@@ -279,6 +279,7 @@ export interface TraceStep {
   round?: number; // 迴圈的第幾輪
   verdict?: LoopVerdict | null; // 迴圈的審查步驟
   history?: { round: number; output: string; verdict: LoopVerdict | null; elapsed_ms: number }[]; // 迴圈前幾輪
+  received?: string[]; // 從中轉站取來的檔案
 }
 
 /** 迴圈：審查結論 */

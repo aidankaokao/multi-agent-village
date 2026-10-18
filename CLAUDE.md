@@ -43,7 +43,11 @@
   村長放棄、程式只補了聽打員）→ 加內建村民「摘要師 @summarizer」，村長沒排時程式也會接上它。
   第二次實測通過（DeepSeek 規劃出「聽打員 → 摘要師」，18 秒，三項待辦都對，還順手改正聽錯的字）。
 
-**下一步**：等使用者實測聽打員。之後的候選見 `docs/ROADMAP.md`「接下來」（檔案在步驟之間傳遞、專家反問、資料分析師）。
+- **中轉站（檔案在步驟之間傳遞）**：`core/depot.py`（使用者提議的「取件區＋號碼＋文字通知」）。步驟產生的檔案登記取件號碼，
+  後面收文件的駐村專家 `use` 它時由村子取件、隨 A2A 送出；文字成果包成「{村民}的成果.txt」；回答附上每一步的檔案。
+  附錄音時村長漏排報告 / 摘要也會補上。**待使用者部署實測**。
+
+**下一步**：等使用者實測中轉站。之後的候選見 `docs/ROADMAP.md`「接下來」（檔案在步驟之間傳遞、專家反問、資料分析師）。
 本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
@@ -81,7 +85,9 @@
   `llm_models.vision_verified_at`）的模型會被用到。一般 LLM 流程不可以用到視覺模型。
 - 語音轉文字模型（`output="audio"`）同理：只能放 `audio` 分級、只能透過 `LLMService.transcribe` 使用，通過轉寫測驗
   （`audio_verified_at`）才會被用到。聽打員的錄音環境放 context variable `TRANSCRIBE_ENV`（只有問答會設定，試打不能轉寫）；
-  工具要回報進度用 `tools.base.report`。backend 容器要有 ffmpeg（Dockerfile 已裝；本機 `brew install ffmpeg`）。
+  工具要回報進度用 `tools.base.report`。
+- 步驟之間的檔案一律經過中轉站（context variable `DEPOT`，每次問答一個）；只有收文件的駐村專家會取件，
+  一般村民拿前一步的文字就夠了。backend 容器要有 ffmpeg（Dockerfile 已裝；本機 `brew install ffmpeg`）。
 - 生圖模型（`llm_models.output="image"`）只能放 `image` 分級、只能透過 `LLMService.generate_image` 使用（OpenRouter `POST /images`），
   不能拿來對話；只有通過生圖測驗（`image_verified_at`）的會被用到。只收點陣圖（看檔頭），SVG 不收。
   畫作存 `chat_images`（kind=generated），14 天後過期（`GENERATED_DAYS`，main.py 定期清理）。

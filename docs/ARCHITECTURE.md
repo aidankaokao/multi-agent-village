@@ -349,6 +349,22 @@ class BaseAgent(Protocol):
   工具 `context()` 告訴畫家有沒有參考圖與寬高（`imagefmt.dimensions`），畫家用 `use_reference` 決定是否以它為底；
   送出時 `input_references` = data URL。模型回 400（不收參考圖）時改成只依描述重畫並在結果註明。
 
+#### 中轉站：步驟之間交接檔案
+
+像店家把外送餐點放在取餐區、貼上號碼：每一步產生的檔案放進這次問答的中轉站（`core/depot.py`，context variable `DEPOT`），
+編上取件號碼（#1、#2…）。內容留在 `chat_files`，中轉站只記號碼、檔名、誰放的、哪一步、檔案 id。
+
+- 放件：步驟完成後，它的附件（`kind=file`，`/api/files/{id}`）由 `Depot.drop_attachments` 登記。
+- 取件：下一步 `use` 了那一步、而且是收文件的駐村專家（`remote.accepts`）時，`Runner._parcels_for` 挑出它收的格式；
+  那一步只有文字成果（摘要師、網路研究員）而對方收 txt 時，`drop_text` 把文字包成「{村民}的成果.txt」。
+  出發前 `Depot.pick_up` 讀出內容（`load_file`：只讀得到提問者自己的檔案）→ `remote.handing` → `files_for`
+  （使用者附的文件優先，合計最多 3 份）→ A2A file part。訊息裡附上取件通知（`slip`：「中轉站有…#1 逐字稿.txt（來自聽打員）」）。
+- 駐村專家在別的容器、連不回村子，所以由村子代為取件、隨訊息送出（A2A 也支援 file part 只給 `uri`，
+  以後檔案大到不適合隨訊息送、或專家能安全地回來拿時，可以改成給一次性的取件網址）。
+- `StepResult.received`、`agent.started` 的 `received`：執行過程與紀錄顯示「📦 從中轉站取件：#1 …」。
+- 回答附上每一步產生的檔案（最後交給使用者的步驟排前面），所以中間的逐字稿也下載得到。
+- 附了錄音時 `with_typist` 也補齊漏排的後續：請求要報告 / PDF 卻沒有收文件的專家 → 接上它；只有聽打員卻要摘要 → 接上摘要師。
+
 #### 語音轉文字模型（audio 分級）與聽打員
 
 - `LLMClient.transcribe` / `list_audio_models`（只有 OpenAI 相容 client 實作）：`POST {base_url}/audio/transcriptions`（multipart）。
@@ -466,6 +482,7 @@ multi-agent-village/
 │       │   ├── painter.py       # 畫家的作畫環境：生圖、張數上限、畫作保存、參考圖
 │       │   ├── remote.py        # 駐村專家：agent card、健康檢查、A2A 呼叫（send / stream、文件與回傳檔案）
 │       │   ├── docfiles.py      # 附文件：格式與大小檢查、哪些駐村專家收哪些檔案
+│       │   ├── depot.py         # 中轉站：步驟產生的檔案登記取件號碼，後面收文件的駐村專家要用時取件
 │       │   ├── audio.py         # 錄音：格式、ffmpeg 切段、逐字稿排版（時間、SRT）、簡轉繁
 │       │   ├── transcriber.py   # 聽打員的轉寫環境：切段同時轉寫、存逐字稿、刪錄音
 │       │   ├── loop.py          # 迴圈：審查結論判讀、從請求補迴圈、輪次狀態

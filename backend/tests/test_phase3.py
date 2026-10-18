@@ -215,6 +215,10 @@ async def test_cancel_and_interrupted(app_env, monkeypatch):
     await asyncio.sleep(0.05)
     assert (await c.post(f"/api/chat/{run_id}/cancel")).status_code == 202
     assert (await _wait_done(c, run_id))["status"] == "cancelled"
+    for _ in range(100):  # 紀錄先標成 cancelled，task 收尾（存回對話）還要一下子
+        if run_id not in ctx.active:
+            break
+        await asyncio.sleep(0.02)
     assert (await c.post(f"/api/chat/{run_id}/cancel")).status_code == 404
 
     await ctx.trace.start("stale", "重啟前沒跑完")

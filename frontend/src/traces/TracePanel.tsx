@@ -273,6 +273,11 @@ function StepCard({ s, name }: { s: TraceStep; name: string }) {
         </span>
       </div>
       <div className="muted">指示：{s.instruction}</div>
+      {s.received && s.received.length > 0 && (
+        <div className="muted received" title="前面步驟的成果：放在中轉站，出發前替它取來">
+          📦 從中轉站取件：{s.received.join("、")}
+        </div>
+      )}
       {s.input && (
         <details>
           <summary className="muted">送給村民的完整訊息</summary>

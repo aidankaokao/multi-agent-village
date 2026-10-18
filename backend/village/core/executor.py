@@ -20,6 +20,7 @@ from village.core.transcriber import TRANSCRIBE_ENV, TranscribeEnv, transcribing
 from village.core.context import PREV, Turn
 from village.core import loop as loops
 from village.core.docfiles import DocFile
+from village.core.depot import DEPOT, Depot, Loader, Parcel, depot, slip
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import (
     ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan, render_audio, render_documents,
@@ -88,6 +89,7 @@ class StepResult:
     round: int = 1  # 迴圈的第幾輪
     verdict: dict | None = None  # 迴圈的審查步驟：{passed, feedback, how}
     history: list[dict] = field(default_factory=list)  # 迴圈前幾輪的成果 {round, output, verdict}
+    received: list[str] = field(default_factory=list)  # 從中轉站取來的檔案（「#1 逐字稿.txt（來自聽打員）」）
 
 
 def render_context(
@@ -172,29 +174,52 @@ def _recordings() -> list:
 
 
 SUMMARIZER = "summarizer"
-# 請求除了逐字稿還要別的（村長沒排時，程式接著交給摘要師）
+# 請求除了逐字稿還要別的（村長沒排時，程式接著交給摘要師 / 收文件的駐村專家）
 _WANTS_SUMMARY = re.compile(r"摘要|重點|總結|整理|會議記錄|會議紀錄|待辦|決議|懶人包|結論|大綱")
+_WANTS_REPORT = re.compile(r"PDF|pdf|報告|彙整")
 
 
-def with_typist(plan: Plan, typist_id: str, message: str, note: str = "", summarizer: str | None = None) -> Plan:
-    """在計畫最前面加上聽打員的步驟；原本沒有依賴的步驟改成用它的逐字稿。
+def with_typist(
+    plan: Plan, typist_id: str, message: str, note: str = "", summarizer: str | None = None, reporter: str | None = None,
+    names: dict[str, str] | None = None,
+) -> Plan:
+    """附了錄音時補齊計畫（弱模型村長常漏）：
 
-    村長什麼都沒排、請求卻還要摘要 / 重點 / 待辦時（常見於村長找不到適合的村民就放棄），接著排摘要師。
+    1. 沒有聽打員：最前面補上它，原本沒有依賴的步驟改成用它的逐字稿（note 記在計畫裡）。
+    2. 請求要報告 / PDF，計畫卻沒有收文件的駐村專家（reporter）：最後接上它（逐字稿或整理好的成果從中轉站交給它）。
+    3. 請求要摘要 / 重點 / 待辦，計畫卻只有聽打員：最後接上摘要師。
     """
-    ids = {s.id for s in plan.steps}
-    first = next(i for i in ("s0", "t0", "typist") if i not in ids)
-    head = Step(id=first, agent=typist_id, instruction="把使用者附的錄音轉成逐字稿")
-    if not plan.steps and summarizer and _WANTS_SUMMARY.search(message):
-        tail = Step(id="s1" if first != "s1" else "s2", agent=summarizer, instruction=message, use=[first])
-        return Plan(steps=[head, tail], source="llm", notes=plan.notes + ([note] if note else []), loop=plan.loop)
-    if not plan.steps:
-        head.instruction = message
-    steps = [head] + [
-        Step(id=s.id, agent=s.agent, instruction=s.instruction, use=s.use if [u for u in s.use if u in ids] else [first, *s.use])
-        for s in plan.steps
-    ]
-    return Plan(steps=steps, source="llm" if plan.source == "direct" else plan.source,
-                notes=plan.notes + ([note] if note else []), loop=plan.loop)
+    names = names or {}
+    steps, notes = list(plan.steps), list(plan.notes)
+    was_empty = not steps
+
+    def new_id() -> str:
+        ids = {s.id for s in steps}
+        return next(f"s{i}" for i in range(len(steps) + 2) if f"s{i}" not in ids)
+
+    if not any(s.agent == typist_id for s in steps):
+        ids = {s.id for s in steps}
+        first = new_id()
+        head = Step(id=first, agent=typist_id, instruction=message if was_empty else "把使用者附的錄音轉成逐字稿")
+        steps = [head] + [
+            Step(id=s.id, agent=s.agent, instruction=s.instruction, use=s.use if [u for u in s.use if u in ids] else [first, *s.use])
+            for s in steps
+        ]
+        if note:
+            notes.append(note)
+    then = None
+    if reporter and _WANTS_REPORT.search(message) and not any(s.agent == reporter for s in steps):
+        then = reporter
+    elif summarizer and _WANTS_SUMMARY.search(message) and all(s.agent == typist_id for s in steps):
+        then = summarizer
+    if then:
+        if was_empty:
+            steps[0].instruction = "把使用者附的錄音轉成逐字稿"
+        steps.append(Step(id=new_id(), agent=then, instruction=message, use=[steps[-1].id]))
+        notes.append(f"請求還要{'做成報告' if then == reporter else '整理內容'}：接著交給{names.get(then, then)}")
+    if steps == plan.steps:
+        return plan
+    return Plan(steps=steps, source="llm" if plan.source == "direct" else plan.source, notes=notes, loop=plan.loop)
 
 
 class Runner:
@@ -223,6 +248,7 @@ class Runner:
         docs: list[DocFile] | None = None, fresh_docs: bool = False, doc_agent: str | None = None,
         save_file: Callable[[str, str, bytes], Awaitable[str]] | None = None,
         transcribe: TranscribeEnv | None = None,
+        load_file: Loader | None = None,
     ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。
 
@@ -232,6 +258,7 @@ class Runner:
         doc_agent：追問上一份報告時，一定要交給的駐村專家（上一輪做報告的那位）。
         save_file：存駐村專家回傳的檔案（例如報告 PDF），回傳檔案 id。
         transcribe：這次附的錄音（聽打員轉逐字稿用）；有錄音時第一步一定是聽打員。
+        load_file：從中轉站取件時讀檔（檔案 id → 內容）；沒有就只能交接這次問答裡產生的文字檔。
         """
         self.bus.claim(run_id, user_id)
         try:
@@ -239,7 +266,8 @@ class Runner:
                 remote.RemoteEnv(self.directory, self.llm, user_id, docs=docs or [], save_file=save_file)
                 if self.directory else None
             )
-            with llm_user(user_id), painting(paint), remote.remote_calls(env), transcribing(transcribe):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
+            with (llm_user(user_id), painting(paint), remote.remote_calls(env), transcribing(transcribe),
+                  depot(Depot(load_file))):  # 這次問答的 LLM 呼叫都用提問者自己的設定與額度
                 _MEMORIES.set(render_memories(memories) if memories else "")
                 _APPRAISAL.set("")
                 _DOCS.set(_DocNote(docs or [], fresh_docs, doc_agent))
@@ -312,14 +340,18 @@ class Runner:
                             source="llm" if plan.source == "direct" else plan.source,
                             notes=plan.notes + [f"{why}：交給{agent.name}處理"])
                 await on_note(f"{why}：交給{agent.name}處理")
-            if heard and typist and not any(s.agent == typist.id for s in plan.steps):
-                # 附了錄音，村長卻沒派聽打員（弱模型常見）：第一步補上聽打員，其他步驟改成處理它的逐字稿
-                why = f"附了錄音：先交給{typist.name}轉成逐字稿"
+            if heard and typist:
+                # 附了錄音：沒派聽打員就補上；請求還要報告 / 摘要卻漏排時接上收文件的專家 / 摘要師
                 summarizer = next((a for a in agents if a.id == SUMMARIZER), None)
-                plan = with_typist(plan, typist.id, message, why, summarizer.id if summarizer else None)
-                await on_note(why)
-                if len(plan.steps) > 1 and plan.steps[-1].agent == SUMMARIZER and plan.steps[-1].use == [plan.steps[0].id]:
-                    await on_note(f"請求還要整理內容：接著交給{summarizer.name}")
+                reporter = next((a for a in doc_agents if ".txt" in (a.remote.accepts if a.remote else [])), None)
+                before = len(plan.notes)
+                plan = with_typist(
+                    plan, typist.id, message, f"附了錄音：先交給{typist.name}轉成逐字稿",
+                    summarizer.id if summarizer else None, reporter.id if reporter else None,
+                    names={a.id: a.name for a in agents},
+                )
+                for n in plan.notes[before:]:
+                    await on_note(n)
             await emit("plan.created", run_id=run_id, agent=MAYOR, **plan.to_dict())
 
             if not plan.steps:
@@ -346,7 +378,10 @@ class Runner:
 
             steps = [asdict(r) for r in results.values()]
             rv = [x.to_dict() for x in reviews]
-            files = [a for s in leaf_steps(plan) if results[s.id].status == "done" for a in results[s.id].attachments]
+            # 回答附上每一步產生的檔案：最後交給使用者的步驟排前面（例如報告 PDF），中間的（逐字稿）也下載得到
+            leaves = [s.id for s in leaf_steps(plan)]
+            order = leaves + [s.id for s in plan.steps if s.id not in leaves]
+            files = [a for sid in order if results[sid].status == "done" for a in results[sid].attachments]
             await emit("run.finished", run_id=run_id, ok=ok, answer=answer, steps=steps, reviews=rv, attachments=files)
             await record("done" if ok else "error", answer=answer)
             return {"ok": ok, "answer": answer, "plan": plan.to_dict(), "steps": steps, "reviews": rv, "attachments": files}
@@ -456,14 +491,21 @@ class Runner:
         state = _LOOP.get()
         is_check = bool(state and state.loop and step.id == state.loop.check)
         instruction = step.instruction + (loops.VERDICT_SUFFIX if is_check else "")
-        await self._run_step(run_id, step, r, rules, instruction, context)
+        await self._run_step(run_id, step, r, rules, instruction, context, results)
 
     async def _run_step(
-        self, run_id: str, step: Step, r: StepResult, rules: VillageRules, instruction: str, context: str
+        self, run_id: str, step: Step, r: StepResult, rules: VillageRules, instruction: str, context: str,
+        results: dict[str, StepResult],
     ) -> None:
         emit = self.bus.publish
         spec = self.registry.get(step.agent)
-        await emit("agent.started", run_id=run_id, step_id=step.id, agent=step.agent, instruction=step.instruction, round=r.round)
+        parcels = self._parcels_for(step, spec, results)
+        handed = await self._pick_up(parcels)
+        if parcels:
+            r.received = [p.label() for p in parcels]
+            context = "\n\n".join(x for x in (context, slip(parcels)) if x)
+        await emit("agent.started", run_id=run_id, step_id=step.id, agent=step.agent, instruction=step.instruction, round=r.round,
+                   received=r.received)
         t0 = time.monotonic()
         timeout = rules.step_timeout_s
         if spec is not None and remote.files_for(spec):  # 要處理文件、產生報告：放寬時間上限
@@ -477,15 +519,18 @@ class Runner:
             async def on_retry(reason: str) -> None:
                 await emit("agent.retry", run_id=run_id, step_id=step.id, agent=step.agent, reason=reason)
 
-            await asyncio.wait_for(
-                run_agent(
-                    self.llm, spec, instruction, context, r,
-                    on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
-                    on_retry=on_retry,
-                ),
-                timeout=timeout,
-            )
+            with remote.handing(handed):
+                await asyncio.wait_for(
+                    run_agent(
+                        self.llm, spec, instruction, context, r,
+                        on_text=DeltaEmitter(self.bus, run_id=run_id, step_id=step.id, agent=step.agent),
+                        on_retry=on_retry,
+                    ),
+                    timeout=timeout,
+                )
             r.status, r.error = "done", None
+            if (d := DEPOT.get()) is not None:  # 這一步產生的檔案放進中轉站，後面的步驟要用時再取
+                d.drop_attachments(step.agent, spec.name, step.id, r.attachments)
         except TimeoutError:
             r.status, r.error = "error", f"逾時：超過 {timeout} 秒沒有完成（可在「村規」調整）"
         except LLMError as e:
@@ -499,6 +544,29 @@ class Runner:
             )
         else:
             await emit("agent.error", run_id=run_id, step_id=step.id, agent=step.agent, error=r.error)
+
+    def _parcels_for(self, step: Step, spec: AgentSpec | None, results: dict[str, StepResult]) -> list[Parcel]:
+        """這一步要從中轉站取的檔案：只有收文件的駐村專家需要（其他村民拿得到前一步的文字就夠了）。
+
+        用到的步驟有它收的檔案就給檔案；只有文字成果（摘要師、網路研究員）而它收 txt 時，把文字包成 txt。
+        """
+        d = DEPOT.get()
+        if d is None or spec is None or spec.kind != "remote" or not spec.remote or not spec.remote.accepts:
+            return []
+        used = [u for u in step.use if u != PREV]
+        accepts = spec.remote.accepts
+        parcels = [p for p in d.from_steps(used) if p.ext in accepts]
+        for u in used:
+            prev = results.get(u)
+            if prev is None or any(p.step == u for p in parcels) or ".txt" not in accepts or not prev.output.strip():
+                continue
+            sender = self.registry.get(prev.agent)
+            parcels.append(d.drop_text(prev.agent, sender.name if sender else prev.agent, u, prev.output))
+        return parcels
+
+    async def _pick_up(self, parcels: list[Parcel]) -> list[DocFile]:
+        d = DEPOT.get()
+        return await d.pick_up(parcels) if d and parcels else []
 
     async def _appraise(
         self, run_id: str, message: str, images: list[ImagePart], relook: bool, history: list[Turn]
@@ -541,7 +609,7 @@ class Runner:
             instruction = f"{step.instruction}\n\n審核員退回了你上一次的成果。原因：{rv.reason}\n請這樣修正：{rv.fix or rv.reason}"
             context = render_context(step, results, self.registry, _PREVIOUS.get())
             context = f"{context}\n\n你上一次的成果（被退回）：\n{r.output}".strip()
-            await self._run_step(run_id, step, r, rules, instruction, context)
+            await self._run_step(run_id, step, r, rules, instruction, context, results)
             if r.status != "done":
                 return
 

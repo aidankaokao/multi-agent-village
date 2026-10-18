@@ -167,8 +167,9 @@ def render_audio(files, typist: AgentSpec | None) -> str:
     who = f"{typist.id}（{typist.name}）" if typist else "聽打員"
     return (
         f"使用者這次附了錄音：{names}。錄音只有 {who} 聽得到，其他村民看不到。"
-        f"第一步一定是派 {who} 轉成逐字稿；使用者還要重點、摘要、會議記錄、翻譯或報告時，"
-        f"再派適合的村民處理逐字稿（那一步的 use 填聽打員那一步的 id）。"
+        f"第一步一定是派 {who} 轉成逐字稿；使用者還要重點、摘要、會議記錄、翻譯時，"
+        f"再派適合的村民處理逐字稿（那一步的 use 填聽打員那一步的 id）；要做成報告或 PDF 時派收文件的村民，"
+        f"use 填聽打員（或整理重點那一步）的 id。"
     )
 
 
@@ -182,7 +183,8 @@ def planner_system_prompt(
         tool = TOOLS.get(a.tool.id) if a.kind == "tool" and a.tool else None
         hint = f"（{tool.planner_hint}）" if tool and tool.planner_hint else ""
         if a.kind == "remote" and a.remote and a.remote.accepts:
-            hint += f"【收文件：{'、'.join(a.remote.accepts)}；只有它讀得到使用者附的文件】"
+            hint += (f"【收文件：{'、'.join(a.remote.accepts)}；只有它讀得到使用者附的文件；"
+                     "也拿得到前面步驟的成果（逐字稿、研究結果、整理好的文字），要做成報告就派它並在 use 填那一步】")
         lines.append(f"- {a.id}（{a.name}）：{a.card.description}{hint}{costly}" + (f" 例：{examples}" if examples else ""))
     roster = "\n".join(lines)
     if disabled:

@@ -709,6 +709,11 @@ function StepItem({ step: s, names, now, isLast }: { step: StepView; names: Reco
       <div className="muted">
         <code>{s.id}</code> 指示：{s.instruction}
       </div>
+      {s.received && s.received.length > 0 && (
+        <div className="muted received" title="前面步驟的成果：放在中轉站，出發前替它取來">
+          📦 從中轉站取件：{s.received.join("、")}
+        </div>
+      )}
       {s.retryReason && s.status === "running" && <div className="muted">↻ 重做原因：{s.retryReason}</div>}
       {s.warnings.map((w) => (
         <div key={w} className="tag warn">

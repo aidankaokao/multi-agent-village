@@ -23,6 +23,7 @@ export interface StepView {
   round?: number; // 迴圈的第幾輪
   verdict?: LoopVerdictView; // 迴圈的審查步驟：這一輪的結論
   rounds?: { round: number; output?: string; verdict?: LoopVerdictView }[]; // 迴圈前幾輪的成果
+  received?: string[]; // 從中轉站取來的檔案（「#1 逐字稿.txt（來自聽打員）」）
 }
 
 export interface LoopVerdictView {
@@ -175,6 +176,8 @@ export function runsReducer(state: RunsState, action: Action): RunsState {
     case "agent.started": {
       // 審核員退回重做時同一步會再 started 一次；迴圈的下一輪（round 變大）把上一輪的成果收進 rounds
       const round = (e.round as number) ?? 1;
+      const received = (e.received as string[] | undefined) ?? [];
+      run = patchStep(run, e.step_id, (s) => ({ ...s, received }));
       run = patchStep(run, e.step_id, (s) =>
         round > (s.round ?? 1)
           ? {
