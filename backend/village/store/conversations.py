@@ -185,14 +185,17 @@ class ConversationStore:
         return []
 
     async def save_generated(
-        self, user_id: str, conversation_id: str | None, images: list[tuple[str, bytes]]
+        self, user_id: str, conversation_id: str | None, images: list[tuple[str, bytes]], kind: str = "generated",
     ) -> list[str]:
-        """存畫家畫的圖（GENERATED_DAYS 天後自動清掉），回傳圖片 id。"""
+        """存畫家畫的圖（GENERATED_DAYS 天後自動清掉），回傳圖片 id。
+
+        kind="report"：駐村專家回傳的圖（例如報社的第一版預覽），保存期限一樣，但不算進畫家每天的張數。
+        """
         expires = _now() + timedelta(days=GENERATED_DAYS)
         rows = [
             ChatImage(
                 user_id=user_id, conversation_id=conversation_id, mime=mime, data=data, size=len(data),
-                kind="generated", expires_at=expires,
+                kind=kind, expires_at=expires,
             )
             for mime, data in images
         ]

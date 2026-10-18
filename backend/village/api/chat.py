@@ -145,6 +145,10 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
     async def save_file(name: str, mime: str, data: bytes) -> str:
         return await ctx.conversations.save_report(me.id, conv_id, name, mime, data)
 
+    async def save_image(mime: str, data: bytes) -> str:  # 駐村專家回傳的圖（報紙預覽）：直接顯示，14 天
+        [image_id] = await ctx.conversations.save_generated(me.id, conv_id, [(mime, data)], kind="report")
+        return image_id
+
     async def load_file(file_id: str) -> bytes | None:  # 中轉站取件：只拿得到自己的檔案
         f = await ctx.conversations.get_file(file_id, me.id)
         return f.data if f else None
@@ -160,7 +164,7 @@ async def chat(body: ChatBody, request: Request, me: CurrentUser = Depends(requi
             out = await ctx.runner.run(
                 run_id, message, traced=True, user_id=me.id, history=history, memories=memories,
                 images=parts, relook=relook, paint=paint, docs=docs, fresh_docs=fresh_docs, doc_agent=doc_agent, save_file=save_file,
-                transcribe=transcribe, load_file=load_file,
+                transcribe=transcribe, load_file=load_file, save_image=save_image,
             )
         except asyncio.CancelledError:
             await ctx.conversations.finish_turn(conv_id, run_id, "", "cancelled")

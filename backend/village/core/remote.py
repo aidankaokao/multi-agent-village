@@ -28,7 +28,7 @@ import httpx
 from sqlalchemy import select
 
 from village.core.card import AgentSpec
-from village.core.docfiles import MAX_FILES, MAX_TOTAL_BYTES, DocFile, accepts_from_card, for_agent, safe_name
+from village.core.docfiles import MAX_TOTAL_BYTES, DocFile, accepts_from_card, for_agent, max_files_from_card, safe_name
 from village.llm.base import LLMError, TextCallback
 from village.security.redact import register_secret
 
@@ -138,7 +138,8 @@ def spec_from_card(
         },
         "x-village": {"sprite": sprite or "scholar", "home": home, "keywords": keywords or []},
         "kind": "remote",
-        "remote": {"url": base, "a2a_path": a2a_path(card), "share_llm": share_llm, "accepts": accepts_from_card(card)},
+        "remote": {"url": base, "a2a_path": a2a_path(card), "share_llm": share_llm, "accepts": accepts_from_card(card),
+                   "max_files": max_files_from_card(card)},
     })
 
 
@@ -188,6 +189,8 @@ class RemoteEnv:
     docs: list[DocFile] = field(default_factory=list)  # 這次問答附的文件（只交給收這類檔案的駐村專家）
     # 存對方回傳的檔案（name, mime, data）→ 檔案 id；沒有就不收檔案
     save_file: Callable[[str, str, bytes], Awaitable[str]] | None = None
+    # 存對方回傳的圖片（例如報社的第一版預覽）→ 圖片 id，直接顯示在回答裡；沒有就當一般檔案
+    save_image: Callable[[str, bytes], Awaitable[str]] | None = None
 
 
 REMOTE_ENV: ContextVar[RemoteEnv | None] = ContextVar("remote_env", default=None)
@@ -402,11 +405,11 @@ def handing(files: list[DocFile]) -> Iterator[None]:
 
 
 def files_for(spec) -> list[DocFile]:
-    """這位駐村專家這次會拿到的文件（名片上寫著收的類型才給）：使用者附的優先，再來是中轉站取來的，最多 MAX_FILES 份。"""
+    """這位駐村專家這次會拿到的文件（名片上寫著收的類型才給）：使用者附的優先，再來是中轉站取來的，最多名片寫的份數。"""
     env = REMOTE_ENV.get()
     if env is None or spec.remote is None or not spec.remote.accepts:
         return []
-    return for_agent(env.docs + _HANDED.get(), spec.remote.accepts)[:MAX_FILES]
+    return for_agent(env.docs + _HANDED.get(), spec.remote.accepts)[: spec.remote.max_files]
 
 
 async def call(spec, instruction: str, context: str, on_text: TextCallback | None = None) -> tuple[Reply, list[str]]:

@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>報社 · 測試</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --line:#ddd6c8; --text:#2b2a27; --muted:#7a7468; --accent:#1d3557; --ok:#2f7a4a; --bad:#b03a2e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.7 -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 12px 0; }
+  details > summary { cursor: pointer; font-weight: 600; }
+  label { display:block; margin: 8px 0 2px; font-size: 13px; color: var(--muted); }
+  input, select, textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: #fffdf9; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 160px; }
+  button { padding: 7px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { font-size: 13px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .answer { white-space: pre-wrap; }
+  .cite { color: var(--accent); cursor: pointer; font-weight: 600; text-decoration: none; }
+  .source { border-left: 3px solid var(--line); padding: 4px 10px; margin: 8px 0; font-size: 14px; }
+  .source.hl { border-color: var(--accent); background: #fbf3ef; }
+  .source .text { white-space: pre-wrap; display: none; margin-top: 4px; }
+  .source.open .text { display: block; }
+  .q { font-weight: 600; margin-bottom: 6px; }
+  .outside { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); background: #faf8f3; }
+  .check { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .check input { width: auto; }
+  .drop { border: 2px dashed var(--line); border-radius: 8px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--accent); background: #eef2f7; }
+  .files { margin: 8px 0 0; padding: 0; list-style: none; }
+  .files li { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 14px; }
+  .files li .x { margin-left: auto; padding: 0 8px; }
+  .progress { font-size: 13px; color: var(--muted); }
+  .progress div::before { content: "… "; }
+  .report { white-space: pre-wrap; }
+  .preview { display: block; max-width: 100%; margin-top: 10px; border: 1px solid var(--line); box-shadow: 0 2px 8px #0002; }
+  .download { display: inline-block; margin-top: 8px; padding: 7px 14px; background: var(--accent); color: #fff; border-radius: 6px; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>📰 報社 · 測試</h1>
+  <div class="muted">這個網頁模擬「另一個應用程式呼叫 agent API」：用 A2A 的 message/stream 把採訪資料（base64 的 txt / md）和要求送出，
+    token 與 LLM 設定放在 HTTP header。報社自己不上網找資料：在村子裡由網路研究員查好再交過來；這裡可以直接上傳或貼上資料測試。</div>
+  <div id="health" class="status muted">檢查服務狀態中…</div>
+
+  <div class="card">
+    <details id="settings-box">
+      <summary>⚙️ 連線設定 <span id="settings-state" class="muted"></span></summary>
+      <div id="unlock" hidden>
+        <label>記住設定的方式改了：最後一次輸入以前設的密碼解開，之後打開網頁會自動帶入，不用再輸入密碼</label>
+        <div class="row"><input id="unlock-pw" type="password" autocomplete="current-password"><button id="unlock-btn" type="button">解開</button>
+          <button id="forget-btn" type="button" class="ghost">不要了，重新填</button></div>
+        <div id="unlock-msg" class="status bad"></div>
+      </div>
+      <label>存取 token（agent 的 .env 裡 NP_ACCESS_TOKENS 的其中一個）</label>
+      <input id="token" type="password" autocomplete="off">
+      <div class="row">
+        <div><label>LLM 網址（OpenAI 相容）</label><input id="llm-url" placeholder="https://openrouter.ai/api/v1"></div>
+        <div><label>模型</label><input id="llm-model" placeholder="例如 openai/gpt-5-mini、deepseek/deepseek-v4-flash"></div>
+      </div>
+      <div class="row">
+        <div><label>LLM API key（本機 Ollama 可以留空）</label><input id="llm-key" type="password" autocomplete="off"></div>
+        <div><label>思考強度（選填）</label>
+          <select id="llm-effort"><option value="">預設</option><option>none</option><option>low</option><option>medium</option><option>high</option></select></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button type="button" class="ghost" data-preset="openrouter">填入 OpenRouter</button>
+        <button type="button" class="ghost" data-preset="ollama">填入本機 Ollama</button>
+      </div>
+      <div class="check"><input id="remember" type="checkbox"><label for="remember" style="margin:0">記住設定（加密存在這個瀏覽器，下次打開自動帶入）</label></div>
+      <div class="row" style="margin-top:10px"><button id="save-btn" type="button">套用</button>
+        <button id="forget-saved" type="button" class="ghost" hidden>刪除記住的設定</button></div>
+      <div id="save-msg" class="status"></div>
+      <div class="muted" style="margin-top:6px">不勾「記住」時，設定只存在這個分頁的記憶體裡，重新整理就要重填。
+        勾選時用這個瀏覽器專屬、無法匯出的金鑰加密（WebCrypto AES-GCM，金鑰存在瀏覽器的 IndexedDB）後才存：電腦上的檔案是密文，
+        但能用這個瀏覽器打開這個網頁的人都能直接使用這些設定（和瀏覽器記住密碼一樣），公用電腦不要勾。</div>
+    </details>
+  </div>
+
+  <div class="card">
+    <form id="report-form">
+      <div id="drop" class="drop">把採訪資料（txt / md）拖到這裡，或<b>點這裡選檔案</b><br><span id="limits" class="muted"></span></div>
+      <input id="file-input" type="file" multiple accept=".txt,.md" hidden>
+      <ul id="files" class="files"></ul>
+      <textarea id="paste" rows="4" style="margin-top:8px" placeholder="也可以直接貼上一段新聞資料（會當成一份「貼上的資料.txt」）"></textarea>
+      <textarea id="question" rows="2" style="margin-top:8px" placeholder="這期的主題與版面（選填），例如：做一份科技與財經早報"></textarea>
+      <div class="row" style="margin-top:8px"><button id="go-btn" type="submit">編報紙</button></div>
+    </form>
+  </div>
+
+  <div id="results"></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const STORE_KEY = "np-settings-v1";
+let settings = { token: "", url: "", model: "", key: "", effort: "" };
+
+// ---------------------------------------------------------------- 記住設定（WebCrypto）
+// v2：瀏覽器自己產生、無法匯出的 AES-GCM 金鑰（存在 IndexedDB），打開網頁自動解密，不用輸入密碼。
+// v1（舊版）：使用者自訂密碼（PBKDF2）加密；只用來把舊資料解開一次、轉成 v2。
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+function storedBox() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } }
+function keyStore(mode, fn) {
+  return new Promise((ok, fail) => {
+    const open = indexedDB.open("agent-test-page", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("keys");
+    open.onerror = () => fail(open.error);
+    open.onsuccess = () => {
+      const req = fn(open.result.transaction("keys", mode).objectStore("keys"));
+      req.onsuccess = () => ok(req.result); req.onerror = () => fail(req.error);
+    };
+  });
+}
+async function deviceKey(create) {
+  let key = await keyStore("readonly", (s) => s.get(STORE_KEY));
+  if (!key && create) {
+    key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]); // false = 不能匯出
+    await keyStore("readwrite", (s) => s.put(key, STORE_KEY));
+  }
+  return key;
+}
+async function remember(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deviceKey(true), enc.encode(JSON.stringify(obj)));
+  localStorage.setItem(STORE_KEY, JSON.stringify({ v: 2, iv: b64(iv), ct: b64(ct) }));
+}
+async function recall(box) {
+  const key = await deviceKey(false);
+  if (!key) throw new Error("找不到金鑰");
+  return JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct))));
+}
+async function unsealV1(box, password) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: unb64(box.salt), iterations: 310000, hash: "SHA-256" }, base,
+    { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  return JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct))));
+}
+async function forget() {
+  localStorage.removeItem(STORE_KEY);
+  try { await keyStore("readwrite", (s) => s.delete(STORE_KEY)); } catch {}
+}
+
+// ---------------------------------------------------------------- 設定
+function fillForm() {
+  $("token").value = settings.token; $("llm-url").value = settings.url; $("llm-model").value = settings.model;
+  $("llm-key").value = settings.key; $("llm-effort").value = settings.effort;
+}
+function readForm() {
+  return { token: $("token").value.trim(), url: $("llm-url").value.trim(), model: $("llm-model").value.trim(),
+           key: $("llm-key").value.trim(), effort: $("llm-effort").value };
+}
+function showState() {
+  const box = storedBox();
+  if (!settings.token && box?.v === 1) { $("settings-state").textContent = "（🔒 舊版記住的設定，輸入密碼解開一次）"; return; }
+  const parts = [settings.token ? "token ✓" : "還沒填 token", settings.url && settings.model ? `LLM：${settings.model}` : "沒有 LLM（每份資料直接排成一則新聞）"];
+  if (box?.v === 2) parts.push("已記住");
+  $("settings-state").textContent = "（" + parts.join("、") + "）";
+  $("forget-saved").hidden = !box;
+}
+document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.preset === "openrouter") { $("llm-url").value = "https://openrouter.ai/api/v1"; }
+  else { $("llm-url").value = "http://host.docker.internal:11434/v1"; $("llm-key").value = ""; $("llm-model").value ||= "qwen3.5:9b"; $("llm-effort").value = "none"; }
+}));
+$("save-btn").addEventListener("click", async () => {
+  settings = readForm();
+  $("save-msg").className = "status ok";
+  if ($("remember").checked) {
+    if (!window.isSecureContext) { $("save-msg").className = "status bad"; $("save-msg").textContent = "瀏覽器的加密功能只能在 localhost 或 https 使用；請用 http://localhost:… 打開這個網頁"; return; }
+    await remember(settings);
+    $("save-msg").textContent = "已套用，並加密記住在這個瀏覽器（下次打開自動帶入）。";
+  } else {
+    await forget();
+    $("save-msg").textContent = "已套用（只在這個分頁，重新整理要重填）。";
+  }
+  $("unlock").hidden = true;
+  showState();
+});
+$("forget-saved").addEventListener("click", async () => {
+  if (!confirm("刪除這個瀏覽器記住的設定？（目前分頁裡的設定還能用，重新整理後就要重填）")) return;
+  await forget(); $("remember").checked = false; showState();
+  $("save-msg").className = "status ok"; $("save-msg").textContent = "已刪除記住的設定。";
+});
+// 舊版（密碼加密）的設定：解開一次並轉成新版，之後不用再輸入密碼
+$("unlock-btn").addEventListener("click", async () => {
+  try {
+    settings = await unsealV1(storedBox(), $("unlock-pw").value);
+  } catch { $("unlock-msg").textContent = "密碼不對"; $("unlock-pw").select(); return; }
+  await remember(settings);
+  fillForm(); $("unlock").hidden = true; $("unlock-pw").value = ""; $("remember").checked = true; showState();
+  $("save-msg").className = "status ok"; $("save-msg").textContent = "已解開並改成新的記住方式，之後打開會自動帶入。";
+  $("settings-box").open = false;
+  const next = pending; pending = null;
+  if (next && settings.token) next(); // 剛剛被擋下來的動作：解開後直接接著做
+});
+$("unlock-pw").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); $("unlock-btn").click(); } });
+$("forget-btn").addEventListener("click", async () => {
+  await forget(); $("unlock").hidden = true; $("remember").checked = false; showState(); $("token").focus();
+});
+
+// 還沒有可用的設定：舊版記住的設定 → 請使用者輸入密碼（解開後自動接著做）；沒有 → 請使用者填設定
+let pending = null;
+function needSettings(action) {
+  $("settings-box").open = true;
+  if (storedBox()?.v === 1) {
+    pending = action;
+    $("unlock-msg").textContent = "輸入以前設的密碼按「解開」（或 Enter），解開後會自動繼續；之後就不用再輸入。";
+    $("unlock-pw").focus();
+  } else {
+    $("save-msg").className = "status bad"; $("save-msg").textContent = "先填存取 token 並按「套用」";
+    $("token").focus();
+  }
+}
+
+// 打開網頁：自動帶入記住的設定
+async function loadSaved() {
+  const box = storedBox();
+  if (box?.v === 2) {
+    try {
+      settings = await recall(box);
+      fillForm(); $("remember").checked = true;
+    } catch {
+      await forget(); // 金鑰不見了（例如清除過網站資料）：只能重填
+      $("save-msg").className = "status bad"; $("save-msg").textContent = "記住的設定讀不出來（可能清除過瀏覽器資料），請重新填一次。";
+    }
+  } else if (box?.v === 1) {
+    $("unlock").hidden = false;
+  }
+  if (!settings.token) { $("settings-box").open = true; (box?.v === 1 ? $("unlock-pw") : $("token")).focus(); }
+  showState();
+}
+
+// ---------------------------------------------------------------- 檔案
+let limits = { max_files: 6, max_file_mb: 2, max_total_mb: 6 };
+let picked = [];
+const EXT = [".txt", ".md"];
+const fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+function showFiles() {
+  $("files").innerHTML = picked.map((f, i) => `<li>📄 ${esc(f.name)} <span class="muted">${fmtSize(f.size)}</span>
+    <button type="button" class="ghost x" data-i="${i}">移除</button></li>`).join("");
+}
+function addFiles(list) {
+  for (const f of list) {
+    const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
+    if (!EXT.includes(ext)) { alert(`「${f.name}」的格式不支援（可以上傳 ${EXT.join("、")}）`); continue; }
+    if (f.size > limits.max_file_mb * 1048576) { alert(`「${f.name}」超過每份 ${limits.max_file_mb} MB 的上限`); continue; }
+    if (picked.length >= limits.max_files) { alert(`最多 ${limits.max_files} 份檔案`); break; }
+    picked.push(f);
+  }
+  showFiles();
+}
+$("files").addEventListener("click", (e) => { if (e.target.dataset.i) { picked.splice(+e.target.dataset.i, 1); showFiles(); } });
+$("drop").addEventListener("click", () => $("file-input").click());
+$("file-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+$("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+$("drop").addEventListener("drop", (e) => { e.preventDefault(); $("drop").classList.remove("over"); addFiles(e.dataTransfer.files); });
+const toBase64 = (file) => new Promise((ok, fail) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(",", 2)[1]);
+  r.onerror = () => fail(r.error);
+  r.readAsDataURL(file);
+});
+
+// ---------------------------------------------------------------- 呼叫 agent（A2A message/stream）
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function headers() {
+  const h = { "Content-Type": "application/json", Authorization: `Bearer ${settings.token}` };
+  if (settings.url && settings.model) {
+    h["X-LLM-Base-URL"] = settings.url; h["X-LLM-Model"] = settings.model;
+    if (settings.key) h["X-LLM-API-Key"] = settings.key;
+    if (settings.effort) h["X-LLM-Reasoning-Effort"] = settings.effort;
+  }
+  return h;
+}
+const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[*-]\s+/gm, "• ");
+
+async function generate() {
+  const pasted = $("paste").value.trim();
+  if (!picked.length && !pasted) { alert("先選採訪資料或貼上一段資料"); return; }
+  if (!settings.token) { needSettings(() => generate()); return; }
+  const q = $("question").value.trim();
+  const box = document.createElement("div");
+  box.className = "card";
+  const names = [...picked.map((f) => f.name), ...(pasted ? ["貼上的資料.txt"] : [])];
+  box.innerHTML = `<div class="q">📄 ${names.map(esc).join("、")}${q ? "　要求：" + esc(q) : ""}</div><div class="progress"></div><div class="out"></div>`;
+  $("results").prepend(box);
+  const progress = (t) => { const d = document.createElement("div"); d.textContent = t; box.querySelector(".progress").append(d); };
+  const out = box.querySelector(".out");
+  $("go-btn").disabled = true;
+  const started = Date.now();
+  try {
+    progress("上傳中");
+    const parts = [];
+    if (q) parts.push({ kind: "text", text: q });
+    for (const f of picked) parts.push({ kind: "file", file: { name: f.name, mimeType: "text/plain", bytes: await toBase64(f) } });
+    if (pasted) parts.push({ kind: "file", file: { name: "貼上的資料.txt", mimeType: "text/plain", bytes: await toBase64(new Blob([pasted])) } });
+    const body = { jsonrpc: "2.0", id: 1, method: "message/stream",
+                   params: { message: { kind: "message", role: "user", messageId: crypto.randomUUID(), parts } } };
+    const r = await fetch("/a2a", { method: "POST", headers: headers(), body: JSON.stringify(body) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${r.status}`); }
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "", text = "", pdf = null, png = null, data = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
+        if (!line.startsWith("data:")) continue;
+        const ev = JSON.parse(line.slice(5));
+        if (ev.error) throw new Error(ev.error.message);
+        const res = ev.result;
+        if (res.kind === "status-update" && !res.final) progress(res.status.message?.parts?.[0]?.text || "處理中");
+        if (res.kind === "artifact-update") {
+          const p = res.artifact.parts[0];
+          if (p.kind === "text") text = p.text;
+          if (p.kind === "file" && p.file.mimeType === "image/png") png = p.file;
+          else if (p.kind === "file") pdf = p.file;
+          if (p.kind === "data") data = p.data;
+        }
+      }
+    }
+    if (!pdf) throw new Error("沒有收到報紙");
+    const blob = new Blob([Uint8Array.from(atob(pdf.bytes), (c) => c.charCodeAt(0))], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const img = png ? `<img class="preview" alt="第一版" src="data:image/png;base64,${png.bytes}">` : "";
+    const meta = [data?.model && `模型：${esc(data.model)}`, `共 ${((Date.now() - started) / 1000).toFixed(1)} 秒`, `PDF ${fmtSize(blob.size)}`].filter(Boolean).join("・");
+    out.innerHTML = `<a class="download" href="${url}" download="${esc(pdf.name)}">⬇️ 下載 ${esc(pdf.name)}</a>
+      <a href="${url}" target="_blank" rel="noopener" style="margin-left:10px">在新分頁預覽</a>
+      <div class="muted" style="margin-top:6px">${meta}</div>
+      ${(data?.notes || []).map((n) => `<div class="status muted">※ ${esc(n)}</div>`).join("")}
+      ${data?.llm_error ? `<div class="status bad">LLM：${esc(data.llm_error)}</div>` : ""}
+      ${data?.unverified?.length ? `<div class="status bad">在採訪資料裡找不到的數字：${esc(data.unverified.join("；"))}</div>` : ""}
+      ${img}
+      <details style="margin-top:8px"><summary>聊天視窗會看到的短版</summary><div class="report">${md(text)}</div></details>`;
+  } catch (e) {
+    // 串流中途斷線（瀏覽器的訊息是 Error in input stream / network error / Failed to fetch 之類）：多半是 agent 當掉或重啟
+    const broken = e instanceof TypeError || /input stream|network|fetch|load failed/i.test(e.message);
+    const hint = broken ? "（和 agent 的連線中途斷了：可能是 agent 當掉或重新啟動，請在 newspaper 資料夾執行 docker-compose logs --tail 50 查看）" : "";
+    out.innerHTML = `<div class="status bad">${esc(e.message)}${hint}</div>`;
+  } finally { $("go-btn").disabled = false; }
+}
+$("report-form").addEventListener("submit", (e) => { e.preventDefault(); generate(); });
+
+// ---------------------------------------------------------------- 啟動
+async function health() {
+  try {
+    const h = await (await fetch("/health")).json();
+    limits = h.limits || limits;
+    $("limits").textContent = `txt、md；最多 ${limits.max_files} 份、每份 ${limits.max_file_mb} MB、合計 ${limits.max_total_mb} MB`;
+    let t = h.ok ? "✅ 服務正常" : `⚠️ PDF 產生器不能用：${h.pdf_error}`;
+    if (!h.auth_configured) t += "・⚠️ agent 還沒設定存取 token（.env 的 NP_ACCESS_TOKENS）";
+    $("health").className = "status " + (h.ok ? "ok" : "bad");
+    $("health").textContent = t;
+  } catch { $("health").className = "status bad"; $("health").textContent = "連不上服務"; }
+}
+health();
+loadSaved();
+</script>
+</body>
+</html>

@@ -26,6 +26,7 @@ VACUUM_MIN_FREE = 32 * MB  # 空出來的空間超過這麼多、而且超過檔
 LABELS = {
     ("chat_images", "upload"): "使用者附的圖",
     ("chat_images", "generated"): "畫家的畫作",
+    ("chat_images", "report"): "駐村專家的圖（報紙預覽）",
     ("chat_files", "upload"): "使用者附的文件",
     ("chat_files", "report"): "報告與逐字稿",
     ("chat_files", "audio"): "錄音（等待轉寫）",

@@ -364,6 +364,9 @@ class BaseAgent(Protocol):
   以後檔案大到不適合隨訊息送、或專家能安全地回來拿時，可以改成給一次性的取件網址）。
 - `StepResult.received`、`agent.started` 的 `received`：執行過程與紀錄顯示「📦 從中轉站取件：#1 …」。
 - 回答附上每一步產生的檔案（最後交給使用者的步驟排前面），所以中間的逐字稿也下載得到。
+- 文字包成的 txt 檔名帶上那一步的指示（「網路研究員_查最近的AI新聞.txt」），好幾位研究員的成果分得出來。
+- 每位駐村專家一次收幾份看名片的 `x-file-limits.maxFiles`（`remote.max_files`，最多 10；報社收 6 份）。
+- 駐村專家回傳的點陣圖（報社的第一版預覽）存成 `chat_images`（`kind=report`，14 天、不算畫家的張數），直接顯示在回答裡。
 - 附了錄音時 `with_typist` 也補齊漏排的後續：請求要報告 / PDF 卻沒有收文件的專家 → 接上它；只有聽打員卻要摘要 → 接上摘要師。
 
 #### 儲存空間
@@ -504,7 +507,8 @@ multi-agent-village/
 ├── extra-agents/                # 獨立開發、獨立部署的外接 agent（村子裡叫駐村專家）
 │   ├── taiwan-history/          # 台灣史專家：corpus（維基 175 篇）、app（RAG、A2A、測試網頁）、自己的 docker-compose（:8100）
 │   ├── report-maker/            # 文件彙整師：讀檔與統計、報告 JSON、圖表、WeasyPrint PDF、範例檔 samples/（:8101）
-│   └── web-researcher/          # 網路研究員：自架 SearXNG（同一個 compose）、安全讀網頁、附引用回答（:8102）
+│   ├── web-researcher/          # 網路研究員：自架 SearXNG（同一個 compose）、安全讀網頁、附引用回答（:8102）
+│   └── newspaper/               # 報社：採訪資料 → 兩階段寫稿（記者 / 總編輯）→ A4 報紙 PDF＋第一版預覽 PNG（:8103）
 ├── frontend/
 │   ├── public/assets/sprites/   # 角色四向圖、裝飾（deco/）、UI 泡泡、manifest.json
 │   └── src/

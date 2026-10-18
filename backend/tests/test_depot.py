@@ -31,12 +31,12 @@ async def test_depot_parcels():
         {"kind": "file", "name": "會議_字幕.srt", "url": "/api/files/f2"},
     ])
     assert (p1.tag, p1.mime, p1.file_id) == (1, "text/plain", "f1") and len(d.parcels) == 2
-    p3 = d.drop_text("summarizer", "摘要師", "s2", "## 重點\n- 三點開會")
+    p3 = d.drop_text("summarizer", "摘要師", "s2", "## 重點\n- 三點開會", "整理 重點！")
     assert d.drop_text("summarizer", "摘要師", "s2", "again") is p3  # 同一步只包一次
-    assert (p3.tag, p3.name, p3.size) == (3, "摘要師的成果.txt", len("## 重點\n- 三點開會".encode()))
+    assert (p3.tag, p3.name, p3.size) == (3, "摘要師_整理重點.txt", len("## 重點\n- 三點開會".encode()))
     assert [p.tag for p in d.from_steps(["s1"])] == [1, 2]
     files = await d.pick_up(d.parcels)  # f2 找不到（過期）就略過
-    assert [(f.name, f.data) for f in files] == [("會議_逐字稿.txt", b"transcript"), ("摘要師的成果.txt", "## 重點\n- 三點開會".encode())]
+    assert [(f.name, f.data) for f in files] == [("會議_逐字稿.txt", b"transcript"), ("摘要師_整理重點.txt", "## 重點\n- 三點開會".encode())]
     assert slip([p1]).endswith("#1 會議_逐字稿.txt（來自聽打員）")
 
 
@@ -117,11 +117,11 @@ async def test_text_result_handed_to_report_maker(village):
     msgs = await _wait(c, r)
     assert msgs[-1]["status"] == "done", msgs[-1]
     [call] = agent.calls
-    assert _file_parts(call) == [("摘要師的成果.txt", "## 重點\n- 三點開會".encode())]
-    assert "中轉站有前面步驟交給你的檔案" in _text(call) and "#1 摘要師的成果.txt（來自摘要師" in _text(call)
+    assert _file_parts(call) == [("摘要師_整理重點.txt", "## 重點\n- 三點開會".encode())]
+    assert "中轉站有前面步驟交給你的檔案" in _text(call) and "#1 摘要師_整理重點.txt（來自摘要師" in _text(call)
     assert "參考資料（來自摘要師）" not in _text(call)  # 已經用檔案交付：文字訊息不重複全文（對方的要求有字數上限）
     trace = (await c.get(f"/api/runs/{r['run_id']}")).json()
-    assert trace["steps"][1]["received"][0].startswith("#1 摘要師的成果.txt") and trace["steps"][0]["received"] == []
+    assert trace["steps"][1]["received"][0].startswith("#1 摘要師_整理重點.txt") and trace["steps"][0]["received"] == []
     assert [a["name"] for a in msgs[-1]["meta"]["attachments"]] == ["營運彙整.pdf"]
     assert "也拿得到前面步驟的成果" in Fake.last_system
 
@@ -160,3 +160,53 @@ async def test_transcript_file_handed_to_report_maker(village):
     assert [a["name"] for a in answer["meta"]["attachments"]] == ["營運彙整.pdf", "週會_逐字稿.txt", "週會_字幕.srt"]
     trace = (await c.get(f"/api/runs/{r['run_id']}")).json()
     assert trace["plan"]["notes"][-1] == "請求還要做成報告：接著交給文件彙整師"
+
+
+def test_max_files_from_card():
+    from village.core.docfiles import max_files_from_card
+
+    assert max_files_from_card({"x-file-limits": {"maxFiles": 6}}) == 6
+    assert max_files_from_card({"x-file-limits": {"maxFiles": 99}}) == 10
+    assert max_files_from_card({"x-file-limits": {"maxFiles": True}}) == 3 and max_files_from_card({}) == 3
+
+
+async def test_paper_preview_shown_inline(village, monkeypatch):
+    from test_documents import PDF, _sse
+
+    c, app, agent, _ = village
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+    paper = _sse(
+        {"kind": "task", "id": "t", "contextId": "c", "status": {"state": "working"}},
+        {"kind": "artifact-update", "artifact": {"artifactId": "paper", "parts": [{"kind": "text", "text": "📰 村莊日報"}]}},
+        {"kind": "artifact-update", "artifact": {"artifactId": "pdf", "parts": [{"kind": "file", "file": {
+            "name": "村莊日報.pdf", "mimeType": "application/pdf", "bytes": base64.b64encode(PDF).decode()}}]}},
+        {"kind": "artifact-update", "artifact": {"artifactId": "png", "parts": [{"kind": "file", "file": {
+            "name": "村莊日報_第一版.png", "mimeType": "image/png", "bytes": base64.b64encode(png).decode()}}]}},
+        {"kind": "status-update", "status": {"state": "completed"}, "final": True},
+    )
+    original = agent.handler
+
+    def handler(request):
+        if request.method == "POST" and request.url.path == "/a2a":
+            agent.calls.append(json.loads(request.content))
+            return httpx.Response(200, text=paper, headers={"content-type": "text/event-stream"})
+        return original(request)
+
+    monkeypatch.setattr(agent, "handler", handler)
+    agent.card["x-file-limits"] = {**agent.card["x-file-limits"], "maxFiles": 6}
+    assert (await c.post("/api/residents/rm/refresh")).status_code in (200, 404)
+    Fake.plan = [{"id": f"s{i}", "agent": "summarizer", "instruction": f"整理主題{i}", "use": []} for i in range(1, 5)] + [
+        {"id": "s5", "agent": "rm", "instruction": "做成報紙", "use": ["s1", "s2", "s3", "s4"]}]
+    r = (await c.post("/api/chat", json={"message": "四個主題做成報紙"})).json()
+    msgs = await _wait(c, r)
+    atts = msgs[-1]["meta"]["attachments"]
+    assert [(a["kind"], a["name"]) for a in atts] == [("file", "村莊日報.pdf"), ("image", "村莊日報_第一版.png")]
+    img = await c.get(atts[1]["url"])
+    assert img.status_code == 200 and img.content == png
+    async with app.state.ctx.sessionmaker() as s:  # 不算進畫家每天的張數
+        from village.store.models import ChatImage
+
+        assert [i.kind for i in (await s.scalars(__import__("sqlalchemy").select(ChatImage))).all()] == ["report"]
+    names = [n for n, _ in _file_parts(agent.calls[-1])]
+    spec = app.state.ctx.registry.get("rm")
+    assert len(names) == min(4, spec.remote.max_files) and names[0] == "摘要師_整理主題1.txt"

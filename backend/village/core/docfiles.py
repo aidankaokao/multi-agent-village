@@ -97,5 +97,14 @@ def accepts_from_card(card: dict) -> list[str]:
     return sorted({e for e in exts if e in MIME}, key=list(MIME).index)
 
 
+MAX_AGENT_FILES = 10  # 不管名片寫多少，一次最多交給駐村專家這麼多份
+
+
+def max_files_from_card(card: dict) -> int:
+    limits = card.get("x-file-limits") if isinstance(card.get("x-file-limits"), dict) else {}
+    n = limits.get("maxFiles")
+    return max(1, min(MAX_AGENT_FILES, n)) if isinstance(n, int) and not isinstance(n, bool) else MAX_FILES
+
+
 def for_agent(docs: list[DocFile], accepts: list[str]) -> list[DocFile]:
     return [d for d in docs if d.ext in accepts]

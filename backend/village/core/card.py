@@ -82,6 +82,7 @@ class RemoteConfig(BaseModel):
     a2a_path: str = "/a2a"  # 從對方的 agent card 讀來
     share_llm: bool = False  # 允許把提問者的 LLM 設定（含 key）交給它；預設關閉，管理員確認信任後才打開
     accepts: list[str] = Field(default_factory=list)  # 收哪些文件（副檔名，從名片讀來，例如 [".xlsx", ".pdf"]）
+    max_files: int = 3  # 一次最多收幾份（名片的 x-file-limits.maxFiles；例如報社收 6 份）
 
 
 class Checks(BaseModel):

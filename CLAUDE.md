@@ -51,7 +51,11 @@
 - **儲存空間**：中轉站實測通過。使用者問會不會越堆越多 → `store/storage.py`：附件依村規 `attachment_keep_days`（預設 90 天）清理、
   清掉很多時自動 VACUUM、村規頁顯示用量與「立即清理」。**待使用者部署實測**。
 
-**下一步**：報紙（使用者的想法：主題 → 搜集資訊 → 排成報紙下載，之後寄 email / LINE / Teams）——評估與規劃已提出，等使用者決定。之後的候選見 `docs/ROADMAP.md`「接下來」（檔案在步驟之間傳遞、專家反問、資料分析師）。
+- **報社（外接 agent）**：`extra-agents/newspaper/`（規劃在它的 `PLAN.md`），127.0.0.1:8103。採訪資料（研究員的成果，經中轉站）
+  → 每份資料各自寫稿（記者）→ 總編輯決定頭條 / 刊名 / 編輯室報告 → WeasyPrint A4 直式多頁 → pypdfium2 第一版預覽 PNG。
+  村子：名片 `maxFiles` 決定一次交幾份、回傳的圖片直接顯示。**待使用者部署實測**。
+
+**下一步**：等使用者實測報社 → N2 郵差（只做 Email：Gmail SMTP＋應用程式密碼）。Teams 不做、Telegram 之後試、定時送報（排程）之後再討論。之後的候選見 `docs/ROADMAP.md`「接下來」（檔案在步驟之間傳遞、專家反問、資料分析師）。
 本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
 ## 使用者偏好（重要）
@@ -76,7 +80,7 @@
 - 系統角色（保留名稱，不會被派去做問答）：`mayor` 村長、`craftsman` 工匠（`core/workshop.py`，對話打造村民）、
   `reviewer` 審核員（`core/reviewer.py`）、`scribe` 書記（`core/scribe.py`，長期記憶）、
   `appraiser` 鑑定師（`core/appraiser.py`，有附圖時先看圖，結果放 context variable `_APPRAISAL` 交給村長 / 村民 / 審核員）。
-- 駐村專家（外接的獨立 agent）：目前三位——台灣史專家 :8100、文件彙整師 :8101、網路研究員 :8102（各自的 compose，綁 127.0.0.1）。
+- 駐村專家（外接的獨立 agent）：目前四位——台灣史專家 :8100、文件彙整師 :8101、網路研究員 :8102、報社 :8103（各自的 compose，綁 127.0.0.1）。
   A2A 的整體說明（中樞式、名片欄位怎麼用、呼叫與串流事件）在 `docs/ARCHITECTURE.md`「A2A：村子和駐村專家怎麼溝通」。
   村民 `kind: remote`（`core/remote.py`、`api/residents.py`），
   存取 token 加密存 `remote_agents`；呼叫網址用「管理員填的網址 ＋ card 的路徑」；村子容器連主機服務用 `host.docker.internal`。

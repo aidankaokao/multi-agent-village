@@ -21,6 +21,7 @@ from village.core.context import PREV, Turn
 from village.core import loop as loops
 from village.core.docfiles import DocFile
 from village.core.depot import DEPOT, Depot, Loader, Parcel, depot, slip
+from village.core.imagefmt import RASTER, sniff
 from village.core.harness import check_output, mask_profanity, normalize, preview, profanity_hits
 from village.core.orchestrator import (
     ChatLLM, Plan, PlanError, Step, _extract_json, direct_reply, make_plan, render_audio, render_documents,
@@ -252,6 +253,7 @@ class Runner:
         save_file: Callable[[str, str, bytes], Awaitable[str]] | None = None,
         transcribe: TranscribeEnv | None = None,
         load_file: Loader | None = None,
+        save_image: Callable[[str, bytes], Awaitable[str]] | None = None,
     ) -> dict:
         """traced=True 代表呼叫端已經建立了執行紀錄（POST /api/chat）；user_id：提問者，事件內容只送給他。
 
@@ -266,7 +268,7 @@ class Runner:
         self.bus.claim(run_id, user_id)
         try:
             env = (
-                remote.RemoteEnv(self.directory, self.llm, user_id, docs=docs or [], save_file=save_file)
+                remote.RemoteEnv(self.directory, self.llm, user_id, docs=docs or [], save_file=save_file, save_image=save_image)
                 if self.directory else None
             )
             with (llm_user(user_id), painting(paint), remote.remote_calls(env), transcribing(transcribe),
@@ -512,7 +514,7 @@ class Runner:
                    received=r.received)
         t0 = time.monotonic()
         timeout = rules.step_timeout_s
-        if spec is not None and remote.files_for(spec):  # 要處理文件、產生報告：放寬時間上限
+        if spec is not None and spec.kind == "remote" and spec.remote and spec.remote.accepts:  # 處理文件、產生報告：放寬時間上限
             timeout = max(timeout, DOC_STEP_TIMEOUT_S)
         if spec is not None and spec.kind == "tool" and spec.tool and spec.tool.id in TOOLS:
             timeout = max(timeout, TOOLS[spec.tool.id].timeout_s)  # 例如聽打員轉寫長錄音
@@ -565,7 +567,7 @@ class Runner:
             if prev is None or any(p.step == u for p in parcels) or ".txt" not in accepts or not prev.output.strip():
                 continue
             sender = self.registry.get(prev.agent)
-            parcels.append(d.drop_text(prev.agent, sender.name if sender else prev.agent, u, prev.output))
+            parcels.append(d.drop_text(prev.agent, sender.name if sender else prev.agent, u, prev.output, prev.instruction))
         return parcels
 
     async def _pick_up(self, parcels: list[Parcel]) -> list[DocFile]:
@@ -663,7 +665,11 @@ async def run_remote_agent(
     r.model = f"{reply.data['model']}（{spec.name}）" if reply.data.get("model") else spec.name
     r.warnings += warnings
     env = remote.REMOTE_ENV.get()
-    for f in reply.files:  # 對方回傳的檔案（例如報告 PDF）：存起來，回答附上下載連結
+    for f in reply.files:  # 對方回傳的檔案（例如報告 PDF）：存起來，回答附上下載連結；圖片直接顯示
+        if env is not None and env.save_image is not None and sniff(f.data) in RASTER:
+            image_id = await env.save_image(sniff(f.data) or f.mime, f.data)
+            r.attachments.append(Attachment(kind="image", name=f.name, title=f.name.rsplit(".", 1)[0], url=f"/api/images/{image_id}").to_dict())
+            continue
         if env is None or env.save_file is None:
             r.warnings.append(f"收到檔案「{f.name}」，但這裡沒辦法保存")
             continue

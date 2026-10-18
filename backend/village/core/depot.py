@@ -10,6 +10,7 @@
 """
 
 import mimetypes
+import re
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -72,13 +73,14 @@ class Depot:
                 out.append(self.drop(sender, sender_name, step, str(a.get("name") or "檔案"), file_id=url[len(FILE_URL):]))
         return out
 
-    def drop_text(self, sender: str, sender_name: str, step: str, text: str) -> Parcel:
-        """只有文字成果：包成 txt（同一步只包一次）。"""
+    def drop_text(self, sender: str, sender_name: str, step: str, text: str, about: str = "") -> Parcel:
+        """只有文字成果：包成 txt（同一步只包一次）。檔名帶上那一步在做什麼，好幾位研究員的成果才分得出來。"""
         for p in self.parcels:
             if p.step == step and p.data is not None and p.ext == ".txt":
                 return p
-        return self.drop(sender, sender_name, step, safe_name(f"{sender_name}的成果.txt"), data=text.encode(),
-                         mime=MIME[".txt"])
+        about = re.sub(r"[\s，。、,.:：;；!?！？「」『』（）()]+", "", about)[:16]
+        name = f"{sender_name}_{about}.txt" if about else f"{sender_name}的成果.txt"
+        return self.drop(sender, sender_name, step, safe_name(name), data=text.encode(), mime=MIME[".txt"])
 
     def from_steps(self, step_ids: list[str]) -> list[Parcel]:
         return [p for p in self.parcels if p.step in step_ids]
