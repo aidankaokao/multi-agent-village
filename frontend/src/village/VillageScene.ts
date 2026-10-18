@@ -162,7 +162,10 @@ class Villager {
       .setOrigin(0.5, 0)
       .setResolution(2);
     if (onClick) {
-      this.sprite.setInteractive({ useHandCursor: true }).on("pointerdown", () => onClick(this.id));
+      this.sprite.setInteractive({ useHandCursor: true }).on("pointerdown", (p: Phaser.Input.Pointer) => {
+        // 只算直接點在地圖上的（點在蓋住地圖的表單、視窗上不算）
+        if (p.downElement === scene.game.canvas) onClick(this.id);
+      });
     }
     this.scheduleWander(Phaser.Math.Between(300, 2500));
   }

@@ -53,6 +53,8 @@ export const VillageCanvas = forwardRef<VillageHandle, Props>(function VillageCa
           // 置中交給 CSS（flex），Phaser 的 autoCenter 在 flex 容器裡會算錯偏移
           scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.NO_CENTER },
           scene: scene.current,
+          // 只處理點在地圖上的滑鼠：Phaser 預設也監聽整個網頁，點彈窗 / 問答視窗時會誤判成點到後面的村民
+          input: { windowEvents: false },
         });
       });
     return () => {

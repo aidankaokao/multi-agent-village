@@ -86,7 +86,8 @@
 - 地圖互動（`village/VillageScene.ts`）：閒著的村民每 8～15 秒有人冒一句（台詞由 `App.tsx` 的 `idleLines` 從名片產生，
   系統角色在 `MAYOR` 等常數裡）；每 30～60 秒兩位附近的村民湊在一起聊幾句；派工時立刻中斷。
   點村民：開新對話並在輸入框填「@id 」（村長不加 @；工匠、審核員、書記、鑑定師只自我介紹；外出中的駐村專家說外出中）。
-  開發模式有 `window.__village`（e2e 測試用）。
+  開發模式有 `window.__village`（e2e 測試用）。Phaser 設 `input.windowEvents: false`，點擊也檢查 `downElement` 是地圖：
+  否則點在蓋住地圖的彈窗 / 視窗上會被當成點到後面的村民。
 
 ## 指令
 
