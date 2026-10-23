@@ -360,6 +360,11 @@ class BaseAgent(Protocol):
 - 駐村專家住在外圍小島，用木棧橋連到主島（`isletFor`）；交接時沿橋走（`walkTo` 自動加上兩端的橋頭）。
 - Q 版村民的造型依像素外觀（sprite id）：衣服顏色同 `gen_placeholder_sprites.py`，再加配件（王冠、貝雷帽、耳機…）。
 - 名牌、冒泡、狀態用 HTML（CSS2DRenderer，`.isl-*` 樣式）；村民行為（閒晃、冒一句、聊天、派工、交接、外出中）照像素版。
+- 日夜：`DAY` 關鍵影格（天空、太陽 / 月光、天地光、海色、夜晚程度）依真實時間每 20 秒內插；夜晚窗戶與路燈的發光材質
+  （材質名 `window` / `lamp`）和路燈點光源一起亮、星星浮現。網址 `?time=night`（或 `dawn`、`day`、`dusk`、`HH:MM`）可預覽。
+- 搬運圖示：`agent.finished` 有附件就照附件（🖼️ 圖、📊 圖表、📄 PDF、📝 檔案），否則照外觀（`CARRY_BY_SPRITE`），
+  駐村專家是 📦；別人的問答事件只有動畫欄位（`for_viewer`），一律照外觀。交接時頭上拿著，到了換到對方手上。
+- 協作線：`agent.handoff` 時在兩人之間畫弧線（TubeGeometry）＋流動光點；那次問答結束 5 秒後淡出（別人的問答沒有 run_id：20 秒）。
 - 拖曳旋轉、滾輪縮放（OrbitControls，限制角度與範圍）；點村民用 raycast（拖曳超過 5px 不算點擊）。開發模式 `window.__island`。
 
 #### 中轉站：步驟之間交接檔案

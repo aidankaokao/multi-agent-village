@@ -1925,3 +1925,19 @@ button.mention-item .clamp {
   background: var(--accent);
   color: #1b1b2a;
 }
+
+/* 島嶼版：交接時頭上拿著的東西 */
+.isl-carry {
+  display: none;
+  padding: 2px 6px;
+  font-size: 18px;
+  line-height: 1.1;
+  background: rgba(255, 253, 246, 0.95);
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(30, 40, 50, 0.3);
+}
+
+.isl-carry.show {
+  display: block;
+  animation: isl-pop 0.25s ease-out, isl-bob 0.9s ease-in-out 0.25s infinite;
+}

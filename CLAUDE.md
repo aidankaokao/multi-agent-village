@@ -58,10 +58,10 @@
   使用者部署實測通過（「網路研究員 ×2 → 報社」，第一版預覽＋PDF）。
 
 - **島嶼版地圖（3D）**：使用者看了政策島網站後提議「另做一版、可以切換、像素村不動」。`frontend/src/island/`（Three.js，lazy 載入），
-  介面同 `VillageCanvas`；畫面上方中央膠囊切換（`?view=island|pixel`、localStorage `map-view`）。I1 骨架完成（待實測），
-  I2 日夜 / 搬運圖示 / 協作線、I3 工具列 / 村莊日誌接著做（見 ROADMAP 第 6 項）。登入頁先維持像素村。
+  介面同 `VillageCanvas`；畫面上方中央膠囊切換（`?view=island|pixel`、localStorage `map-view`）。I1 骨架使用者看過；
+  I2 日夜（真實時間，`?time=night` 預覽）/ 搬運圖示 / 協作線完成（待實測）；I3 工具列 / 村莊日誌接著做（見 ROADMAP 第 6 項）。登入頁先維持像素村。
 
-**下一步**：島嶼版 I2（日夜、搬運圖示、協作線）。之後 N2 郵差（只做 Email：Gmail SMTP＋應用程式密碼）——先提設計方案。
+**下一步**：島嶼版 I3（膠囊工具列、村莊日誌 LIVE、鳥瞰、效能與手機）。之後 N2 郵差（只做 Email：Gmail SMTP＋應用程式密碼）——先提設計方案。
 Teams 不做、Telegram 之後試、定時送報（排程）等報社與郵差做完再討論。其他候選見 `docs/ROADMAP.md`「接下來」。
 本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 

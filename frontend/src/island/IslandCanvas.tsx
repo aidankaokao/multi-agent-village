@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { VillageHandle } from "../village/VillageCanvas";
-import { IslandWorld, type IslandVillager } from "./IslandWorld";
+import { IslandWorld, parseTime, type IslandVillager } from "./IslandWorld";
 
 interface Props {
   villagers: IslandVillager[];
@@ -31,6 +31,7 @@ const IslandCanvas = forwardRef<VillageHandle, Props>(function IslandCanvas({ vi
     const w = new IslandWorld(host.current);
     w.onVillagerClick = (id) => clickRef.current?.(id);
     w.syncVillagers(latest.current, false);
+    w.setTime(parseTime(new URLSearchParams(location.search).get("time"))); // 預覽某個時段：?time=night、?time=18:30
     world.current = w;
     if (import.meta.env.DEV) (window as unknown as { __island?: IslandWorld }).__island = w; // e2e 測試用
     return () => {

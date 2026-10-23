@@ -47,6 +47,64 @@ interface Islet {
   gateIsland: THREE.Vector3; // 橋在主島這端
 }
 
+// ---------------------------------------------------------------- 日夜（依真實時間；分鐘）
+
+// [分鐘, 天空, 太陽光色, 太陽強度, 天光, 地光, 天地光強度, 夜晚程度 0～1, 海水]
+type Key = [number, number, number, number, number, number, number, number, number];
+const DAY: Key[] = [
+  [0, 0x1b2550, 0xa8b8ff, 0.45, 0x8a9ad0, 0x3a3448, 0.8, 1, 0x2b5482],
+  [300, 0x24305e, 0xb0bcff, 0.45, 0x8a96cc, 0x3e3850, 0.8, 1, 0x2f5886],
+  [360, 0xf2b8a0, 0xffb48a, 1.3, 0xf3c6b5, 0x6b5a5a, 1.0, 0.45, 0x8fb7c4],
+  [450, 0xbfe0f0, 0xffe2c4, 2.4, 0xeaf2f6, 0x8a7a68, 1.25, 0, 0x8ccbd2],
+  [720, 0xb9dcee, 0xfff1de, 2.7, 0xeef6fa, 0x8a7a68, 1.35, 0, 0x7ec7d0],
+  [960, 0xbcdcec, 0xffe3c0, 2.5, 0xf1efe8, 0x8a7a66, 1.3, 0, 0x80c4cc],
+  [1065, 0xf0b48c, 0xff9f6a, 1.7, 0xf6d2bc, 0x7d6660, 1.15, 0.3, 0x8fb2cc],
+  [1140, 0x7a6aa8, 0xff9a7a, 0.9, 0xc8b8e4, 0x5d4f60, 0.9, 0.7, 0x5b7ba8],
+  [1230, 0x2a3260, 0xa8b8ff, 0.45, 0x8a92c8, 0x3e3850, 0.8, 1, 0x2d5480],
+  [1440, 0x1b2550, 0xa8b8ff, 0.45, 0x8a9ad0, 0x3a3448, 0.8, 1, 0x2b5482],
+];
+
+/** 預覽用的時段（網址 ?time=dawn|day|dusk|night 或 HH:MM） */
+export function parseTime(q: string | null): number | null {
+  if (!q) return null;
+  const named: Record<string, number> = { dawn: 380, morning: 480, day: 720, noon: 720, dusk: 1100, evening: 1140, night: 1320 };
+  if (q in named) return named[q];
+  const m = /^(\d{1,2}):(\d{2})$/.exec(q);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// ---------------------------------------------------------------- 搬運與協作線
+
+// 交接時頭上拿的東西：看得到產出就照產出（PDF、圖、圖表、文字檔），不然照村民的外觀
+const CARRY_BY_SPRITE: Record<string, string> = {
+  mayor: "📋", poet: "📜", jester: "😄", translator: "🔤", scholar: "📚", merchant: "💰", farmer: "🌾", chef: "🍲",
+  painter: "🎨", typist: "📝", reviewer: "✏️", auditor: "✅", scribe: "📒", appraiser: "🔍", craftsman: "🔨",
+};
+
+function carryFromAttachments(raw: unknown): string | null {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const kinds = raw.map((a) => (a && typeof a === "object" ? (a as { kind?: string; name?: string }) : {}));
+  if (kinds.some((a) => a.kind === "image")) return "🖼️";
+  if (kinds.some((a) => a.kind === "svg")) return "📊";
+  if (kinds.some((a) => (a.name ?? "").toLowerCase().endsWith(".pdf"))) return "📄";
+  if (kinds.some((a) => a.kind === "file")) return "📝";
+  return null;
+}
+
+const FLOW_COLORS = [0xe8643c, 0x3a8fd0, 0xe0a43a, 0x8a5ad0, 0x3fa05a];
+const FLOW_MAX_MS = 10 * 60_000; // 有 run_id：最多留到問答結束（保險起見 10 分鐘）
+const FLOW_ORPHAN_MS = 20_000; // 別人的問答（沒有 run_id）：20 秒後淡出
+const FLOW_LINGER_MS = 5_000; // 問答結束後再留 5 秒
+
+interface Flow {
+  curve: THREE.QuadraticBezierCurve3;
+  line: THREE.Mesh;
+  dot: THREE.Mesh;
+  runId?: string;
+  born: number;
+  fadeAt: number;
+}
+
 // ---------------------------------------------------------------- 障礙物
 
 const BLOCK_R: Record<string, number> = { tree: 0.55, pine: 0.55, bush: 0.75, rock: 0.6, well: 0.95, house_red: 2.0, house_blue: 2.0, sign: 0.45, workbench: 0.95 };
@@ -69,6 +127,8 @@ class Villager3D {
   private nameEl: HTMLDivElement;
   private speechEl: HTMLDivElement;
   private statusEl: HTMLDivElement;
+  private carryEl: HTMLDivElement;
+  private carryTimer?: number;
   private path: THREE.Vector3[] = [];
   private onArrive?: () => void;
   private walkT = 0;
@@ -88,9 +148,10 @@ class Villager3D {
     private world: IslandWorld,
     public id: string,
     public name: string,
-    sprite: string,
+    public sprite: string,
     public home: THREE.Vector3,
     public islet: Islet | null,
+    public remote: boolean,
   ) {
     this.model = M.chibi(sprite);
     this.root = this.model.root;
@@ -104,10 +165,12 @@ class Villager3D {
     this.speechEl.className = "isl-speech";
     this.statusEl = document.createElement("div");
     this.statusEl.className = "isl-status";
+    this.carryEl = document.createElement("div");
+    this.carryEl.className = "isl-carry";
     this.nameEl = document.createElement("div");
     this.nameEl.className = "isl-name";
     this.nameEl.textContent = name;
-    el.append(this.speechEl, this.statusEl, this.nameEl);
+    el.append(this.speechEl, this.statusEl, this.carryEl, this.nameEl);
     this.tag = new CSS2DObject(el);
     this.tag.center.set(0.5, 1);
     this.tag.position.set(0, TAG_Y, 0);
@@ -280,17 +343,32 @@ class Villager3D {
     if (!this.busy) this.wanderAt = performance.now() + 800 + Math.random() * 1700;
   }
 
-  /** 走到另一位村民旁邊交接，再回家 */
-  handoffTo(other: Villager3D) {
+  /** 頭上顯示拿著的東西（交接用）；ms 之後收起來 */
+  carry(icon: string | null, ms?: number) {
+    window.clearTimeout(this.carryTimer);
+    if (!icon) {
+      this.carryEl.className = "isl-carry";
+      return;
+    }
+    this.carryEl.textContent = icon;
+    this.carryEl.className = "isl-carry show";
+    if (ms) this.carryTimer = window.setTimeout(() => (this.carryEl.className = "isl-carry"), ms);
+  }
+
+  /** 走到另一位村民旁邊交接（頭上拿著 icon），交給對方後回家 */
+  handoffTo(other: Villager3D, icon: string) {
     this.endChat();
     other.endChat();
     this.busy = true;
+    this.carry(icon);
     const dir = new THREE.Vector3(this.pos.x - other.pos.x, 0, this.pos.z - other.pos.z);
     if (dir.lengthSq() < 0.01) dir.set(1, 0, 0);
     const spot = other.pos.clone().add(dir.setLength(1.1));
     this.walkTo(spot, () => {
       this.faceTo(other.pos);
       other.faceTo(this.pos);
+      this.carry(null);
+      other.carry(icon, 2200); // 東西到了對方手上
       this.timers.push(window.setTimeout(() => {
         this.busy = false;
         this.walkTo(this.world.wanderTarget(this.home, this.islet, this.home) ?? this.home.clone(), undefined, this.islet);
@@ -320,6 +398,7 @@ class Villager3D {
     this.timers.forEach((t) => window.clearTimeout(t));
     window.clearTimeout(this.speechTimer);
     window.clearTimeout(this.statusTimer);
+    window.clearTimeout(this.carryTimer);
     this.tag.element.remove();
     this.root.removeFromParent();
     this.root.traverse((o) => {
@@ -372,6 +451,19 @@ export class IslandWorld {
   private isletGroups = new Map<string, THREE.Group>();
   private obstacles: Obstacle[] = [];
   private boats: THREE.Group[] = [];
+  // 日夜
+  private hemi!: THREE.HemisphereLight;
+  private sun!: THREE.DirectionalLight;
+  private seaMat!: THREE.MeshStandardMaterial;
+  private glowMats: { mat: THREE.MeshStandardMaterial; k: number }[] = []; // 窗戶、路燈：晚上發光
+  private lampLights: THREE.PointLight[] = [];
+  private stars!: THREE.Points;
+  private timeOverride: number | null = null;
+  private timeTimer = 0;
+  night = 0;
+  // 搬運與協作線
+  private carrying = new Map<string, string>(); // 村民 id → 交接時拿著的東西
+  private flows: Flow[] = [];
   private clouds: THREE.Group[] = [];
   private frame = 0;
   private last = performance.now();
@@ -413,6 +505,8 @@ export class IslandWorld {
     });
 
     this.buildWorld();
+    this.collectGlow(this.scene);
+    this.applyTime(this.minutes());
     this.resize = new ResizeObserver(() => this.fit());
     this.resize.observe(host);
     this.fit();
@@ -430,8 +524,10 @@ export class IslandWorld {
     const s = this.scene;
     s.background = new THREE.Color(0xb9dcee);
     s.fog = new THREE.Fog(0xb9dcee, 90, 210);
-    s.add(new THREE.HemisphereLight(0xeef6fa, 0x8a7a68, 1.35));
+    this.hemi = new THREE.HemisphereLight(0xeef6fa, 0x8a7a68, 1.35);
+    s.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xfff1de, 2.7);
+    this.sun = sun;
     sun.position.set(24, 38, 16);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -443,7 +539,9 @@ export class IslandWorld {
     sun.shadow.normalBias = 0.03;
     s.add(sun);
 
-    s.add(M.sea(260));
+    const sea = M.sea(260);
+    this.seaMat = sea.material as THREE.MeshStandardMaterial;
+    s.add(sea);
     s.add(M.island(ISLAND_R));
 
     // 小路與廣場（同像素版：十字路＋村長廣場）
@@ -487,6 +585,30 @@ export class IslandWorld {
       t.position.set(Math.cos(a) * r, 0.18, Math.sin(a) * r);
       s.add(t);
     }
+
+    // 路燈：廣場四角與小路旁（晚上亮）
+    const lampSpots: [number, number][] = [[2.6, 2.0], [-2.9, 2.0], [2.6, -2.8], [-2.9, -2.8], [9, 0.6], [-9, 0.6], [0.6, 8], [0.6, -8.5]];
+    for (const [x, z] of lampSpots) {
+      const l = M.lamp();
+      l.position.set(x, 0.18, z);
+      s.add(l);
+      this.obstacles.push({ x, z, r: 0.3 });
+      const light = new THREE.PointLight(0xffc46b, 0, 9, 1.6);
+      light.position.set(x, 2.0, z);
+      s.add(light);
+      this.lampLights.push(light);
+    }
+    // 星星：夜晚才看得到
+    const starPos: number[] = [];
+    for (let i = 0; i < 420; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const e = 0.12 + Math.random() * 1.2;
+      starPos.push(Math.cos(a) * Math.cos(e) * 200, Math.sin(e) * 200, Math.sin(a) * Math.cos(e) * 200);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
+    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.1, transparent: true, opacity: 0, fog: false }));
+    s.add(this.stars);
 
     // 遠方的山、海上的小船、天上的雲
     const hillColors = [0x7fae6a, 0x8db878, 0x9fbf86, 0x6f9e60];
@@ -551,10 +673,111 @@ export class IslandWorld {
     t.position.set(side.x, 0.18, side.z);
     g.add(t);
     this.scene.add(g);
+    this.collectGlow(g);
+    this.applyTime(this.minutes());
     const islet = { center, gateIslet, gateIsland };
     this.islets.set(id, islet);
     this.isletGroups.set(id, g);
     return islet;
+  }
+
+  // ---------------------------------------------------------------- 日夜
+
+  /** 窗戶、路燈的發光材質（晚上亮） */
+  private collectGlow(root: THREE.Object3D) {
+    root.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const m = o.material as THREE.MeshStandardMaterial;
+      if ((m.name === "window" || m.name === "lamp") && !this.glowMats.some((g) => g.mat === m)) {
+        this.glowMats.push({ mat: m, k: m.name === "lamp" ? 2.4 : 1.4 });
+      }
+    });
+  }
+
+  /** 現在幾點（分鐘）：預設照真實時間；可以指定（預覽用） */
+  private minutes(): number {
+    if (this.timeOverride !== null) return this.timeOverride;
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes();
+  }
+
+  /** 指定時間（分鐘，0～1439）；null = 跟著真實時間 */
+  setTime(minutes: number | null) {
+    this.timeOverride = minutes === null ? null : ((minutes % 1440) + 1440) % 1440;
+    this.applyTime(this.minutes());
+  }
+
+  private applyTime(min: number) {
+    let i = 0;
+    while (i < DAY.length - 2 && DAY[i + 1][0] <= min) i++;
+    const a = DAY[i];
+    const b = DAY[i + 1];
+    const t = (min - a[0]) / Math.max(1, b[0] - a[0]);
+    const col = (k: number) => new THREE.Color(a[k]).lerp(new THREE.Color(b[k]), t);
+    const num = (k: number) => a[k] + (b[k] - a[k]) * t;
+    const sky = col(1);
+    (this.scene.background as THREE.Color).copy(sky);
+    (this.scene.fog as THREE.Fog).color.copy(sky);
+    this.sun.color.copy(col(2));
+    this.sun.intensity = num(3);
+    this.hemi.color.copy(col(4));
+    this.hemi.groundColor.copy(col(5));
+    this.hemi.intensity = num(6);
+    this.night = num(7);
+    this.seaMat.color.copy(col(8));
+    // 太陽（晚上是月光）繞著島轉：早上從東邊（+x）升起
+    const ang = ((min - 360) / 1440) * Math.PI * 2;
+    this.sun.position.set(Math.cos(ang) * 36, 18 + Math.abs(Math.sin(ang)) * 22, 18 + Math.sin(ang) * 10);
+    for (const g of this.glowMats) g.mat.emissiveIntensity = this.night * g.k;
+    for (const l of this.lampLights) l.intensity = this.night * 7;
+    (this.stars.material as THREE.PointsMaterial).opacity = Math.max(0, this.night - 0.3) * 1.4;
+    this.renderer.toneMappingExposure = 1.05 + this.night * 0.25;
+  }
+
+  // ---------------------------------------------------------------- 協作線
+
+  /** 交接時在兩位村民之間畫一條弧線，上面有一顆光點從交件的人流向收件的人 */
+  private addFlow(from: Villager3D, to: Villager3D, runId: string | undefined) {
+    const a = from.pos.clone().setY(0.35);
+    const b = to.pos.clone().setY(0.35);
+    const mid = a.clone().lerp(b, 0.5).setY(1.2 + a.distanceTo(b) * 0.22);
+    const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
+    const color = FLOW_COLORS[this.flows.length % FLOW_COLORS.length];
+    const lineMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 });
+    const line = new THREE.Mesh(new THREE.TubeGeometry(curve, 40, 0.1, 6, false), lineMat);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), dotMat);
+    this.scene.add(line, dot);
+    this.flows.push({ curve, line, dot, runId, born: performance.now(), fadeAt: runId ? performance.now() + FLOW_MAX_MS : performance.now() + FLOW_ORPHAN_MS });
+  }
+
+  /** 問答結束：那次問答的協作線幾秒後淡出 */
+  private endFlows(runId: string | undefined) {
+    const at = performance.now() + FLOW_LINGER_MS;
+    for (const f of this.flows) if (!runId || f.runId === runId) f.fadeAt = Math.min(f.fadeAt, at);
+  }
+
+  private updateFlows(now: number) {
+    this.flows = this.flows.filter((f) => {
+      const fade = now < f.fadeAt ? 1 : Math.max(0, 1 - (now - f.fadeAt) / 1200);
+      const lineMat = f.line.material as THREE.MeshBasicMaterial;
+      const dotMat = f.dot.material as THREE.MeshBasicMaterial;
+      lineMat.opacity = 0.85 * fade;
+      dotMat.opacity = fade;
+      f.dot.position.copy(f.curve.getPoint(((now - f.born) / 1600) % 1));
+      if (fade > 0) return true;
+      f.line.removeFromParent();
+      f.dot.removeFromParent();
+      f.line.geometry.dispose();
+      f.dot.geometry.dispose();
+      lineMat.dispose();
+      dotMat.dispose();
+      return false;
+    });
+  }
+
+  private carryOf(v: Villager3D): string {
+    return this.carrying.get(v.id) ?? (v.remote ? "📦" : CARRY_BY_SPRITE[v.sprite] ?? "📜");
   }
 
   isletAt(p: THREE.Vector3): Islet | null {
@@ -621,7 +844,7 @@ export class IslandWorld {
       this.looks.set(info.id, look(info));
       const islet = info.remote ? this.isletFor(info.id) : null;
       const home = islet ? islet.center.clone() : this.homeOf(info);
-      const v = new Villager3D(this, info.id, info.name, info.sprite ?? "poet", home, islet);
+      const v = new Villager3D(this, info.id, info.name, info.sprite ?? "poet", home, islet, !!info.remote);
       v.lines = info.lines ?? [];
       v.skill = info.skill ?? "";
       this.villagers.set(info.id, v);
@@ -661,6 +884,12 @@ export class IslandWorld {
 
   handleEvent(e: VillageEvent) {
     const v = e.agent ? this.villagers.get(e.agent) : undefined;
+    if (e.type === "agent.finished" && e.agent) {
+      const icon = carryFromAttachments(e.attachments);
+      if (icon) this.carrying.set(e.agent, icon);
+      else this.carrying.delete(e.agent);
+    }
+    if (["run.finished", "run.failed", "run.cancelled"].includes(e.type)) this.endFlows(e.run_id);
     switch (e.type) {
       case "run.started":
         v?.startWork("thinking");
@@ -699,7 +928,10 @@ export class IslandWorld {
       case "agent.handoff": {
         const from = this.villagers.get(e.from_agent ?? "");
         const to = this.villagers.get(e.to_agent ?? "");
-        if (from && to) from.handoffTo(to);
+        if (from && to) {
+          from.handoffTo(to, this.carryOf(from));
+          this.addFlow(from, to, e.run_id);
+        }
         break;
       }
     }
@@ -791,6 +1023,11 @@ export class IslandWorld {
     for (const c of this.clouds) {
       c.position.x += dt * 0.5;
       if (c.position.x > 110) c.position.x = -110;
+    }
+    this.updateFlows(now);
+    if (now >= this.timeTimer) {
+      this.timeTimer = now + 20_000; // 天色每 20 秒跟著真實時間更新一次
+      this.applyTime(this.minutes());
     }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);

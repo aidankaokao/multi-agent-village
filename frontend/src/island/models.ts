@@ -228,6 +228,17 @@ export function boat(color = 0xd0563f): THREE.Group {
   return g;
 }
 
+/** 路燈：晚上燈罩會亮（材質名 lamp），旁邊再放一盞不投影的點光源 */
+export function lamp(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.7, 6), mat(0x3a3a44), 0, 0.85, 0));
+  const glow = new THREE.MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xffc46b, emissiveIntensity: 0, flatShading: true });
+  glow.name = "lamp";
+  g.add(mesh(new THREE.SphereGeometry(0.17, 10, 8), glow, 0, 1.8, 0));
+  g.add(mesh(new THREE.ConeGeometry(0.22, 0.14, 6), mat(0x3a3a44), 0, 1.98, 0));
+  return g;
+}
+
 export function cloud(): THREE.Group {
   const g = new THREE.Group();
   const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true, transparent: true, opacity: 0.92 });
