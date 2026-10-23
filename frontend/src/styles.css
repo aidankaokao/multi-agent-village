@@ -1793,6 +1793,21 @@ button.mention-item .clamp {
   background: #b9dcee;
 }
 
+.island-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.island-canvas.hide-names .isl-name,
+.island-canvas.hide-carry .isl-carry {
+  display: none !important;
+}
+
+.island-canvas.paused .isl-status,
+.island-canvas.paused .isl-carry {
+  animation-play-state: paused;
+}
+
 .island-canvas canvas {
   display: block;
   touch-action: none;
@@ -1940,4 +1955,237 @@ button.mention-item .clamp {
 .isl-carry.show {
   display: block;
   animation: isl-pop 0.25s ease-out, isl-bob 0.9s ease-in-out 0.25s infinite;
+}
+
+.isl-name.pulse {
+  animation: isl-pulse 1.4s ease-out;
+}
+
+@keyframes isl-pulse {
+  0%,
+  60% {
+    background: #ffd84d;
+    transform: scale(1.25);
+  }
+}
+
+/* 島嶼版工具列：白色膠囊（參考政策島的浮動工具列） */
+.isl-toolbar {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 24px);
+  font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+}
+
+.isl-seg {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(30, 40, 50, 0.18);
+  backdrop-filter: blur(6px);
+}
+
+.isl-seg button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 46px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: #4a4a52;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.isl-seg button .ico {
+  font-size: 16px;
+}
+
+.isl-seg button:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.isl-seg button.on {
+  background: #23232b;
+  color: #fff;
+}
+
+.isl-dot {
+  position: absolute;
+  top: 3px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: #e8643c;
+  border-radius: 50%;
+}
+
+/* 村莊日誌 LIVE */
+.isl-log {
+  position: absolute;
+  top: 96px;
+  left: 12px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: calc(100% - 180px);
+  background: rgba(255, 253, 248, 0.95);
+  color: #2b2a27;
+  border-radius: 14px;
+  box-shadow: 0 4px 18px rgba(30, 40, 50, 0.22);
+  font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+  overflow: hidden;
+}
+
+.isl-log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #ece6da;
+}
+
+.isl-log-head > div {
+  flex: 1;
+}
+
+.isl-log-head .eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #e8643c;
+  font-weight: 700;
+}
+
+.isl-log-head strong {
+  font-size: 15px;
+}
+
+.isl-log-head .live {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #c0392b;
+}
+
+.isl-log-head .live i {
+  width: 7px;
+  height: 7px;
+  background: #e74c3c;
+  border-radius: 50%;
+  animation: isl-live 1.4s ease-in-out infinite;
+}
+
+@keyframes isl-live {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.isl-log-head button.link {
+  color: #6a6a72;
+  font-size: 12px;
+}
+
+.isl-log-list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.isl-log-list li button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.isl-log-list li button:disabled {
+  cursor: default;
+}
+
+.isl-log-list li button:not(:disabled):hover {
+  background: #f3ede1;
+}
+
+.isl-log-list li.ok .x {
+  color: #2f7a4a;
+}
+
+.isl-log-list li.bad .x {
+  color: #b03a2e;
+}
+
+.isl-log-list .t {
+  flex: none;
+  font-size: 11px;
+  color: #9a948a;
+  font-variant-numeric: tabular-nums;
+}
+
+.isl-log-list .i {
+  flex: none;
+}
+
+.isl-log-list .empty {
+  padding: 12px;
+  font-size: 13px;
+}
+
+/* 手機：工具列只留圖示、日誌改成底部的抽屜 */
+@media (max-width: 700px) {
+  .isl-seg button {
+    min-width: 34px;
+    padding: 5px 6px;
+  }
+
+  .isl-seg button .lbl {
+    display: none;
+  }
+
+  .isl-log {
+    top: auto;
+    bottom: 76px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 40%;
+  }
+}
+
+/* 手機：左上的村名、帳號佔掉上方空間，切換膠囊與工具列往下排 */
+@media (max-width: 700px) {
+  .view-switch {
+    top: 92px;
+  }
+
+  .isl-toolbar {
+    top: 136px;
+  }
 }

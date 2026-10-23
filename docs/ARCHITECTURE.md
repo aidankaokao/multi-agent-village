@@ -365,6 +365,9 @@ class BaseAgent(Protocol):
 - 搬運圖示：`agent.finished` 有附件就照附件（🖼️ 圖、📊 圖表、📄 PDF、📝 檔案），否則照外觀（`CARRY_BY_SPRITE`），
   駐村專家是 📦；別人的問答事件只有動畫欄位（`for_viewer`），一律照外觀。交接時頭上拿著，到了換到對方手上。
 - 協作線：`agent.handoff` 時在兩人之間畫弧線（TubeGeometry）＋流動光點；那次問答結束 5 秒後淡出（別人的問答沒有 run_id：20 秒）。
+- 介面層（`island/IslandHud.tsx`）：膠囊工具列（時段、名牌、搬運、協作線、暫停、鳥瞰、日誌；`island-prefs`，網址 `?time=` 優先）
+  與「村莊日誌 LIVE」（`describe` 把事件寫成一句話，最多 120 筆；點一下 `IslandWorld.focus` 鏡頭飛過去）。
+  名牌 / 搬運用外層 class 隱藏（`.hide-names`、`.hide-carry`）；暫停只停動畫，鏡頭照樣能轉。
 - 拖曳旋轉、滾輪縮放（OrbitControls，限制角度與範圍）；點村民用 raycast（拖曳超過 5px 不算點擊）。開發模式 `window.__island`。
 
 #### 中轉站：步驟之間交接檔案

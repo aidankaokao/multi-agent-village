@@ -376,6 +376,13 @@ class Villager3D {
     }, other.islet);
   }
 
+  /** 被日誌點到：名牌閃一下 */
+  greetPulse() {
+    this.nameEl.classList.remove("pulse");
+    void this.nameEl.offsetWidth;
+    this.nameEl.classList.add("pulse");
+  }
+
   setAway(away: boolean) {
     if (away === this.away) return;
     this.away = away;
@@ -464,6 +471,11 @@ export class IslandWorld {
   // 搬運與協作線
   private carrying = new Map<string, string>(); // 村民 id → 交接時拿著的東西
   private flows: Flow[] = [];
+  // 工具列
+  private small = false;
+  paused = false;
+  private flowsVisible = true;
+  private camAnim: { fromPos: THREE.Vector3; toPos: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t: number } | null = null;
   private clouds: THREE.Group[] = [];
   private frame = 0;
   private last = performance.now();
@@ -477,7 +489,10 @@ export class IslandWorld {
 
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // 手機、小螢幕：解析度與陰影品質降一點，省電也比較順
+    const small = Math.min(window.innerWidth, window.innerHeight) < 700;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, small ? 1.5 : 2));
+    this.small = small;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -530,7 +545,7 @@ export class IslandWorld {
     this.sun = sun;
     sun.position.set(24, 38, 16);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(this.small ? 1024 : 2048, this.small ? 1024 : 2048);
     const c = sun.shadow.camera;
     c.left = c.bottom = -40;
     c.right = c.top = 40;
@@ -748,6 +763,7 @@ export class IslandWorld {
     const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), dotMat);
     this.scene.add(line, dot);
+    line.visible = dot.visible = this.flowsVisible;
     this.flows.push({ curve, line, dot, runId, born: performance.now(), fadeAt: runId ? performance.now() + FLOW_MAX_MS : performance.now() + FLOW_ORPHAN_MS });
   }
 
@@ -774,6 +790,12 @@ export class IslandWorld {
       dotMat.dispose();
       return false;
     });
+  }
+
+  /** 交接時頭上拿的東西（日誌也用它） */
+  carryIcon(id: string): string {
+    const v = this.villagers.get(id);
+    return v ? this.carryOf(v) : "📜";
   }
 
   private carryOf(v: Villager3D): string {
@@ -876,6 +898,41 @@ export class IslandWorld {
     this.villagers.get(id)?.greet(text);
   }
 
+  // ---------------------------------------------------------------- 工具列
+
+  setFlowsVisible(v: boolean) {
+    this.flowsVisible = v;
+    for (const f of this.flows) f.line.visible = f.dot.visible = v;
+  }
+
+  /** 暫停：村民、船、雲、協作線都停住（鏡頭照樣可以轉） */
+  setPaused(p: boolean) {
+    this.paused = p;
+  }
+
+  /** 鳥瞰（從正上方看整座群島）或回到預設的斜角 */
+  setBirdView(on: boolean) {
+    const pos = on ? new THREE.Vector3(0, 105, 0.01) : new THREE.Vector3().setFromSphericalCoords(78, 0.9, 0.38);
+    const target = on ? new THREE.Vector3(0, 0, 0) : new THREE.Vector3(0, 0, 1.5);
+    this.controls.minPolarAngle = on ? 0 : 0.3;
+    this.flyTo(pos, target);
+  }
+
+  /** 鏡頭飛到某位村民（日誌點一下） */
+  focus(id: string) {
+    const v = this.villagers.get(id);
+    if (!v) return;
+    const target = v.pos.clone().setY(0);
+    const offset = new THREE.Vector3().setFromSphericalCoords(30, 0.85, this.controls.getAzimuthalAngle());
+    this.controls.minPolarAngle = 0.3;
+    this.flyTo(target.clone().add(offset), target);
+    v.greetPulse();
+  }
+
+  private flyTo(pos: THREE.Vector3, target: THREE.Vector3) {
+    this.camAnim = { fromPos: this.camera.position.clone(), toPos: pos, fromT: this.controls.target.clone(), toT: target, t: 0 };
+  }
+
   setNamesVisible(v: boolean) {
     this.villagers.forEach((x) => x.setNameVisible(v));
   }
@@ -938,6 +995,7 @@ export class IslandWorld {
   }
 
   private tickIdle() {
+    if (this.paused) return;
     const now = performance.now();
     const all = [...this.villagers.values()];
     if (now >= this.nextAmbient) {
@@ -1014,17 +1072,27 @@ export class IslandWorld {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
-    this.villagers.forEach((v) => v.update(dt, now));
-    for (const b of this.boats) {
-      const ph = b.userData.phase as number;
-      b.position.y = -0.45 + Math.sin(now / 900 + ph) * 0.06;
-      b.rotation.z = Math.sin(now / 1100 + ph) * 0.05;
+    if (!this.paused) {
+      this.villagers.forEach((v) => v.update(dt, now));
+      for (const b of this.boats) {
+        const ph = b.userData.phase as number;
+        b.position.y = -0.45 + Math.sin(now / 900 + ph) * 0.06;
+        b.rotation.z = Math.sin(now / 1100 + ph) * 0.05;
+      }
+      for (const c of this.clouds) {
+        c.position.x += dt * 0.5;
+        if (c.position.x > 110) c.position.x = -110;
+      }
+      this.updateFlows(now);
     }
-    for (const c of this.clouds) {
-      c.position.x += dt * 0.5;
-      if (c.position.x > 110) c.position.x = -110;
+    if (this.camAnim) {
+      const a = this.camAnim;
+      a.t = Math.min(1, a.t + dt / 0.9);
+      const e = a.t < 0.5 ? 2 * a.t * a.t : 1 - Math.pow(-2 * a.t + 2, 2) / 2;
+      this.camera.position.lerpVectors(a.fromPos, a.toPos, e);
+      this.controls.target.lerpVectors(a.fromT, a.toT, e);
+      if (a.t >= 1) this.camAnim = null;
     }
-    this.updateFlows(now);
     if (now >= this.timeTimer) {
       this.timeTimer = now + 20_000; // 天色每 20 秒跟著真實時間更新一次
       this.applyTime(this.minutes());
