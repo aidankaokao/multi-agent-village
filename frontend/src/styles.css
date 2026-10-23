@@ -2189,3 +2189,29 @@ button.mention-item .clamp {
     top: 136px;
   }
 }
+
+/* 帳號選單：介面風格（跟著地圖 / 像素 / 柔和） */
+.theme-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 2px;
+  font-size: 12px;
+}
+
+.theme-pick .row {
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.theme-pick button {
+  padding: 3px 8px;
+  font-size: 12px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.theme-pick button.on {
+  background: var(--accent);
+  color: #222;
+}

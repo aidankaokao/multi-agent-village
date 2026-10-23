@@ -349,6 +349,14 @@ class BaseAgent(Protocol):
   工具 `context()` 告訴畫家有沒有參考圖與寬高（`imagefmt.dimensions`），畫家用 `use_reference` 決定是否以它為底；
   送出時 `input_references` = data URL。模型回 400（不收參考圖）時改成只依描述重畫並在結果註明。
 
+#### 介面風格（像素 / 柔和）
+
+`styles.css` 是像素風格（深藍灰、黃色、粗黑框、直角、錯開的實心陰影），顏色幾乎都走主題變數。
+`theme-soft.css` 只在 `<html data-theme="soft">` 時生效：換變數（米白面板、珊瑚橘），再覆蓋粗框、直角、實心陰影、深色底。
+選擇器的根用 `:where(:root[data-theme="soft"])`（不加權重），元件自己更具體的樣式（例如島嶼工具列）仍然優先。
+App 依帳號選單的「介面風格」（localStorage `ui-theme`：跟著地圖 / 像素 / 柔和）設定 `data-theme`；跟著地圖 = 像素村配像素、
+島嶼配柔和。登出（登入頁）時移除，登入頁一律像素。新增樣式時：先寫像素版，柔和版需要不同外觀再到 `theme-soft.css` 補。
+
 #### 島嶼版地圖（和像素村二選一）
 
 地圖和其他部分只靠一個小介面溝通（`VillageHandle`：`dispatch(事件)`、`say(id, 話)`；props：村民名單、點了誰），

@@ -1,0 +1,544 @@
+/*
+ * 柔和風格（呼應島嶼版與政策島）：米白面板、珊瑚橘強調色、細線、圓角、柔和浮起陰影。
+ * 只在 <html data-theme="soft"> 時生效；像素風格（styles.css）一行都不動。
+ * 做法：先換主題變數，再覆蓋「像素感」的四件事——粗黑框、直角、錯開的實心陰影、深色底。
+ * 選擇器的根用 :where() 包起來（不加權重）：只和 styles.css 裡同樣寫法的規則比先後，
+ * 元件自己更具體的樣式（例如島嶼版的工具列按鈕）仍然優先，不會被這裡的通用按鈕樣式蓋掉。
+ */
+
+:root[data-theme="soft"] {
+  --bg: #f4efe6;
+  --panel: #fffdf8;
+  --card: #f6f1e7;
+  --line: #e4dccd;
+  --text: #2b2a27;
+  --muted: #8a8478;
+  --accent: #e2643a;
+  --ok: #2f8a55;
+  --danger: #d0453f;
+  --soft-input: #fbf8f2;
+  --soft-ink: #23232b;
+  --soft-shadow: 0 6px 24px rgba(60, 45, 25, 0.12), 0 1px 3px rgba(60, 45, 25, 0.08);
+  --soft-shadow-sm: 0 2px 8px rgba(60, 45, 25, 0.1);
+  --soft-radius: 14px;
+  font-family: -apple-system, "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------- 按鈕、輸入框、卡片、標籤 */
+
+:where(:root[data-theme="soft"]) button {
+  background: var(--soft-ink);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  box-shadow: none;
+  padding: 6px 14px;
+  transition: background 0.15s, transform 0.1s;
+}
+
+:where(:root[data-theme="soft"]) button:where(:hover:not(:disabled)) {
+  background: #3a3a46;
+}
+
+:where(:root[data-theme="soft"]) button:where(:active) {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+
+:where(:root[data-theme="soft"]) button.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+:where(:root[data-theme="soft"]) button.link,
+:where(:root[data-theme="soft"]) button.link:where(:hover:not(:disabled)) {
+  background: none;
+  color: var(--accent);
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+:where(:root[data-theme="soft"]) button.link.danger {
+  color: var(--danger);
+}
+
+:where(:root[data-theme="soft"]) input,
+:where(:root[data-theme="soft"]) select,
+:where(:root[data-theme="soft"]) textarea {
+  background: var(--soft-input);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) input:focus,
+:where(:root[data-theme="soft"]) select:focus,
+:where(:root[data-theme="soft"]) textarea:focus {
+  outline: 2px solid rgba(226, 100, 58, 0.35);
+  border-color: var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--soft-radius);
+  box-shadow: var(--soft-shadow-sm);
+}
+
+:where(:root[data-theme="soft"]) h3 {
+  color: var(--text);
+}
+
+:where(:root[data-theme="soft"]) .tag {
+  background: #efe8da;
+  color: #6f685c;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+:where(:root[data-theme="soft"]) .tag.ok {
+  background: #e3f1e7;
+  color: var(--ok);
+}
+
+:where(:root[data-theme="soft"]) .tag.warn {
+  background: #fbe6dc;
+  color: var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .error {
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) .error.toast {
+  box-shadow: var(--soft-shadow);
+}
+
+:where(:root[data-theme="soft"]) .notice {
+  background: #e3f1e7;
+  color: #24553a;
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) .output {
+  background: var(--soft-input);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) td,
+:where(:root[data-theme="soft"]) .event-log li,
+:where(:root[data-theme="soft"]) .storage-table td {
+  border-bottom-color: var(--line);
+}
+
+/* ---------------------------------------------------------------- 左上村名、帳號選單、右上選單 */
+
+:where(:root[data-theme="soft"]) .village-name {
+  color: var(--accent);
+  background: rgba(255, 253, 248, 0.92);
+  border: none;
+  border-radius: 999px;
+  box-shadow: var(--soft-shadow-sm);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+:where(:root[data-theme="soft"]) .user-chip > button {
+  background: rgba(255, 253, 248, 0.92);
+  color: var(--text);
+  box-shadow: var(--soft-shadow-sm);
+}
+
+:where(:root[data-theme="soft"]) .user-menu {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--soft-radius);
+  box-shadow: var(--soft-shadow);
+}
+
+:where(:root[data-theme="soft"]) .user-menu button {
+  background: none;
+  color: var(--text);
+  border-radius: 8px;
+}
+
+:where(:root[data-theme="soft"]) .user-menu button:where(:hover:not(:disabled)) {
+  background: var(--card);
+  color: var(--text);
+}
+
+:where(:root[data-theme="soft"]) .user-menu button.danger-text {
+  color: var(--danger);
+}
+
+:where(:root[data-theme="soft"]) button.fab {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--soft-shadow);
+}
+
+:where(:root[data-theme="soft"]) button.fab:where(:hover:not(:disabled)) {
+  background: #fff;
+}
+
+:where(:root[data-theme="soft"]) button.fab-item,
+:where(:root[data-theme="soft"]) button.fab-item:where(:hover:not(:disabled)) {
+  background: none;
+}
+
+:where(:root[data-theme="soft"]) .fab-label {
+  background: var(--panel);
+  color: var(--text);
+  border: none;
+  border-radius: 999px;
+  box-shadow: var(--soft-shadow-sm);
+}
+
+:where(:root[data-theme="soft"]) .fab-icon {
+  background: var(--panel);
+  border: none;
+  box-shadow: var(--soft-shadow-sm);
+}
+
+:where(:root[data-theme="soft"]) button.fab-item:hover .fab-icon,
+:where(:root[data-theme="soft"]) button.fab-item:hover .fab-label {
+  background: #fff;
+  color: var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .fab-dot {
+  border-color: var(--panel);
+}
+
+:where(:root[data-theme="soft"]) .view-switch {
+  background: rgba(255, 253, 248, 0.92);
+  border: none;
+  box-shadow: var(--soft-shadow-sm);
+}
+
+:where(:root[data-theme="soft"]) .view-switch button {
+  color: var(--text);
+  background: transparent;
+}
+
+:where(:root[data-theme="soft"]) .view-switch button.active {
+  background: var(--soft-ink);
+  color: #fff;
+}
+
+:where(:root[data-theme="soft"]) .llm-banner {
+  background: #fdf0e8;
+  color: #a2421f;
+  border: 1px solid #f2c9b4;
+  border-radius: var(--soft-radius);
+  box-shadow: var(--soft-shadow-sm);
+}
+
+/* ---------------------------------------------------------------- 抽屜（村民、紀錄、記憶、村規、帳號、LLM 設定） */
+
+:where(:root[data-theme="soft"]) .drawer {
+  background: var(--bg);
+  border-left: none;
+  box-shadow: -10px 0 40px rgba(60, 45, 25, 0.18);
+}
+
+:where(:root[data-theme="soft"]) .drawer-head {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+:where(:root[data-theme="soft"]) .drawer-tabs button {
+  background: none;
+  color: var(--muted);
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+}
+
+:where(:root[data-theme="soft"]) .drawer-tabs button:where(:hover:not(:disabled)) {
+  background: none;
+  color: var(--text);
+}
+
+:where(:root[data-theme="soft"]) .drawer-tabs button.active {
+  color: var(--text);
+  background: none;
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+:where(:root[data-theme="soft"]) .subtabs {
+  border-bottom: 1px solid var(--line);
+}
+
+:where(:root[data-theme="soft"]) .subtabs button,
+:where(:root[data-theme="soft"]) .subtabs button:where(:hover:not(:disabled)) {
+  background: none;
+  color: var(--muted);
+  border-radius: 0;
+}
+
+:where(:root[data-theme="soft"]) .subtabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+:where(:root[data-theme="soft"]) .editor-foot,
+:where(:root[data-theme="soft"]) .modal-foot {
+  border-top: 1px solid var(--line);
+}
+
+:where(:root[data-theme="soft"]) .sprite-thumb {
+  background-color: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) .sprite-pick button,
+:where(:root[data-theme="soft"]) .kind-pick button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+:where(:root[data-theme="soft"]) .sprite-pick button.picked {
+  border-color: var(--accent);
+  background: #fdf0e8;
+}
+
+:where(:root[data-theme="soft"]) .kind-pick button.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(226, 100, 58, 0.3);
+}
+
+:where(:root[data-theme="soft"]) .home-dot {
+  border: 2px solid #fff;
+}
+
+:where(:root[data-theme="soft"]) .home-dot.other {
+  background: #c9c2b4;
+}
+
+:where(:root[data-theme="soft"]) .workshop .chat-input {
+  border: 1px solid var(--line);
+  border-radius: var(--soft-radius);
+}
+
+:where(:root[data-theme="soft"]) .ws-test {
+  border-top-color: var(--line);
+}
+
+:where(:root[data-theme="soft"]) .theme-pick button.on {
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------------- 彈窗 */
+
+:where(:root[data-theme="soft"]) .modal-backdrop {
+  background: rgba(40, 32, 22, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+:where(:root[data-theme="soft"]) .modal {
+  background: var(--panel);
+  border: none;
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(40, 32, 22, 0.28);
+}
+
+:where(:root[data-theme="soft"]) .modal-head {
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- 問答視窗 */
+
+:where(:root[data-theme="soft"]) .chat-window {
+  background: var(--panel);
+  border: none;
+  border-radius: 20px;
+  box-shadow: 0 16px 50px rgba(40, 32, 22, 0.22), 0 2px 6px rgba(40, 32, 22, 0.08);
+  overflow: hidden;
+}
+
+:where(:root[data-theme="soft"]) .chat-backdrop {
+  background: rgba(40, 32, 22, 0.3);
+  backdrop-filter: blur(2px);
+}
+
+:where(:root[data-theme="soft"]) .chat-window-head {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+
+:where(:root[data-theme="soft"]) .conv-list {
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+:where(:root[data-theme="soft"]) button.conv-open {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) .conv-row.active .conv-open {
+  border-color: var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .chat-bar {
+  border-bottom: 1px solid var(--line);
+}
+
+:where(:root[data-theme="soft"]) .chat-input {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+:where(:root[data-theme="soft"]) .bubble {
+  border: none;
+  border-radius: 16px;
+}
+
+:where(:root[data-theme="soft"]) .bubble.user {
+  background: var(--soft-ink);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+:where(:root[data-theme="soft"]) .bubble.user .muted,
+:where(:root[data-theme="soft"]) .bubble.user .doc-chip .muted {
+  color: #c9c6c0;
+}
+
+:where(:root[data-theme="soft"]) .bubble.village {
+  background: var(--card);
+  border-bottom-left-radius: 4px;
+}
+
+:where(:root[data-theme="soft"]) .answer {
+  background: var(--panel);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+}
+
+:where(:root[data-theme="soft"]) .process {
+  border-left: 2px dashed var(--line);
+}
+
+:where(:root[data-theme="soft"]) button.example {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: left;
+}
+
+:where(:root[data-theme="soft"]) button.example:where(:hover:not(:disabled)) {
+  background: #fff;
+  border-color: var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .drop-hint {
+  border: 2px dashed var(--accent);
+  background: rgba(255, 253, 248, 0.9);
+  color: var(--accent);
+  border-radius: var(--soft-radius);
+}
+
+:where(:root[data-theme="soft"]) .pending-images img,
+:where(:root[data-theme="soft"]) .image-strip img {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) .doc-chip {
+  background: #efe8da;
+  border: none;
+  border-radius: 999px;
+}
+
+:where(:root[data-theme="soft"]) .chat-input .doc-chip {
+  background: #efe8da;
+}
+
+:where(:root[data-theme="soft"]) .bubble.user .doc-chip {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+:where(:root[data-theme="soft"]) .doc-chip.uploading {
+  outline: 1px dashed var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .file-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+:where(:root[data-theme="soft"]) .attachments figure,
+:where(:root[data-theme="soft"]) img.zoomed {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+:where(:root[data-theme="soft"]) .attachments figcaption {
+  background: var(--card);
+}
+
+:where(:root[data-theme="soft"]) .expired-image {
+  border-radius: 10px;
+}
+
+:where(:root[data-theme="soft"]) .mention-menu {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--soft-radius);
+  box-shadow: var(--soft-shadow);
+}
+
+:where(:root[data-theme="soft"]) button.mention-item {
+  background: none;
+  color: var(--text);
+  border-radius: 8px;
+}
+
+:where(:root[data-theme="soft"]) button.mention-item.active,
+:where(:root[data-theme="soft"]) button.mention-item:where(:hover:not(:disabled)) {
+  background: var(--card);
+}
+
+:where(:root[data-theme="soft"]) .mention-hint {
+  border-top: 1px solid var(--line);
+}
+
+:where(:root[data-theme="soft"]) .scribe-note {
+  color: #9a6a2a;
+}
+
+/* ---------------------------------------------------------------- Markdown（回答內容） */
+
+:where(:root[data-theme="soft"]) .md code {
+  background: rgba(60, 45, 25, 0.07);
+}
+
+:where(:root[data-theme="soft"]) .md pre {
+  background: #f3eee4;
+}
+
+:where(:root[data-theme="soft"]) .md th {
+  background: #f3eee4;
+}
+
+:where(:root[data-theme="soft"]) .md blockquote {
+  border-left-color: var(--accent);
+}
+
+:where(:root[data-theme="soft"]) .md hr {
+  border-top: 1px solid var(--line);
+}

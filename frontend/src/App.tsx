@@ -18,6 +18,18 @@ import type { VillagerInfo } from "./village/VillageScene";
 const IslandCanvas = lazy(() => import("./island/IslandCanvas"));
 type MapView = "pixel" | "island";
 
+// 介面風格：跟著地圖（像素村 → 像素、島嶼 → 柔和），或自己指定；登入頁一律像素
+type UiTheme = "auto" | "pixel" | "soft";
+function initialTheme(): UiTheme {
+  try {
+    const t = localStorage.getItem("ui-theme");
+    return t === "pixel" || t === "soft" ? t : "auto";
+  } catch {
+    return "auto";
+  }
+}
+const THEME_LABEL: Record<UiTheme, string> = { auto: "跟著地圖", pixel: "像素", soft: "柔和" };
+
 /** 地圖樣式：網址 ?view=island / pixel 優先，再來是上次的選擇 */
 function initialView(): MapView {
   const q = new URLSearchParams(location.search).get("view");
@@ -147,6 +159,22 @@ function VillageApp({
     url.searchParams.set("view", v);
     history.replaceState(null, "", url);
   };
+  const [uiTheme, setUiThemeState] = useState<UiTheme>(initialTheme);
+  const setUiTheme = (t: UiTheme) => {
+    setUiThemeState(t);
+    try {
+      localStorage.setItem("ui-theme", t);
+    } catch {
+      /* 存不了：只是下次不記得 */
+    }
+  };
+  const theme = uiTheme === "auto" ? (view === "island" ? "soft" : "pixel") : uiTheme;
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => {
+      delete document.documentElement.dataset.theme; // 登出回登入頁：像素
+    };
+  }, [theme]);
   const [unseen, setUnseen] = useState(false); // 問答視窗收著時有問答完成 → 💬 上的紅點
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [runs, dispatch] = useReducer(runsReducer, initialRuns);
@@ -310,6 +338,16 @@ function VillageApp({
             <span className="muted">@{me.username}</span>
             <button onClick={() => (openPage("llm"), setUserMenu(false))}>🧠 我的 LLM 設定</button>
             <button onClick={() => (setChangingPassword(true), setUserMenu(false))}>🔑 修改密碼</button>
+            <div className="theme-pick" role="group" aria-label="介面風格">
+              <span className="muted">🎨 介面風格</span>
+              <div className="row">
+                {(["auto", "pixel", "soft"] as const).map((t) => (
+                  <button key={t} className={uiTheme === t ? "on" : ""} aria-pressed={uiTheme === t} onClick={() => setUiTheme(t)}>
+                    {THEME_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
             <button onClick={onLogout}>🚪 登出</button>
             <button className="danger-text" onClick={() => (setDeleting(true), setUserMenu(false))}>
               🗑 刪除我的帳號
