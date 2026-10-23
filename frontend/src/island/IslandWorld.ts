@@ -4,13 +4,15 @@
  * - 主島：像素地圖的 30×20 格對應到一座圓角六邊形的島；裝飾、池塘、小路的位置和像素版一樣
  * - 駐村專家住在外圍的小島，用木棧橋連到主島；交接時沿著橋走過來
  * - 名牌、冒泡、狀態用 HTML（CSS2DRenderer），文字清楚、不受 3D 縮放影響
- * - 村民的行為（閒晃、冒一句、兩人聊天、派工、交接、外出中）照像素版
+ * - 村民的行為（冒一句、兩人聊天、派工、交接、外出中）照像素版；閒著時照生活作息（village/life.ts）
+ *   走去井邊、池塘、樹下做事，派工時立刻中斷，做完再回去接著做
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import type { VillageEvent } from "../events";
 import { APPRAISER, CRAFTSMAN, DECOR, MAP_H, MAP_W, MAYOR, POND, REVIEWER, SCRIBE, type VillagerInfo } from "../village/VillageScene";
+import { nextActivity, periodOf, rolesOf, type Activity, type Pose, type SpotKind } from "../village/life";
 import * as M from "./models";
 
 const S = 0.9; // 像素地圖一格 = 0.9 單位
@@ -45,7 +47,21 @@ interface Islet {
   center: THREE.Vector3;
   gateIslet: THREE.Vector3; // 橋在小島這端
   gateIsland: THREE.Vector3; // 橋在主島這端
+  door: Spot; // 小屋門口（晚上在這裡打瞌睡）
+  desk: Spot; // 小島上做事的地方（駐村專家不到主島做生活上的事）
 }
+
+// ---------------------------------------------------------------- 生活作息的地點
+
+interface Spot {
+  kind: SpotKind;
+  pos: THREE.Vector3;
+  face: THREE.Vector3; // 做事時面向哪裡
+  taken: string | null; // 誰佔著
+}
+
+// 坐著做的事（坐下：身體往下、腳往前伸）
+const SITTING: Pose[] = ["sit", "fish", "write", "type", "eat", "sleep"];
 
 // ---------------------------------------------------------------- 日夜（依真實時間；分鐘）
 
@@ -67,7 +83,7 @@ const DAY: Key[] = [
 /** 預覽用的時段（網址 ?time=dawn|day|dusk|night 或 HH:MM） */
 export function parseTime(q: string | null): number | null {
   if (!q) return null;
-  const named: Record<string, number> = { dawn: 380, morning: 480, day: 720, noon: 720, dusk: 1100, evening: 1140, night: 1320 };
+  const named: Record<string, number> = { dawn: 380, morning: 480, day: 600, noon: 720, dusk: 1100, evening: 1140, night: 1320 };
   if (q in named) return named[q];
   const m = /^(\d{1,2}):(\d{2})$/.exec(q);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
@@ -137,6 +153,16 @@ class Villager3D {
   private speechTimer?: number;
   private statusTimer?: number;
   private appearT = -1;
+  // 生活作息
+  activity: Activity | null = null; // 正在做（或正要走去做）的事
+  private spot: Spot | null = null;
+  private pose: Pose | null = null; // 到了地點才擺姿勢
+  private propObj: THREE.Group | null = null;
+  private lastAct: string | null = null;
+  private resume: Activity | null = null; // 被派工打斷的事，做完回去接著做
+  private actEl: HTMLDivElement;
+  private actTimer?: number;
+  roles: string[] = [];
   busy = false;
   chatting = false;
   away = false;
@@ -167,10 +193,12 @@ class Villager3D {
     this.statusEl.className = "isl-status";
     this.carryEl = document.createElement("div");
     this.carryEl.className = "isl-carry";
+    this.actEl = document.createElement("div");
+    this.actEl.className = "isl-act";
     this.nameEl = document.createElement("div");
     this.nameEl.className = "isl-name";
     this.nameEl.textContent = name;
-    el.append(this.speechEl, this.statusEl, this.carryEl, this.nameEl);
+    el.append(this.speechEl, this.statusEl, this.carryEl, this.actEl, this.nameEl);
     this.tag = new CSS2DObject(el);
     this.tag.center.set(0.5, 1);
     this.tag.position.set(0, TAG_Y, 0);
@@ -180,6 +208,23 @@ class Villager3D {
 
   get idle(): boolean {
     return !this.busy && !this.chatting && !this.away;
+  }
+
+  /** 可以被找去聊天：閒著，而且沒在做事（或做的是可以聊天的事，例如在廣場喝茶） */
+  get chatty(): boolean {
+    return this.idle && (!this.activity || (!!this.activity.social && !!this.pose));
+  }
+
+  get sleeping(): boolean {
+    return this.pose === "sleep";
+  }
+
+  /** 做事時偶爾冒的一句（沒有就用名片的台詞） */
+  ambientLine(): string | null {
+    if (this.sleeping) return null;
+    const own = this.pose ? this.activity?.lines ?? [] : [];
+    if (own.length && (!this.lines.length || Math.random() < 0.6)) return pick(own);
+    return this.lines.length ? pick(this.lines) : null;
   }
 
   get pos(): THREE.Vector3 {
@@ -220,19 +265,188 @@ class Villager3D {
     } else {
       this.walkT = 0;
     }
-    const swing = this.path.length ? Math.sin(this.walkT) * 0.5 : 0;
-    this.model.legs[0].rotation.x = swing;
-    this.model.legs[1].rotation.x = -swing;
-    this.model.arms[0].rotation.x = -swing * 0.8;
-    this.model.arms[1].rotation.x = swing * 0.8;
-    this.model.root.children[0].position.y = this.path.length ? Math.abs(Math.sin(this.walkT)) * 0.06 : Math.sin(now / 600 + p.x) * 0.012;
+    if (this.path.length || !this.pose) {
+      const swing = this.path.length ? Math.sin(this.walkT) * 0.5 : 0;
+      this.setLimbs(swing, -swing, -swing * 0.8, swing * 0.8);
+      this.model.body.position.y = this.path.length ? Math.abs(Math.sin(this.walkT)) * 0.06 : Math.sin(now / 600 + p.x) * 0.012;
+      this.model.body.rotation.set(0, 0, 0);
+    } else {
+      this.animatePose(this.pose, now);
+    }
     if (this.appearT >= 0) {
       this.appearT = Math.min(1, this.appearT + dt * 1.6);
       const t = this.appearT;
       this.root.scale.setScalar(VILLAGER_SCALE * (t < 1 ? 1.15 * (1 - Math.pow(1 - t, 3)) : 1));
       if (t >= 1) this.appearT = -1;
     }
-    if (!this.busy && !this.chatting && !this.path.length && now >= this.wanderAt) this.wander(now);
+    if (!this.busy && !this.chatting && !this.path.length && now >= this.wanderAt) {
+      if (this.world.lifeOn && !this.away) this.live(now);
+      else this.wander(now);
+    }
+  }
+
+  private setLimbs(l0: number, l1: number, a0: number, a1: number) {
+    this.model.legs[0].rotation.x = l0;
+    this.model.legs[1].rotation.x = l1;
+    this.model.arms[0].rotation.x = a0;
+    this.model.arms[1].rotation.x = a1;
+  }
+
+  /** 做事的姿勢（每一幀）：手腳從關節轉，身體坐下 / 前傾 / 左右晃 */
+  private animatePose(pose: Pose, now: number) {
+    const b = this.model.body;
+    const t = now / 1000 + this.pos.x; // 每個人錯開一點
+    const sitting = SITTING.includes(pose) || (pose === "read" && this.spot?.kind === "tree");
+    const leg = sitting ? -1.45 : 0;
+    b.position.y = sitting ? -0.2 : 0;
+    b.rotation.set(0, 0, 0);
+    switch (pose) {
+      case "fish": {
+        const tug = Math.sin(t * 0.7) > 0.93 ? 0.25 : 0; // 偶爾有魚咬餌
+        this.setLimbs(leg, leg, -0.9 - tug, -0.9 - tug);
+        break;
+      }
+      case "write":
+        this.setLimbs(leg, leg, -0.7, -0.85 + Math.sin(t * 9) * 0.12);
+        b.rotation.x = 0.12;
+        break;
+      case "type":
+        this.setLimbs(leg, leg, -0.85 + Math.sin(t * 11) * 0.1, -0.85 - Math.sin(t * 11) * 0.1);
+        b.rotation.x = 0.08;
+        break;
+      case "read":
+        this.setLimbs(leg, leg, -1.0, -1.0);
+        b.rotation.x = 0.06 + Math.sin(t * 0.8) * 0.03;
+        break;
+      case "eat":
+        this.setLimbs(leg, leg, -0.3, -1.1 - Math.max(0, Math.sin(t * 2)) * 0.9);
+        break;
+      case "sleep":
+        this.setLimbs(leg, leg, 0, 0);
+        b.rotation.x = 0.28 + Math.sin(t * 0.9) * 0.05;
+        break;
+      case "sit":
+        this.setLimbs(leg, leg, -0.3, -0.3);
+        b.position.y += Math.sin(t * 1.4) * 0.008;
+        break;
+      case "hammer":
+        this.setLimbs(0, 0, -0.6, -0.9 - Math.max(0, Math.sin(t * 7)) * 1.3);
+        b.position.y = Math.abs(Math.sin(t * 7)) * 0.02;
+        break;
+      case "water":
+        this.setLimbs(0, 0, -0.3, -1.0);
+        b.rotation.x = 0.12;
+        break;
+      case "stretch":
+        this.setLimbs(0, 0, -2.9 + Math.sin(t * 2) * 0.2, -2.9 + Math.sin(t * 2) * 0.2);
+        b.position.y = Math.max(0, Math.sin(t * 2)) * 0.06;
+        break;
+      case "look":
+        this.setLimbs(0, 0, this.propObj ? -1.4 : 0, this.propObj ? -1.4 : 0.2);
+        b.rotation.y = Math.sin(t * 0.6) * 0.5;
+        break;
+      case "sweep":
+        this.setLimbs(0, 0, -0.6, -0.6);
+        b.rotation.y = Math.sin(t * 3.2) * 0.35;
+        break;
+      case "paint":
+        this.setLimbs(0, 0, -0.4, -1.2 + Math.sin(t * 4) * 0.15);
+        break;
+      case "dance": {
+        const s = Math.sin(t * 6);
+        this.setLimbs(s * 0.3, -s * 0.3, -2.2 + s * 0.6, -2.2 - s * 0.6);
+        b.position.y = Math.abs(Math.sin(t * 6)) * 0.1;
+        break;
+      }
+      default: // stand（喝茶時偶爾喝一口）
+        this.setLimbs(0, 0, 0, this.propObj ? -0.9 - Math.max(0, Math.sin(t * 0.9)) * 0.5 : 0);
+    }
+  }
+
+  // ---------------------------------------------------------------- 生活作息
+
+  /** 該換下一件事了：剛才被打斷的先接著做，不然照時段和角色挑一件（null = 隨便走走） */
+  private live(now: number) {
+    this.endActivity();
+    const period = periodOf(this.world.minutesNow());
+    let act = this.resume;
+    this.resume = null;
+    if (act && (period === "night") !== (act.id === "sleep")) act = null; // 天亮了就不回去睡、天黑了就不回去做事
+    act ??= nextActivity(this.roles, period, this.lastAct);
+    if (!act) return this.wander(now);
+    const spot = this.world.claimSpot(this, act.spot);
+    if (!spot) return this.wander(now);
+    this.activity = act;
+    this.spot = spot;
+    this.lastAct = act.id;
+    this.wanderAt = Infinity; // 到了才開始計時
+    this.goTo(spot.pos, () => {
+      if (this.activity !== act || this.busy) return;
+      this.faceTo(spot.face);
+      this.pose = act.pose;
+      if (act.prop) {
+        this.propObj = M.prop(act.prop);
+        this.model.body.add(this.propObj);
+      }
+      this.showAct(act.icon);
+      this.wanderAt = performance.now() + between(act.dur) * 1000;
+    });
+  }
+
+  /** 走過去（主島上會繞開池塘、房子；駐村專家在自己的小島上） */
+  private goTo(target: THREE.Vector3, onDone: () => void) {
+    if (this.islet) return this.walkTo(target, onDone, this.islet);
+    this.path = this.world.route(this.pos, target);
+    this.onArrive = onDone;
+  }
+
+  /** 收起道具、讓出地點 */
+  endActivity() {
+    if (this.wanderAt === Infinity) this.wanderAt = performance.now() + 1000; // 走到一半被打斷
+    if (this.propObj) M.disposeProp(this.propObj);
+    this.propObj = null;
+    this.pose = null;
+    this.activity = null;
+    this.world.releaseSpot(this.spot);
+    this.spot = null;
+    this.hideAct();
+  }
+
+  /** 被找去做別的事：記住剛才在做什麼，做完回去接著做；被叫醒的會說一聲 */
+  private interrupt(): boolean {
+    const wasSleeping = this.sleeping;
+    if (this.activity) this.resume = this.activity;
+    const had = !!this.activity;
+    this.endActivity();
+    if (had) this.flashAlert();
+    if (wasSleeping) this.say(pick(["來了來了！", "哈啊…我醒了", "誰叫我？"]), 1800);
+    return had;
+  }
+
+  private showAct(icon: string) {
+    window.clearTimeout(this.actTimer);
+    this.actEl.textContent = icon;
+    this.actEl.className = "isl-act show";
+  }
+
+  private hideAct() {
+    window.clearTimeout(this.actTimer);
+    this.actEl.className = "isl-act";
+  }
+
+  private flashAlert() {
+    this.actEl.textContent = "❗";
+    this.actEl.className = "isl-act show alert";
+    window.clearTimeout(this.actTimer);
+    this.actTimer = window.setTimeout(() => (this.actEl.className = "isl-act"), 900);
+  }
+
+  /** 時段改了、生活作息關掉：做到一半的事先收起來，馬上重挑 */
+  restartLife() {
+    if (!this.activity || this.busy || this.chatting) return;
+    this.endActivity();
+    this.stop();
+    this.wanderAt = performance.now() + Math.random() * 1500;
   }
 
   private turnTo(yaw: number, dt: number) {
@@ -285,7 +499,7 @@ class Villager3D {
   }
 
   greet(text: string) {
-    if (!this.busy && !this.chatting) {
+    if (!this.busy && !this.chatting && !this.pose) {
       this.stop();
       this.faceTo(this.world.cameraGround());
       this.wanderAt = performance.now() + 4000;
@@ -302,6 +516,7 @@ class Villager3D {
 
   startWork(kind: "working" | "thinking" = "working") {
     this.endChat();
+    this.interrupt();
     this.busy = true;
     this.stop();
     this.faceTo(this.world.cameraGround());
@@ -315,6 +530,8 @@ class Villager3D {
   }
 
   chatWith(other: Villager3D, script: [string, string, string?]) {
+    this.interrupt();
+    if (!other.pose || !other.activity?.social) other.interrupt(); // 在廣場喝茶的就邊喝邊聊
     this.chatting = other.chatting = true;
     other.stop();
     other.faceTo(this.pos);
@@ -359,6 +576,8 @@ class Villager3D {
   handoffTo(other: Villager3D, icon: string) {
     this.endChat();
     other.endChat();
+    this.interrupt();
+    other.interrupt();
     this.busy = true;
     this.carry(icon);
     const dir = new THREE.Vector3(this.pos.x - other.pos.x, 0, this.pos.z - other.pos.z);
@@ -371,7 +590,8 @@ class Villager3D {
       other.carry(icon, 2200); // 東西到了對方手上
       this.timers.push(window.setTimeout(() => {
         this.busy = false;
-        this.walkTo(this.world.wanderTarget(this.home, this.islet, this.home) ?? this.home.clone(), undefined, this.islet);
+        if (this.world.lifeOn) this.wanderAt = performance.now() + 300; // 回去接著做剛才的事
+        else this.walkTo(this.world.wanderTarget(this.home, this.islet, this.home) ?? this.home.clone(), undefined, this.islet);
       }, 800));
     }, other.islet);
   }
@@ -392,7 +612,11 @@ class Villager3D {
     }
     this.nameEl.textContent = away ? `${this.name}（外出中）` : this.name;
     this.nameEl.classList.toggle("away", away);
-    if (away) this.stop();
+    if (away) {
+      this.endActivity();
+      this.resume = null;
+      this.stop();
+    }
   }
 
   appear() {
@@ -402,6 +626,7 @@ class Villager3D {
   }
 
   dispose() {
+    this.endActivity();
     this.timers.forEach((t) => window.clearTimeout(t));
     window.clearTimeout(this.speechTimer);
     window.clearTimeout(this.statusTimer);
@@ -457,6 +682,8 @@ export class IslandWorld {
   private islets = new Map<string, Islet>(); // 駐村專家 id → 小島
   private isletGroups = new Map<string, THREE.Group>();
   private obstacles: Obstacle[] = [];
+  private spots: Spot[] = []; // 主島上做事的地點
+  lifeOn = true;
   private boats: THREE.Group[] = [];
   // 日夜
   private hemi!: THREE.HemisphereLight;
@@ -625,6 +852,8 @@ export class IslandWorld {
     this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.1, transparent: true, opacity: 0, fog: false }));
     s.add(this.stars);
 
+    this.buildSpots();
+
     // 遠方的山、海上的小船、天上的雲
     const hillColors = [0x7fae6a, 0x8db878, 0x9fbf86, 0x6f9e60];
     for (let i = 0; i < 16; i++) {
@@ -651,6 +880,104 @@ export class IslandWorld {
       this.clouds.push(cl);
       s.add(cl);
     }
+  }
+
+  /** 生活作息的地點：井邊、池塘邊、樹下、告示牌前、花圃、工作台、廣場、房子門口（位置跟著裝飾算） */
+  private buildSpots() {
+    const per = new Map<THREE.Vector3, number>(); // 每個東西旁邊最多幾個位子
+    const add = (kind: SpotKind, pos: THREE.Vector3, face: THREE.Vector3, anchor: THREE.Vector3, max: number) => {
+      if ((per.get(anchor) ?? 0) >= max) return;
+      if (!insideHex(pos, ISLAND_R, 1.8) || this.blocked(pos.x, pos.z)) return;
+      if (this.spots.some((x) => x.pos.distanceTo(pos) < 0.9)) return; // 不要擠在一起
+      this.spots.push({ kind, pos: pos.setY(0.18), face, taken: null });
+      per.set(anchor, (per.get(anchor) ?? 0) + 1);
+    };
+    const ring = (c: THREE.Vector3, rx: number, rz: number, n: number, start = 0) =>
+      Array.from({ length: n }, (_, i) => {
+        const a = start + (i / n) * Math.PI * 2;
+        return new THREE.Vector3(c.x + Math.cos(a) * rx, 0.18, c.z + Math.sin(a) * rz);
+      });
+    for (const d of DECOR) {
+      const p = toWorld(d.x, d.y - (d.kind.startsWith("house") ? 1.6 : 0.5));
+      const inward = Math.atan2(-p.z, -p.x); // 先試朝島中心那一側
+      if (d.kind === "tree" || d.kind === "pine") {
+        // 背靠樹幹坐著：面向外面
+        for (const q of ring(p, 1.0, 1.0, 6, inward)) add("tree", q, q.clone().multiplyScalar(2).sub(p), p, 1);
+      } else if (d.kind === "well") ring(p, 1.5, 1.5, 4, inward).forEach((q) => add("well", q, p.clone(), p, 3));
+      else if (d.kind === "sign") [0, -0.8, 0.8].forEach((dx) => add("sign", new THREE.Vector3(p.x + dx, 0, p.z + 1.0), p.clone(), p, 2));
+      else if (d.kind === "workbench") ring(p, 1.3, 1.0, 6, inward).forEach((q) => add("workbench", q, p.clone(), p, 2));
+      else if (d.kind === "flowers") ring(p, 0.75, 0.75, 4, inward).forEach((q) => add("flowers", q, p.clone(), p, 1));
+      else if (d.kind.startsWith("house")) [-0.9, 0, 0.9].forEach((dx) => add("house", new THREE.Vector3(p.x + dx, 0, p.z + 2.4), new THREE.Vector3(p.x + dx, 0, p.z + 6), p, 3));
+    }
+    const pc = toWorld((POND.x0 + POND.x1 + 1) / 2, (POND.y0 + POND.y1 + 1) / 2);
+    const pw = (POND.x1 - POND.x0 + 1) * S;
+    const pd = (POND.y1 - POND.y0 + 1) * S;
+    ring(pc, pw / 2 + 0.7, Math.max(pd / 2 + 0.7, 2.35), 10).forEach((q) => add("pond", q, pc.clone(), pc, 4));
+    const plaza = new THREE.Vector3(0, 0.18, -0.36);
+    ring(plaza, 1.6, 1.6, 6, 0.3).forEach((q) => add("plaza", q, plaza.clone(), plaza, 6));
+  }
+
+  /** 佔一個地點：挑離家近的（前三近隨機一個）；沒空位回 null。駐村專家用自己小島上的 */
+  claimSpot(v: Villager3D, kind: SpotKind): Spot | null {
+    let spot: Spot | null = null;
+    if (v.islet) spot = kind === "house" ? v.islet.door : v.islet.desk;
+    else {
+      const free = this.spots.filter((x) => x.kind === kind && (!x.taken || x.taken === v.id));
+      free.sort((a, b) => a.pos.distanceTo(v.home) - b.pos.distanceTo(v.home));
+      spot = free.length ? free[Math.floor(Math.random() * Math.min(3, free.length))] : null;
+      // 晚上門口坐滿了：靠在樹下打瞌睡，再不然在自己家附近
+      if (!spot && kind === "house") return this.claimSpot(v, "tree") ?? { kind, pos: v.home.clone(), face: this.cameraGround(), taken: v.id };
+    }
+    if (spot) spot.taken = v.id;
+    return spot;
+  }
+
+  releaseSpot(spot: Spot | null) {
+    if (spot) spot.taken = null;
+  }
+
+  /** 主島上的路線：直走會撞到東西就繞小路（十字路的路口），最多繞兩次 */
+  route(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] {
+    const clear = (a: THREE.Vector3, b: THREE.Vector3) => {
+      const n = Math.ceil(a.distanceTo(b) / 0.4);
+      for (let k = 1; k < n; k++) {
+        const q = a.clone().lerp(b, k / n);
+        if (this.blocked(q.x, q.z)) return false;
+      }
+      return true;
+    };
+    if (clear(from, to)) return [to.clone()];
+    const nodes = [[-0.36, -0.36], [-7, -0.36], [7, -0.36], [-13, -0.36], [13, -0.36], [-0.36, -6], [-0.36, 6]].map(([x, z]) => new THREE.Vector3(x, 0.18, z));
+    let best: THREE.Vector3[] | null = null;
+    let bestLen = Infinity;
+    const consider = (pts: THREE.Vector3[]) => {
+      let len = 0;
+      let prev = from;
+      for (const q of pts) {
+        if (!clear(prev, q)) return;
+        len += prev.distanceTo(q);
+        prev = q;
+      }
+      if (len < bestLen) {
+        bestLen = len;
+        best = pts;
+      }
+    };
+    for (const a of nodes) consider([a, to]);
+    if (!best) for (const a of nodes) for (const b of nodes) if (a !== b) consider([a, b, to]);
+    return (best ?? [to]).map((q) => q.clone());
+  }
+
+  /** 現在幾點（分鐘）：作息跟著天色（工具列選的時段也算） */
+  minutesNow(): number {
+    return this.minutes();
+  }
+
+  /** 生活作息開關：關掉就回到原本的隨便走走 */
+  setLife(on: boolean) {
+    if (on === this.lifeOn) return;
+    this.lifeOn = on;
+    this.villagers.forEach((v) => v.restartLife());
   }
 
   /** 駐村專家的小島：第一次需要時才建 */
@@ -690,7 +1017,10 @@ export class IslandWorld {
     this.scene.add(g);
     this.collectGlow(g);
     this.applyTime(this.minutes());
-    const islet = { center, gateIslet, gateIsland };
+    const toMain = center.clone().multiplyScalar(0.5); // 面向主島（也就是鏡頭這邊）
+    const door: Spot = { kind: "house", pos: dir.clone().multiplyScalar(ISLET_DIST + 0.3).setY(0.18), face: toMain, taken: null };
+    const desk: Spot = { kind: "tree", pos: new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(-1.1).add(center).setY(0.18), face: toMain, taken: null };
+    const islet = { center, gateIslet, gateIsland, door, desk };
     this.islets.set(id, islet);
     this.isletGroups.set(id, g);
     return islet;
@@ -718,8 +1048,10 @@ export class IslandWorld {
 
   /** 指定時間（分鐘，0～1439）；null = 跟著真實時間 */
   setTime(minutes: number | null) {
+    const before = periodOf(this.minutes());
     this.timeOverride = minutes === null ? null : ((minutes % 1440) + 1440) % 1440;
     this.applyTime(this.minutes());
+    if (periodOf(this.minutes()) !== before) this.villagers.forEach((v) => v.restartLife()); // 換時段：馬上照新的作息
   }
 
   private applyTime(min: number) {
@@ -861,6 +1193,7 @@ export class IslandWorld {
         existing.setAway(!!info.away);
         existing.lines = info.lines ?? [];
         existing.skill = info.skill ?? "";
+        existing.roles = rolesOf(info);
         continue;
       }
       this.looks.set(info.id, look(info));
@@ -869,6 +1202,7 @@ export class IslandWorld {
       const v = new Villager3D(this, info.id, info.name, info.sprite ?? "poet", home, islet, !!info.remote);
       v.lines = info.lines ?? [];
       v.skill = info.skill ?? "";
+      v.roles = rolesOf(info);
       this.villagers.set(info.id, v);
       this.scene.add(v.root);
       if (animate && !info.away) v.appear();
@@ -1000,15 +1334,16 @@ export class IslandWorld {
     const all = [...this.villagers.values()];
     if (now >= this.nextAmbient) {
       this.nextAmbient = now + between(AMBIENT_MS);
-      const free = all.filter((v) => v.idle && !v.speaking && v.lines.length);
+      const free = all.filter((v) => v.idle && !v.speaking && !v.sleeping);
       if (free.length && all.filter((v) => v.speaking).length < MAX_SPEAKING) {
         const v = pick(free);
-        v.say(pick(v.lines));
+        const line = v.ambientLine();
+        if (line) v.say(line);
       }
     }
     if (now >= this.nextChat) {
       this.nextChat = now + between(CHAT_MS);
-      const free = all.filter((v) => v.idle && !v.speaking);
+      const free = all.filter((v) => v.chatty && !v.speaking);
       const a = free.length > 1 ? pick(free) : undefined;
       const near = a ? free.filter((v) => v !== a && v.pos.distanceTo(a.pos) < CHAT_RANGE) : [];
       if (a && near.length) {

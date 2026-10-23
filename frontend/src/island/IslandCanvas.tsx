@@ -76,7 +76,8 @@ const IslandCanvas = forwardRef<VillageHandle, Props>(function IslandCanvas({ vi
     if (!w) return;
     w.setTime(urlTime.current ?? (prefs.time === "auto" ? null : TIME_MINUTES[prefs.time]));
     w.setFlowsVisible(prefs.flows);
-  }, [prefs.time, prefs.flows]);
+    w.setLife(prefs.life);
+  }, [prefs.time, prefs.flows, prefs.life]);
   useEffect(() => world.current?.setPaused(paused), [paused]);
   useEffect(() => {
     if (skipBird.current) {
@@ -86,7 +87,7 @@ const IslandCanvas = forwardRef<VillageHandle, Props>(function IslandCanvas({ vi
     world.current?.setBirdView(bird);
   }, [bird]);
 
-  const cls = ["island-canvas", prefs.names ? "" : "hide-names", prefs.carry ? "" : "hide-carry", paused ? "paused" : ""].join(" ");
+  const cls = ["island-canvas", prefs.names ? "" : "hide-names", prefs.carry ? "" : "hide-carry", prefs.life ? "" : "hide-life", paused ? "paused" : ""].join(" ");
   return (
     <div className={cls}>
       <div className="island-stage" ref={host} />

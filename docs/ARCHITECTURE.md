@@ -367,13 +367,23 @@ App 依帳號選單的「介面風格」（localStorage `ui-theme`：跟著地�
 - 主島：圓角六邊形；像素地圖的 30×20 格對應到島上（`toWorld`，一格 0.9 單位），裝飾、池塘、小路的位置和像素版一樣。
 - 駐村專家住在外圍小島，用木棧橋連到主島（`isletFor`）；交接時沿橋走（`walkTo` 自動加上兩端的橋頭）。
 - Q 版村民的造型依像素外觀（sprite id）：衣服顏色同 `gen_placeholder_sprites.py`，再加配件（王冠、貝雷帽、耳機…）。
-- 名牌、冒泡、狀態用 HTML（CSS2DRenderer，`.isl-*` 樣式）；村民行為（閒晃、冒一句、聊天、派工、交接、外出中）照像素版。
+- 名牌、冒泡、狀態用 HTML（CSS2DRenderer，`.isl-*` 樣式）；村民行為（冒一句、聊天、派工、交接、外出中）照像素版。
+- 生活作息（使用者提議「看起來像在過生活，需要時才停下來」）：「做什麼」在 `village/life.ts`（不依賴畫法，像素版之後共用）——
+  活動表 `ACTIVITIES`（圖示、地點種類、姿勢、道具、時間、能不能邊做邊聊、台詞）、`rolesOf`（名字 / 技能的關鍵字優先，
+  再看外觀：畫家寫生、工匠敲打、計算機打算盤、報社看報、網路研究員拿望遠鏡…）、`periodOf` / `nextActivity`
+  （平常約六成做拿手的事、兩成五散步、一成五釣魚 / 澆花 / 打水這類共同的事；清晨伸懶腰、中午吃飯、傍晚廣場喝茶各一半；
+  22:00～5:30 回家睡覺）。「在哪裡、怎麼做」在 `IslandWorld`：`buildSpots` 依裝飾算出地點（井邊、池塘邊、樹下、告示牌前、
+  花圃、工作台、廣場、房子門口，各有位子上限，`claimSpot` / `releaseSpot`），`route` 直走會撞到東西就繞十字路口；
+  駐村專家只在自己小島上（`Islet.desk` / `door`）。村民模型的手腳掛在肩 / 髖關節（`Chibi.arms` / `legs` 是 Group），
+  `animatePose` 每幀擺姿勢（坐下、釣魚、寫字、敲打、伸懶腰、打瞌睡…），道具 `models.prop`。
+  派工、交接、被找去聊天時 `interrupt`：收起道具、頭上閃 ❗（睡著的會說「來了來了！」），做完回去接著做（`resume`；
+  天亮了不回去睡）。在廣場喝茶這類 `social` 的事可以邊做邊聊；換時段時（工具列）大家馬上照新的作息。工具列「🏡 生活」可關掉（回到隨便走走）。
 - 日夜：`DAY` 關鍵影格（天空、太陽 / 月光、天地光、海色、夜晚程度）依真實時間每 20 秒內插；夜晚窗戶與路燈的發光材質
   （材質名 `window` / `lamp`）和路燈點光源一起亮、星星浮現。網址 `?time=night`（或 `dawn`、`day`、`dusk`、`HH:MM`）可預覽。
 - 搬運圖示：`agent.finished` 有附件就照附件（🖼️ 圖、📊 圖表、📄 PDF、📝 檔案），否則照外觀（`CARRY_BY_SPRITE`），
   駐村專家是 📦；別人的問答事件只有動畫欄位（`for_viewer`），一律照外觀。交接時頭上拿著，到了換到對方手上。
 - 協作線：`agent.handoff` 時在兩人之間畫弧線（TubeGeometry）＋流動光點；那次問答結束 5 秒後淡出（別人的問答沒有 run_id：20 秒）。
-- 介面層（`island/IslandHud.tsx`）：膠囊工具列（時段、名牌、搬運、協作線、暫停、鳥瞰、日誌；`island-prefs`，網址 `?time=` 優先）
+- 介面層（`island/IslandHud.tsx`）：膠囊工具列（時段、名牌、搬運、協作線、生活、暫停、鳥瞰、日誌；`island-prefs`，網址 `?time=` 優先）
   與「村莊日誌 LIVE」（`describe` 把事件寫成一句話，最多 120 筆；點一下 `IslandWorld.focus` 鏡頭飛過去）。
   名牌 / 搬運用外層 class 隱藏（`.hide-names`、`.hide-carry`）；暫停只停動畫，鏡頭照樣能轉。
 - 拖曳旋轉、滾輪縮放（OrbitControls，限制角度與範圍）；點村民用 raycast（拖曳超過 5px 不算點擊）。開發模式 `window.__island`。
@@ -543,9 +553,9 @@ multi-agent-village/
 │   └── src/
 │       ├── App.tsx              # 登入閘門、滿版村子、⚙️ 選單、抽屜、💬 問答視窗
 │       ├── auth/                # 登入頁（示範村落劇本 demo.ts）
-│       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色、冒泡與村民互動、點村民）
+│       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色、冒泡與村民互動、點村民）；life.ts 生活作息（兩版共用）
 │       ├── island/              # 島嶼版地圖（Three.js，切到島嶼才載入）：IslandCanvas（介面同 VillageCanvas）、
-│       │                        # IslandWorld（場景、鏡頭、村民行為、事件）、models（程式組的低多邊形模型與 Q 版村民）
+│       │                        # IslandWorld（場景、鏡頭、村民行為與生活作息的地點 / 姿勢、事件）、models（程式組的低多邊形模型、Q 版村民、小道具）
 │       ├── chat/                # 問答面板、事件 reducer、附圖前處理、附文件（docs.ts）、@ 自動完成（mention.ts）
 │       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定

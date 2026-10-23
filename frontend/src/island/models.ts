@@ -354,8 +354,9 @@ export const LOOKS: Record<string, Look> = {
 
 export interface Chibi {
   root: THREE.Group;
-  legs: THREE.Mesh[];
-  arms: THREE.Mesh[];
+  body: THREE.Group; // 整個身體（坐下時往下移、打瞌睡時往前傾）
+  legs: THREE.Group[]; // 髖關節
+  arms: THREE.Group[]; // 肩關節
   materials: THREE.MeshStandardMaterial[];
 }
 
@@ -371,17 +372,22 @@ export function chibi(sprite: string): Chibi {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
+  // 手腳掛在關節（髖、肩）上，坐下、舉手時才會從關節轉
   const legs = [-0.12, 0.12].map((x) => {
-    const leg = mesh(new RoundedBoxGeometry(0.15, 0.26, 0.16, 2, 0.05), m(look.cloth2), x, 0.13, 0);
-    body.add(leg);
-    return leg;
+    const hip = new THREE.Group();
+    hip.position.set(x, 0.26, 0);
+    hip.add(mesh(new RoundedBoxGeometry(0.15, 0.26, 0.16, 2, 0.05), m(look.cloth2), 0, -0.13, 0));
+    body.add(hip);
+    return hip;
   });
   body.add(mesh(new RoundedBoxGeometry(0.52, 0.48, 0.38, 3, 0.14), m(look.cloth), 0, 0.5, 0));
   const arms = [-1, 1].map((s) => {
-    const arm = mesh(new THREE.CapsuleGeometry(0.07, 0.22, 3, 6), m(look.cloth), s * 0.32, 0.52, 0);
-    arm.rotation.z = s * 0.25;
-    body.add(arm);
-    return arm;
+    const shoulder = new THREE.Group();
+    shoulder.position.set(s * 0.29, 0.66, 0);
+    shoulder.rotation.z = s * 0.25;
+    shoulder.add(mesh(new THREE.CapsuleGeometry(0.07, 0.22, 3, 6), m(look.cloth), 0, -0.14, 0));
+    body.add(shoulder);
+    return shoulder;
   });
   body.add(mesh(new THREE.SphereGeometry(0.34, 16, 12), m(SKIN), 0, 0.98, 0)); // 頭
   const hair = mesh(new THREE.SphereGeometry(0.36, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2.1), m(look.hair), 0, 1.0, -0.03);
@@ -390,5 +396,82 @@ export function chibi(sprite: string): Chibi {
   [-0.11, 0.11].forEach((x) => body.add(mesh(new THREE.SphereGeometry(0.04, 8, 6), m(0x2a2028), x, 0.96, 0.31))); // 眼睛
   [-0.19, 0.19].forEach((x) => body.add(mesh(new THREE.SphereGeometry(0.045, 8, 6), m(0xf0a0a0), x, 0.88, 0.27))); // 腮紅
   look.acc?.(body, m);
-  return { root, legs, arms, materials };
+  return { root, body, legs, arms, materials };
+}
+
+// ---------------------------------------------------------------- 生活用的小道具（掛在村民身上，村民自己的座標，面向 +z）
+
+/** 做事時拿的東西；easel 這類放在地上的也掛在村民身上（跟著村民走，收起來時一起拿掉） */
+export function prop(kind: string): THREE.Group {
+  const g = new THREE.Group();
+  const add = (geo: THREE.BufferGeometry, color: number, x: number, y: number, z: number) => {
+    const p = mesh(geo, mat(color, 0.7), x, y, z);
+    g.add(p);
+    return p;
+  };
+  switch (kind) {
+    case "rod": {
+      const r = add(new THREE.CylinderGeometry(0.018, 0.025, 1.5, 5), 0x7a4e2e, 0.22, 0.75, 0.6);
+      r.rotation.x = 1.05;
+      add(new THREE.CylinderGeometry(0.004, 0.004, 0.75, 3), 0xeeeeee, 0.22, 0.75, 1.27); // 釣線
+      add(new THREE.SphereGeometry(0.05, 6, 4), 0xd0563f, 0.22, 0.38, 1.27); // 浮標
+      break;
+    }
+    case "book":
+      add(new THREE.BoxGeometry(0.34, 0.24, 0.05), 0x8a3a2a, 0, 0.62, 0.34).rotation.x = -0.5;
+      add(new THREE.BoxGeometry(0.32, 0.22, 0.02), 0xf6efe0, 0, 0.64, 0.36).rotation.x = -0.5;
+      break;
+    case "notebook":
+      add(new THREE.BoxGeometry(0.3, 0.02, 0.22), 0xf6efe0, -0.03, 0.42, 0.32);
+      add(new THREE.CylinderGeometry(0.012, 0.012, 0.2, 4), 0x2a2028, 0.12, 0.48, 0.32).rotation.z = 0.8;
+      break;
+    case "paper":
+      add(new THREE.BoxGeometry(0.36, 0.28, 0.015), 0xf3ead3, 0, 0.66, 0.36).rotation.x = -0.35;
+      break;
+    case "scroll":
+      add(new THREE.BoxGeometry(0.42, 0.26, 0.01), 0xf1e6c8, 0, 0.64, 0.36).rotation.x = -0.4;
+      [-1, 1].forEach((s) => (add(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 6), 0x8a5a2a, s * 0.22, 0.64, 0.36).rotation.x = -0.4));
+      break;
+    case "can":
+      add(new THREE.CylinderGeometry(0.1, 0.12, 0.18, 8), 0x3a8fd0, 0.3, 0.42, 0.32);
+      add(new THREE.CylinderGeometry(0.015, 0.025, 0.22, 4), 0x3a8fd0, 0.3, 0.46, 0.48).rotation.x = 1.0;
+      break;
+    case "riceball":
+      add(new THREE.ConeGeometry(0.1, 0.14, 3), 0xffffff, 0.2, 0.68, 0.26);
+      add(new THREE.BoxGeometry(0.1, 0.05, 0.02), 0x1e2a1e, 0.2, 0.63, 0.31);
+      break;
+    case "broom": {
+      const b = add(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 5), 0x9a6a3a, 0.24, 0.45, 0.3);
+      b.rotation.x = 0.4;
+      add(new THREE.ConeGeometry(0.12, 0.22, 6), 0xd8b45a, 0.24, 0.06, 0.46);
+      break;
+    }
+    case "telescope": {
+      const t = add(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 8), 0xc89a3a, 0.08, 1.0, 0.42);
+      t.rotation.x = 1.25;
+      break;
+    }
+    case "easel": {
+      [-1, 1].forEach((s) => (add(new THREE.CylinderGeometry(0.02, 0.02, 0.95, 4), 0x8a5a2a, s * 0.2, 0.45, 0.62).rotation.z = s * 0.12));
+      add(new THREE.BoxGeometry(0.5, 0.42, 0.03), 0xffffff, 0, 0.72, 0.6);
+      add(new THREE.BoxGeometry(0.16, 0.12, 0.01), 0xe8643c, -0.08, 0.76, 0.58);
+      add(new THREE.BoxGeometry(0.14, 0.1, 0.01), 0x3a8fd0, 0.1, 0.66, 0.58);
+      break;
+    }
+    case "cup":
+      add(new THREE.CylinderGeometry(0.06, 0.05, 0.1, 8), 0xffffff, 0.24, 0.5, 0.22);
+      break;
+    case "abacus":
+      add(new THREE.BoxGeometry(0.4, 0.03, 0.22), 0x7a4e2e, 0, 0.42, 0.34);
+      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(0.34, 0.03, 0.03), 0xd0563f, 0, 0.45, 0.26 + i * 0.05);
+      break;
+  }
+  return g;
+}
+
+export function disposeProp(g: THREE.Object3D) {
+  g.removeFromParent();
+  g.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.geometry.dispose(); // 材質是共用的，不釋放
+  });
 }

@@ -1,22 +1,23 @@
 /**
- * 島嶼版的介面層：膠囊工具列（時段、名牌、搬運、協作線、暫停、鳥瞰、日誌）與「村莊日誌 LIVE」。
+ * 島嶼版的介面層：膠囊工具列（時段、名牌、搬運、協作線、生活、暫停、鳥瞰、日誌）與「村莊日誌 LIVE」。
  * 開關記在 localStorage（island-prefs）；網址 ?time= 會蓋過記住的時段。
  */
 import { useEffect, useState } from "react";
 import type { VillageEvent } from "../events";
 
 export type TimeChoice = "auto" | "dawn" | "day" | "dusk" | "night";
-export const TIME_MINUTES: Record<Exclude<TimeChoice, "auto">, number> = { dawn: 380, day: 720, dusk: 1100, night: 1320 };
+export const TIME_MINUTES: Record<Exclude<TimeChoice, "auto">, number> = { dawn: 380, day: 600, dusk: 1100, night: 1320 };
 
 export interface Prefs {
   time: TimeChoice;
   names: boolean;
   carry: boolean;
   flows: boolean;
+  life: boolean;
   log: boolean;
 }
 
-const DEFAULT_PREFS: Prefs = { time: "auto", names: true, carry: true, flows: true, log: false };
+const DEFAULT_PREFS: Prefs = { time: "auto", names: true, carry: true, flows: true, life: true, log: false };
 
 export function loadPrefs(): Prefs {
   try {
@@ -125,7 +126,7 @@ const TIMES: [TimeChoice, string, string][] = [
 ];
 
 export function IslandHud({ prefs, setPrefs, paused, setPaused, bird, setBird, log, onFocus, onClearLog }: HudProps) {
-  const toggle = (k: "names" | "carry" | "flows" | "log") => setPrefs({ ...prefs, [k]: !prefs[k] });
+  const toggle = (k: "names" | "carry" | "flows" | "life" | "log") => setPrefs({ ...prefs, [k]: !prefs[k] });
   const [fresh, setFresh] = useState(false); // 日誌收著時有新事件 → 按鈕上的小點
   useEffect(() => {
     if (!prefs.log && log.length) setFresh(true);
@@ -157,6 +158,10 @@ export function IslandHud({ prefs, setPrefs, paused, setPaused, bird, setBird, l
           <button className={prefs.flows ? "on" : ""} aria-pressed={prefs.flows} onClick={() => toggle("flows")} title="交接的路線">
             <span className="ico">〰️</span>
             <span className="lbl">協作線</span>
+          </button>
+          <button className={prefs.life ? "on" : ""} aria-pressed={prefs.life} onClick={() => toggle("life")} title="生活作息：閒著的村民去釣魚、看書、打水，晚上回家睡覺（關掉就只是隨便走走）">
+            <span className="ico">🏡</span>
+            <span className="lbl">生活</span>
           </button>
           <button className={paused ? "on" : ""} aria-pressed={paused} onClick={() => setPaused(!paused)} title="暫停動畫（鏡頭照樣可以轉）">
             <span className="ico">{paused ? "▶️" : "⏸️"}</span>

@@ -1961,6 +1961,32 @@ button.mention-item .clamp {
   animation: isl-pulse 1.4s ease-out;
 }
 
+/* 生活作息：頭上的小圖示（在做什麼） */
+.isl-act {
+  display: none;
+  padding: 1px 5px;
+  font-size: 14px;
+  line-height: 1.15;
+  background: rgba(255, 253, 246, 0.85);
+  border-radius: 9px;
+  box-shadow: 0 1px 4px rgba(30, 40, 50, 0.22);
+}
+
+.isl-act.show {
+  display: block;
+  animation: isl-pop 0.25s ease-out;
+}
+
+.isl-act.alert {
+  font-size: 17px;
+  background: #fff4e8;
+  animation: isl-pop 0.2s ease-out, isl-bob 0.45s ease-in-out 0.2s infinite;
+}
+
+.island-canvas.hide-life .isl-act:not(.alert) {
+  display: none !important;
+}
+
 @keyframes isl-pulse {
   0%,
   60% {
