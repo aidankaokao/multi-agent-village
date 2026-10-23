@@ -16,7 +16,8 @@ import type { VillagerInfo } from "./village/VillageScene";
 
 // 島嶼版地圖（Three.js）：切到島嶼才下載，用像素村的人不受影響
 const IslandCanvas = lazy(() => import("./island/IslandCanvas"));
-type MapView = "pixel" | "island";
+const RailCanvas = lazy(() => import("./rail/RailCanvas"));
+type MapView = "pixel" | "island" | "rail";
 
 // 介面風格：預設柔和，帳號選單可以換回像素；登入頁一律像素
 type UiTheme = "pixel" | "soft";
@@ -39,10 +40,11 @@ function hasWebGL(): boolean {
   }
 }
 
-/** 地圖：島嶼（3D）；畫不了 3D 時自動退回像素村。網址 ?view=pixel 可以強制看像素村（測試用） */
+/** 地圖：島嶼（3D）；畫不了 3D 時自動退回像素村。網址 ?view=pixel 強制看像素村（測試用）、?view=rail 預覽鐵道小鎮 */
 function initialView(): MapView {
-  if (new URLSearchParams(location.search).get("view") === "pixel") return "pixel";
-  return hasWebGL() ? "island" : "pixel";
+  const q = new URLSearchParams(location.search).get("view");
+  if (q === "pixel" || !hasWebGL()) return "pixel";
+  return q === "rail" ? "rail" : "island";
 }
 
 type Page = "villagers" | "traces" | "memories" | "rules" | "accounts" | "llm";
@@ -307,6 +309,10 @@ function VillageApp({
         {view === "island" ? (
           <Suspense fallback={<div className="island-loading">🏝️ 島嶼載入中…</div>}>
             <IslandCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
+          </Suspense>
+        ) : view === "rail" ? (
+          <Suspense fallback={<div className="island-loading">🚂 小鎮載入中…</div>}>
+            <RailCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
           </Suspense>
         ) : (
           <VillageCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />

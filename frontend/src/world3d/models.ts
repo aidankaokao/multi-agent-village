@@ -18,7 +18,7 @@ export function mat(color: number | string, rough = 0.85): THREE.MeshStandardMat
   return m;
 }
 
-function mesh(geo: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
+export function mesh(geo: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
   const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z);
   m.castShadow = true;

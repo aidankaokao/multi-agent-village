@@ -148,8 +148,10 @@ export interface Terrain {
   inside(p: THREE.Vector3, margin: number): boolean;
   /** 繞路用的路口（直走會撞到東西時，經過這些點） */
   routeNodes: THREE.Vector3[];
-  /** 第 index 位駐村專家住的地方（第一次需要時才蓋） */
-  outpost(index: number, ctx: BuildCtx): { outpost: Outpost; group: THREE.Group };
+  /** 第 index 位駐村專家住的地方（第一次需要時才蓋；who 用來挑樣式） */
+  outpost(index: number, ctx: BuildCtx, who: { id: string; name: string; skill?: string }): { outpost: Outpost; group: THREE.Group };
+  /** 駐村專家外出中（窗戶、路燈由 World3D 熄掉；場景可以再加別的，例如「暫停營業」看板） */
+  outpostAway?(group: THREE.Group, away: boolean): void;
   /** 依時間換顏色（DAY 的「海水」那一欄） */
   tint(water: THREE.Color, night: number): void;
   /** 每一幀（船、雲） */

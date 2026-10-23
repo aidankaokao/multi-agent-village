@@ -1850,6 +1850,20 @@ button.mention-item .clamp {
   white-space: nowrap;
 }
 
+/* 鐵道小鎮：外出中的小站 */
+.isl-closed {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a2421f;
+  background: #fdf0e8;
+  border: 1px solid #f0c8b4;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(30, 40, 50, 0.25);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .isl-name.away {
   opacity: 0.65;
 }

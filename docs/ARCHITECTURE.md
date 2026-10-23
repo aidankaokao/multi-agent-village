@@ -365,7 +365,9 @@ App 依帳號選單的「介面風格」（localStorage `ui-theme`：柔和（�
 閒聊、生活作息的佔位與繞路、點村民）、`Villager3D`（一位村民：走路、派工、交接、姿勢與道具）、`WorldCanvas` 與 `Hud`
 （工具列、村莊日誌）、`town.ts`（村子本身：十字路、裝飾、池塘、路燈、生活作息的地點）、`models.ts`；場景只要實作
 `common.ts` 的 `Terrain`（地形、範圍 `inside`、繞路的路口、駐村專家住的地方 `outpost` → `Outpost{center, radius, gates, door, desk}`、
-依時間換顏色 `tint`、每幀 `update`、鏡頭設定 `view`）。島嶼是 `island/IslandTerrain.ts`（海、六邊形主島、外圍小島與木棧橋、船、雲）。使用者決定只留島嶼（2026-10-23）：登入後一律島嶼，
+依時間換顏色 `tint`、每幀 `update`、鏡頭設定 `view`）。島嶼是 `island/IslandTerrain.ts`（海、六邊形主島、外圍小島與木棧橋、船、雲）；鐵道小鎮是 `rail/RailTerrain.ts`
+（環狀鐵道、主車站與倉庫＝中轉站、專家的主題小站、田野；網址 `?view=rail` 預覽，見 ROADMAP 第 8 項）。
+駐村專家外出中時 World3D 熄掉那裡的窗戶與燈（發光材質 `userData.off`），場景可再加東西（鐵道小鎮：「暫停營業」標籤）。使用者決定只留島嶼（2026-10-23）：登入後一律島嶼，
 沒有切換按鈕；瀏覽器畫不了 3D（`hasWebGL()` 失敗）時自動用像素村，網址 `?view=pixel` 可強制看像素村（測試用）。
 像素版程式還在（登入頁示範村落也還用它），等登入頁改成島嶼版、使用者用一陣子沒問題後再刪（含 Phaser）。
 
@@ -563,6 +565,7 @@ multi-agent-village/
 │       ├── world3d/             # 3D 地圖共用（Three.js，lazy 載入）：World3D（鏡頭、日夜、事件、協作線、生活作息）、Villager3D、
 │       │                        # WorldCanvas＋Hud（工具列、日誌）、town（村子與作息地點）、models（低多邊形模型、Q 版村民、小道具）、common（Terrain 介面）
 │       ├── island/              # 島嶼場景：IslandTerrain（海、主島、外圍小島與木棧橋）、IslandCanvas（介面同 VillageCanvas）
+│       ├── rail/                # 鐵道小鎮場景（?view=rail 預覽）：RailTerrain、models（鐵道、車站、倉庫、火車、平交道、田）
 │       ├── chat/                # 問答面板、事件 reducer、附圖前處理、附文件（docs.ts）、@ 自動完成（mention.ts）
 │       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定

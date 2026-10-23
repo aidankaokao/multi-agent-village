@@ -10,7 +10,7 @@
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
+import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import type { VillageEvent } from "../events";
 import { APPRAISER, CRAFTSMAN, MAP_H, MAP_W, MAYOR, REVIEWER, SCRIBE, type VillagerInfo } from "../village/VillageScene";
 import { periodOf, rolesOf, type SpotKind } from "../village/life";
@@ -275,18 +275,44 @@ export class World3D {
   }
 
   /** 駐村專家住的地方：第一次需要時才蓋（用最前面還空著的位置） */
-  private outpostFor(id: string): Outpost {
-    const existing = this.outposts.get(id);
+  private outpostFor(info: WorldVillager): Outpost {
+    const existing = this.outposts.get(info.id);
     if (existing) return existing.outpost;
     const used = new Set([...this.outposts.values()].map((x) => x.slot));
     let slot = 0;
     while (used.has(slot)) slot++;
-    const { outpost, group } = this.terrain.outpost(slot, this.ctx);
+    const { outpost, group } = this.terrain.outpost(slot, this.ctx, { id: info.id, name: info.name, skill: info.skill });
     this.scene.add(group);
     this.collectGlow(group);
     this.applyTime(this.minutes());
-    this.outposts.set(id, { outpost, group, slot });
+    this.outposts.set(info.id, { outpost, group, slot });
     return outpost;
+  }
+
+  private removeOutpost(id: string) {
+    const o = this.outposts.get(id);
+    if (!o) return;
+    o.group.removeFromParent();
+    const mats = new Set<THREE.Material>();
+    o.group.traverse((x) => {
+      if (x instanceof THREE.Mesh) mats.add(x.material as THREE.Material);
+      if (x instanceof CSS2DObject) x.element.remove(); // HTML 標籤不會跟著拿掉
+    });
+    this.glowMats = this.glowMats.filter((g) => !mats.has(g.mat));
+    this.outposts.delete(id);
+  }
+
+  /** 駐村專家外出中：那裡的窗戶、燈不亮（場景可以再加看板） */
+  private setOutpostAway(id: string, away: boolean) {
+    const o = this.outposts.get(id);
+    if (!o || o.group.userData.away === away) return;
+    o.group.userData.away = away;
+    o.group.traverse((x) => {
+      const m = x instanceof THREE.Mesh ? (x.material as THREE.Material) : null;
+      if (m && (m.name === "window" || m.name === "lamp")) m.userData.off = away;
+    });
+    this.terrain.outpostAway?.(o.group, away);
+    this.applyTime(this.minutes());
   }
 
   // ---------------------------------------------------------------- 日夜
@@ -338,7 +364,7 @@ export class World3D {
     // 太陽（晚上是月光）繞著島轉：早上從東邊（+x）升起
     const ang = ((min - 360) / 1440) * Math.PI * 2;
     this.sun.position.set(Math.cos(ang) * 36, 18 + Math.abs(Math.sin(ang)) * 22, 18 + Math.sin(ang) * 10);
-    for (const g of this.glowMats) g.mat.emissiveIntensity = this.night * g.k;
+    for (const g of this.glowMats) g.mat.emissiveIntensity = g.mat.userData.off ? 0 : this.night * g.k;
     for (const l of this.lampLights) l.intensity = this.night * 7;
     (this.stars.material as THREE.PointsMaterial).opacity = Math.max(0, this.night - 0.3) * 1.4;
     this.renderer.toneMappingExposure = 1.05 + this.night * 0.25;
@@ -444,23 +470,21 @@ export class World3D {
         this.villagers.delete(id);
       }
     }
-    for (const [id, o] of this.outposts) {
-      if (!wanted.get(id)?.remote) {
-        o.group.removeFromParent();
-        this.outposts.delete(id);
-      }
+    for (const id of [...this.outposts.keys()]) {
+      if (!wanted.get(id)?.remote || !this.villagers.has(id)) this.removeOutpost(id); // 改了名字：重蓋（樣式可能不同）
     }
     for (const info of wanted.values()) {
       const existing = this.villagers.get(info.id);
       if (existing) {
         existing.setAway(!!info.away);
+        this.setOutpostAway(info.id, !!info.away);
         existing.lines = info.lines ?? [];
         existing.skill = info.skill ?? "";
         existing.roles = rolesOf(info);
         continue;
       }
       this.looks.set(info.id, look(info));
-      const outpost = info.remote ? this.outpostFor(info.id) : null;
+      const outpost = info.remote ? this.outpostFor(info) : null;
       const home = outpost ? outpost.center.clone() : this.homeOf(info);
       const v = new Villager3D(this, info.id, info.name, info.sprite ?? "poet", home, outpost, !!info.remote);
       v.lines = info.lines ?? [];
@@ -470,6 +494,7 @@ export class World3D {
       this.scene.add(v.root);
       if (animate && !info.away) v.appear();
       v.setAway(!!info.away);
+      this.setOutpostAway(info.id, !!info.away);
     }
   }
 
