@@ -349,6 +349,19 @@ class BaseAgent(Protocol):
   工具 `context()` 告訴畫家有沒有參考圖與寬高（`imagefmt.dimensions`），畫家用 `use_reference` 決定是否以它為底；
   送出時 `input_references` = data URL。模型回 400（不收參考圖）時改成只依描述重畫並在結果註明。
 
+#### 島嶼版地圖（和像素村二選一）
+
+地圖和其他部分只靠一個小介面溝通（`VillageHandle`：`dispatch(事件)`、`say(id, 話)`；props：村民名單、點了誰），
+所以另外寫了 3D 版 `island/IslandCanvas.tsx`，介面一模一樣；App 依 `view`（網址 `?view=island|pixel` → localStorage `map-view`）
+選用哪一個，畫面上方中央的膠囊切換。像素版的程式不動（`VillagerInfo` 只多了選填的 `remote`）。
+
+- Three.js（`React.lazy`）切到島嶼才下載（壓縮後約 157KB）；不用模型檔或貼圖，全部用方塊、圓柱、圓球組成（`island/models.ts`）。
+- 主島：圓角六邊形；像素地圖的 30×20 格對應到島上（`toWorld`，一格 0.9 單位），裝飾、池塘、小路的位置和像素版一樣。
+- 駐村專家住在外圍小島，用木棧橋連到主島（`isletFor`）；交接時沿橋走（`walkTo` 自動加上兩端的橋頭）。
+- Q 版村民的造型依像素外觀（sprite id）：衣服顏色同 `gen_placeholder_sprites.py`，再加配件（王冠、貝雷帽、耳機…）。
+- 名牌、冒泡、狀態用 HTML（CSS2DRenderer，`.isl-*` 樣式）；村民行為（閒晃、冒一句、聊天、派工、交接、外出中）照像素版。
+- 拖曳旋轉、滾輪縮放（OrbitControls，限制角度與範圍）；點村民用 raycast（拖曳超過 5px 不算點擊）。開發模式 `window.__island`。
+
 #### 中轉站：步驟之間交接檔案
 
 像店家把外送餐點放在取餐區、貼上號碼：每一步產生的檔案放進這次問答的中轉站（`core/depot.py`，context variable `DEPOT`），
@@ -515,6 +528,8 @@ multi-agent-village/
 │       ├── App.tsx              # 登入閘門、滿版村子、⚙️ 選單、抽屜、💬 問答視窗
 │       ├── auth/                # 登入頁（示範村落劇本 demo.ts）
 │       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色、冒泡與村民互動、點村民）
+│       ├── island/              # 島嶼版地圖（Three.js，切到島嶼才載入）：IslandCanvas（介面同 VillageCanvas）、
+│       │                        # IslandWorld（場景、鏡頭、村民行為、事件）、models（程式組的低多邊形模型與 Q 版村民）
 │       ├── chat/                # 問答面板、事件 reducer、附圖前處理、附文件（docs.ts）、@ 自動完成（mention.ts）
 │       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定

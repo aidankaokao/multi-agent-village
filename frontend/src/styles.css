@@ -1782,3 +1782,146 @@ button.mention-item .clamp {
   text-align: right;
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------- 島嶼版地圖（island/） */
+
+.island-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #b9dcee;
+}
+
+.island-canvas canvas {
+  display: block;
+  touch-action: none;
+}
+
+.island-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: #b9dcee;
+  color: #2b4a5a;
+  font-size: 16px;
+}
+
+.isl-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.isl-tag {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+  font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+}
+
+.isl-name {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2b2a27;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(30, 40, 50, 0.25);
+  white-space: nowrap;
+}
+
+.isl-name.away {
+  opacity: 0.65;
+}
+
+.isl-speech {
+  display: none;
+  max-width: 180px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: #2b2a27;
+  background: #fffdf6;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(30, 40, 50, 0.25);
+  text-align: center;
+}
+
+.isl-speech.show {
+  display: block;
+  animation: isl-pop 0.25s ease-out;
+}
+
+.isl-status {
+  display: none;
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.isl-status.show {
+  display: block;
+  animation: isl-pop 0.25s ease-out;
+}
+
+.isl-status.working {
+  animation: isl-spin 1.6s linear infinite;
+}
+
+.isl-status.thinking {
+  animation: isl-bob 1.2s ease-in-out infinite;
+}
+
+@keyframes isl-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+
+@keyframes isl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes isl-bob {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* 地圖樣式切換（畫面上方中央的膠囊） */
+.view-switch {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(27, 27, 42, 0.8);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+}
+
+.view-switch button {
+  padding: 4px 12px;
+  font-size: 13px;
+  border-radius: 999px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text);
+}
+
+.view-switch button.active {
+  background: var(--accent);
+  color: #1b1b2a;
+}

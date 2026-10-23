@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AccountsPanel, DeleteAccountModal, PasswordModal } from "./accounts/AccountsPanel";
 import { auth, conversations, UNAUTHORIZED, village, type AgentInfo, type AuthStatus, type ConversationRow, type Me } from "./api";
 import { LoginPage } from "./auth/LoginPage";
@@ -13,6 +13,21 @@ import { TracePanel } from "./traces/TracePanel";
 import { VillagerManager } from "./villagers/VillagerManager";
 import { VillageCanvas, type VillageHandle } from "./village/VillageCanvas";
 import type { VillagerInfo } from "./village/VillageScene";
+
+// 島嶼版地圖（Three.js）：切到島嶼才下載，用像素村的人不受影響
+const IslandCanvas = lazy(() => import("./island/IslandCanvas"));
+type MapView = "pixel" | "island";
+
+/** 地圖樣式：網址 ?view=island / pixel 優先，再來是上次的選擇 */
+function initialView(): MapView {
+  const q = new URLSearchParams(location.search).get("view");
+  if (q === "island" || q === "pixel") return q;
+  try {
+    return localStorage.getItem("map-view") === "island" ? "island" : "pixel";
+  } catch {
+    return "pixel";
+  }
+}
 
 type Page = "villagers" | "traces" | "memories" | "rules" | "accounts" | "llm";
 
@@ -120,6 +135,18 @@ function VillageApp({
       /* 無痕模式等存不了：只是下次不記得 */
     }
   };
+  const [view, setView] = useState<MapView>(initialView);
+  const switchView = (v: MapView) => {
+    setView(v);
+    try {
+      localStorage.setItem("map-view", v);
+    } catch {
+      /* 存不了：只是下次不記得 */
+    }
+    const url = new URL(location.href);
+    url.searchParams.set("view", v);
+    history.replaceState(null, "", url);
+  };
   const [unseen, setUnseen] = useState(false); // 問答視窗收著時有問答完成 → 💬 上的紅點
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [runs, dispatch] = useReducer(runsReducer, initialRuns);
@@ -156,6 +183,7 @@ function VillageApp({
         sprite: a.sprite,
         home: a.home,
         away: a.kind === "remote" && a.status !== "online",
+        remote: a.kind === "remote",
         ...idleLines(a),
       })),
     [agents],
@@ -255,7 +283,21 @@ function VillageApp({
   return (
     <div className={`stage ${page ? "with-drawer" : ""}`}>
       <div className="map" onMouseDown={() => setMenuOpen(false)}>
-        <VillageCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
+        {view === "island" ? (
+          <Suspense fallback={<div className="island-loading">🏝️ 島嶼載入中…</div>}>
+            <IslandCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
+          </Suspense>
+        ) : (
+          <VillageCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
+        )}
+      </div>
+      <div className="view-switch" role="group" aria-label="地圖樣式">
+        <button className={view === "pixel" ? "active" : ""} onClick={() => switchView("pixel")} title="像素村（2D）">
+          🟫 像素村
+        </button>
+        <button className={view === "island" ? "active" : ""} onClick={() => switchView("island")} title="島嶼（3D，可拖曳旋轉、滾輪縮放）">
+          🏝️ 島嶼
+        </button>
       </div>
       <div className="village-name">Multi-Agent Village</div>
       <div className="user-chip">
