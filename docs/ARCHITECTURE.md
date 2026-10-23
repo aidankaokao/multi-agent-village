@@ -1,6 +1,6 @@
 # Multi-Agent Village — 架構設計
 
-> 一個像素風的虛擬村落。每個 agent 是村裡的一位村民，平常隨意閒晃；
+> 一個 3D 鐵道小鎮裡的虛擬村落。每個 agent 是村裡的一位村民，平常照作息過日子；
 > 當你在旁邊的問答框提問時，村長（orchestrator）指派村民合作完成任務，
 > 工作中的村民頭頂會冒出「運作中」泡泡。
 
@@ -8,8 +8,8 @@
 
 ```
 ┌──────────────────────────── Browser ─────────────────────────────┐
-│ 登入頁：示範村落（劇本驅動）＋ 登入 / 註冊                          │
-│ 村子：Phaser 3 像素地圖滿版（村民閒晃、頭頂泡泡、交接動畫）          │
+│ 登入頁：示範鐵道小鎮（劇本驅動）＋ 登入 / 註冊                      │
+│ 村子：Three.js 鐵道小鎮滿版（作息、泡泡、交接、火車與中轉站）        │
 │   右上 ⚙️ → 右側抽屜：村民 / 紀錄 / 記憶 / 村規 / 帳號 / LLM 設定    │
 │   右下 💬 → 問答視窗（對話列表、執行過程、停止、圖片放大）           │
 └───────────────▲─────────────────────────────────────▲────────────┘
@@ -40,8 +40,7 @@
 | 後端 | Python 3.12 + FastAPI + uv | 之後的 RAG / 資料分析生態都在 Python |
 | LLM 呼叫 | 自己寫薄薄一層 `LLMProvider`，底層用 **OpenAI 相容 API**；provider / 模型在 UI 註冊，存 DB | Ollama、vLLM、LM Studio、OpenAI、多數雲端都支援同一個介面；Anthropic 另寫一個 adapter |
 | Agent 間協定 | 內部：Python 呼叫；外部：**A2A (Agent2Agent) 協定** 的 Agent Card + JSON-RPC | Agent Card 概念本來就是 A2A 的，照著做之後就能接別人的 agent |
-| 前端 | Vite + TypeScript + React（聊天面板）+ **Phaser 3**（村落） | Phaser 對像素地圖、sprite 動畫、tilemap 支援成熟 |
-| 地圖 | Tiled 編輯器 + Kenney「Tiny Town」等 CC0 tileset | 免費可商用，風格一致 |
+| 前端 | Vite + TypeScript + React（介面）+ **Three.js**（3D 村落，lazy 載入） | 一開始用 Phaser 3 畫像素地圖；2026-10 改成程式組的低多邊形 3D（不用模型檔），Phaser 已移除 |
 | 即時通訊 | WebSocket | 推送 agent 狀態事件給村落動畫 |
 | 儲存 | SQLAlchemy 2 + SQLite（MVP）→ Postgres/TimescaleDB | 用 ORM 隔開，換 DB 只改連線字串 + migration (Alembic) |
 
@@ -226,7 +225,7 @@ class BaseAgent(Protocol):
 {"type": "agent.started", "run_id": "r_123", "step_id": "s1", "agent": "poet", "ts": "..."}
 ```
 
-**地圖互動**（只在前端，`village/VillageScene.ts`）：閒著的村民每 8～15 秒有人冒一句（台詞由 `App.tsx` 的 `idleLines`
+**地圖互動**（只在前端，`world3d/World3D.ts`）：閒著的村民每 8～15 秒有人冒一句（台詞由 `App.tsx` 的 `idleLines`
 從名片產生；系統角色的台詞寫在 `MAYOR` 等常數），同時最多兩個泡泡；每 30～60 秒兩位附近的村民湊在一起聊幾句；
 收到 `agent.started` 等事件時立刻中斷去工作。點村民 → App 開新對話並在輸入框填「@id 」（村長不加 @；工匠、審核員、書記、
 鑑定師只自我介紹；外出中的駐村專家說外出中）。
@@ -353,52 +352,58 @@ class BaseAgent(Protocol):
 
 `styles.css` 是像素風格（深藍灰、黃色、粗黑框、直角、錯開的實心陰影），顏色幾乎都走主題變數。
 `theme-soft.css` 只在 `<html data-theme="soft">` 時生效：換變數（米白面板、珊瑚橘），再覆蓋粗框、直角、實心陰影、深色底。
-選擇器的根用 `:where(:root[data-theme="soft"])`（不加權重），元件自己更具體的樣式（例如島嶼工具列）仍然優先。
+選擇器的根用 `:where(:root[data-theme="soft"])`（不加權重），元件自己更具體的樣式（例如地圖工具列）仍然優先。
 App 依帳號選單的「介面風格」（localStorage `ui-theme`：柔和（預設）/ 像素）設定 `data-theme`。
-登出（登入頁）時移除，登入頁一律像素。新增樣式時：先寫像素版，柔和版需要不同外觀再到 `theme-soft.css` 補。
+登入頁照同一個設定（`ui/theme.ts` 的 `initialTheme`）。新增樣式時：先寫在 `styles.css`（像素，也是基底），柔和版需要不同外觀再到 `theme-soft.css` 補。
 
-#### 3D 地圖（預設是鐵道小鎮；島嶼版、像素村只剩備案）
+#### 3D 地圖：鐵道小鎮
 
-地圖和其他部分只靠一個小介面溝通（`VillageHandle`：`dispatch(事件)`、`say(id, 話)`；props：村民名單、點了誰），
-所以另外寫了 3D 版 `island/IslandCanvas.tsx`，介面一模一樣。
-3D 的程式分兩層（R0 重構，為了鐵道小鎮）：`world3d/` 是場景共用的部分——`World3D`（鏡頭、日夜、村民名單、事件、協作線、
-閒聊、生活作息的佔位與繞路、點村民）、`Villager3D`（一位村民：走路、派工、交接、姿勢與道具）、`WorldCanvas` 與 `Hud`
-（工具列、村莊日誌）、`town.ts`（村子本身：十字路、裝飾、池塘、路燈、生活作息的地點）、`models.ts`；場景只要實作
-`common.ts` 的 `Terrain`（地形、範圍 `inside`、繞路的路口、駐村專家住的地方 `outpost` → `Outpost{center, radius, gates, door, desk}`、
-依時間換顏色 `tint`、每幀 `update`、鏡頭設定 `view`）。島嶼是 `island/IslandTerrain.ts`（海、六邊形主島、外圍小島與木棧橋、船、雲）；鐵道小鎮是 `rail/RailTerrain.ts`
-（環狀鐵道、主車站與倉庫＝中轉站、專家的主題小站、田野；預設地圖，見 ROADMAP 第 8 項）。
-場景可以有交通工具（`Terrain.courier`，介面 `Courier`）：有的話 `agent.handoff` 先問它要不要處理，`agent.started` /
-`agent.finished` / 問答結束也通知它，它可以寫村莊日誌（`CourierHost.log` → `World3D.onLog`）。鐵道小鎮的 `rail/Railway.ts`：
-和駐村專家之間的交接都經過中轉站（倉庫貨架上貼號碼的包裹）——村民自己走去放 / 拿（`Villager3D.errand`，工作中也會走完），
-專家的東西由火車載（工作排隊，一次一件；開動時那段鐵道亮起）；只是動畫，號碼是畫面上的順序，不是後端的取件號碼。
-駐村專家外出中時 World3D 熄掉那裡的窗戶與燈（發光材質 `userData.off`），場景可再加東西（鐵道小鎮：「暫停營業」標籤）。使用者決定只留島嶼（2026-10-23）：登入後一律島嶼，
-沒有切換按鈕；之後鐵道小鎮取代島嶼成為預設（`?view=island` 還看得到島嶼版）。瀏覽器畫不了 3D（`hasWebGL()` 失敗）
-時自動用像素村，網址 `?view=pixel` 可強制看像素村（測試用）。
-像素版程式還在（登入頁示範村落也還用它），等登入頁改成島嶼版、使用者用一陣子沒問題後再刪（含 Phaser）。
+地圖和其他部分只靠一個小介面溝通（`VillageHandle`：`dispatch(事件)`、`say(id, 話)`；props：村民名單、點了誰），App 與登入頁
+都用 `rail/RailCanvas.tsx`（`React.lazy`，Three.js 分開打包）。演進：像素村（Phaser）→ 島嶼版 3D（日夜、作息、工具列…）→
+鐵道小鎮（2026-10-24 起唯一的地圖，像素村與島嶼版的程式已刪除）。瀏覽器畫不了 3D（`world3d/webgl.ts` 的 `hasWebGL()`）時，
+地圖區顯示說明（`NoWebGL`），問答與設定照常可用。
 
-- Three.js（`React.lazy`）切到島嶼才下載（壓縮後約 157KB）；不用模型檔或貼圖，全部用方塊、圓柱、圓球組成（`world3d/models.ts`）。
-- 主島：圓角六邊形；像素地圖的 30×20 格對應到島上（`toWorld`，一格 0.9 單位），裝飾、池塘、小路的位置和像素版一樣。
-- 駐村專家住在外圍小島，用木棧橋連到主島（`isletFor`）；交接時沿橋走（`walkTo` 自動加上兩端的橋頭）。
-- Q 版村民的造型依像素外觀（sprite id）：衣服顏色同 `gen_placeholder_sprites.py`，再加配件（王冠、貝雷帽、耳機…）。
-- 名牌、冒泡、狀態用 HTML（CSS2DRenderer，`.isl-*` 樣式）；村民行為（冒一句、聊天、派工、交接、外出中）照像素版。
-- 生活作息（使用者提議「看起來像在過生活，需要時才停下來」）：「做什麼」在 `village/life.ts`（不依賴畫法，像素版之後共用）——
+程式分兩層：`world3d/` 是場景共用的部分——`World3D`（鏡頭、日夜、村民名單、事件、協作線、閒聊、生活作息的佔位與繞路、
+點村民、跟車）、`Villager3D`（一位村民：走路、派工、交接、跑腿 `errand`、姿勢與道具）、`WorldCanvas` 與 `Hud`（工具列、村莊日誌）、
+`town.ts`（村子本身：十字路、裝飾、池塘、路燈、生活作息的地點）、`models.ts`、`bake.ts`；場景實作 `common.ts` 的 `Terrain`
+（地形、範圍 `inside`、繞路的路口、駐村專家住的地方 `outpost` → `Outpost{center, radius, gates, door, desk}`、依時間換顏色 `tint`、
+每幀 `update`、鏡頭設定 `view`、交通工具 `courier`）。鐵道小鎮是 `rail/RailTerrain.ts`＋`rail/models.ts`＋`rail/Railway.ts`。
+村子的配置（30×20 格、裝飾、池塘、障礙物、系統角色）在 `village/layout.ts`（村民編輯器選住處的小地圖也用）。
+
+- 不用模型檔或貼圖，全部用方塊、圓柱、圓球組成。30×20 格對應到小鎮（`toWorld`，一格 0.9 單位）。
+- 場景：小鎮（半徑 20）、環狀鐵道（半徑 24；枕木用 InstancedMesh）、主車站在鐵道內側正前方（正面朝鏡頭，月台、站名、
+  倉庫＝中轉站、時刻表、等車的長椅）、駐村專家的小站在鐵道外側（`styleFor` 依名字：紅磚古蹟 / 冒煙的印刷廠 / 電台天線 /
+  檔案室 / 木造，月台、站名、平交道）、外圍田野與遠山。手機直式時鏡頭拉遠（`ViewConfig.portraitDist`）；
+  登入頁不顯示工具列、畫面往左偏並拉遠（`setViewShift`），讓出右邊的登入卡片。
+- 效能：建好場景後 `bakeStatic` 把不會動的零件依材質合併（約 800 → 490 個網格、每幀繪圖約 1400 → 900 次）；
+  不合併的：`userData.dynamic`（火車、雲）、晚上會亮的材質（window / lamp）、半透明的。
+- 交通工具（`Terrain.courier`，介面 `Courier`）：`agent.handoff` 先問它要不要處理，`agent.started` / `agent.finished` /
+  問答結束也通知它，它可以寫村莊日誌（`CourierHost.log` → `World3D.onLog`）。`rail/Railway.ts`：和駐村專家之間的交接都經過
+  中轉站（倉庫貨架上貼號碼的包裹）——村民自己走去放 / 拿（`Villager3D.errand`，工作中也會走完），專家的東西由火車載
+  （工作排隊 `chain`，一次一件；開動時那段鐵道亮起，取代弧形協作線；專家第一步沒人交東西時送「村長的指示」📨；
+  問答結束後最後一件工作是清空中轉站、回主車站）。只是動畫，號碼是畫面上的順序，不是後端的取件號碼。
+  村民之間（都在小鎮裡）照舊走過去交（弧形協作線）。
+- 駐村專家外出中時 World3D 熄掉那裡的窗戶與燈（發光材質 `userData.off`）、印刷廠不冒煙、站房上方「🚧 暫停營業」（`outpostAway`）。
+- Q 版村民的造型依外觀（sprite id）：衣服顏色同 `gen_placeholder_sprites.py`，再加配件（王冠、貝雷帽、耳機…）。
+- 名牌、冒泡、狀態用 HTML（CSS2DRenderer，`.isl-*` 樣式，名字沿用島嶼版時代）。CSS2DRenderer 用外層元素的 transform 定位，
+  動畫要放內層（`Railway` 的 `label`）；地圖區 `.map` 自成一層，3D 名牌不會蓋過登入卡片或選單。
+- 生活作息（使用者提議「看起來像在過生活，需要時才停下來」）：「做什麼」在 `village/life.ts`——
   活動表 `ACTIVITIES`（圖示、地點種類、姿勢、道具、時間、能不能邊做邊聊、台詞）、`rolesOf`（名字 / 技能的關鍵字優先，
   再看外觀：畫家寫生、工匠敲打、計算機打算盤、報社看報、網路研究員拿望遠鏡…）、`periodOf` / `nextActivity`
-  （平常約六成做拿手的事、兩成五散步、一成五釣魚 / 澆花 / 打水這類共同的事；清晨伸懶腰、中午吃飯、傍晚廣場喝茶各一半；
-  22:00～5:30 回家睡覺）。「在哪裡、怎麼做」在 `world3d/`：`townSpots` 依裝飾算出地點（井邊、池塘邊、樹下、告示牌前、
-  花圃、工作台、廣場、房子門口，各有位子上限，`claimSpot` / `releaseSpot`），`route` 直走會撞到東西就繞十字路口；
-  駐村專家只在自己小島上（`Islet.desk` / `door`）。村民模型的手腳掛在肩 / 髖關節（`Chibi.arms` / `legs` 是 Group），
-  `animatePose` 每幀擺姿勢（坐下、釣魚、寫字、敲打、伸懶腰、打瞌睡…），道具 `models.prop`。
+  （平常約六成做拿手的事、兩成五散步、一成五做大家都會做的事：釣魚、澆花、打水、車站長椅等車、看時刻表、種菜；
+  清晨伸懶腰、中午吃飯、傍晚廣場喝茶各一半；22:00～5:30 回家睡覺）。「在哪裡、怎麼做」在 `world3d/`：`townSpots` 依裝飾
+  算出地點（井邊、池塘邊、樹下、告示牌前、花圃、工作台、廣場、房子門口），鐵道小鎮再加長椅、時刻表、菜園；各有位子上限
+  （`claimSpot` / `releaseSpot`），`route` 直走會撞到東西就繞路口；駐村專家只在自己的小站（`Outpost.desk` / `door`）。
+  村民模型的手腳掛在肩 / 髖關節（`Chibi.arms` / `legs` 是 Group），`animatePose` 每幀擺姿勢，道具 `models.prop`。
   派工、交接、被找去聊天時 `interrupt`：收起道具、頭上閃 ❗（睡著的會說「來了來了！」），做完回去接著做（`resume`；
-  天亮了不回去睡）。在廣場喝茶這類 `social` 的事可以邊做邊聊；換時段時（工具列）大家馬上照新的作息。工具列「🏡 生活」可關掉（回到隨便走走）。
-- 日夜：`DAY` 關鍵影格（天空、太陽 / 月光、天地光、海色、夜晚程度）依真實時間每 20 秒內插；夜晚窗戶與路燈的發光材質
+  天亮了不回去睡）。`social` 的事（廣場喝茶、等車）可以邊做邊聊；換時段時大家馬上照新的作息。工具列「🏡 生活」可關掉。
+- 日夜：`DAY` 關鍵影格（天空、太陽 / 月光、天地光、夜晚程度）依真實時間每 20 秒內插；夜晚窗戶與路燈的發光材質
   （材質名 `window` / `lamp`）和路燈點光源一起亮、星星浮現。網址 `?time=night`（或 `dawn`、`day`、`dusk`、`HH:MM`）可預覽。
 - 搬運圖示：`agent.finished` 有附件就照附件（🖼️ 圖、📊 圖表、📄 PDF、📝 檔案），否則照外觀（`CARRY_BY_SPRITE`），
-  駐村專家是 📦；別人的問答事件只有動畫欄位（`for_viewer`），一律照外觀。交接時頭上拿著，到了換到對方手上。
-- 協作線：`agent.handoff` 時在兩人之間畫弧線（TubeGeometry）＋流動光點；那次問答結束 5 秒後淡出（別人的問答沒有 run_id：20 秒）。
-- 介面層（`world3d/Hud.tsx`）：膠囊工具列（時段、名牌、搬運、協作線、生活、暫停、鳥瞰、日誌；`island-prefs`，網址 `?time=` 優先）
-  與「村莊日誌 LIVE」（`describe` 把事件寫成一句話，最多 120 筆；點一下 `World3D.focus` 鏡頭飛過去）。
-  名牌 / 搬運用外層 class 隱藏（`.hide-names`、`.hide-carry`）；暫停只停動畫，鏡頭照樣能轉。
+  駐村專家是 📦；別人的問答事件只有動畫欄位（`for_viewer`），一律照外觀。
+- 介面層（`world3d/Hud.tsx`）：膠囊工具列（時段、名牌、搬運、協作線、生活、暫停、鳥瞰、跟車、日誌；localStorage `island-prefs`，
+  網址 `?time=` 優先）與「村莊日誌 LIVE」（`describe` 把事件寫成一句話，最多 120 筆；點一下 `World3D.focus` 鏡頭飛過去）。
+  跟車（`setFollow`）：鏡頭拉近到火車、每幀跟著移動，拖曳照樣能轉角度；開鳥瞰或點日誌就停止跟車。
 - 拖曳旋轉、滾輪縮放（OrbitControls，限制角度與範圍）；點村民用 raycast（拖曳超過 5px 不算點擊）。開發模式 `window.__island`。
 
 #### 中轉站：步驟之間交接檔案
@@ -562,15 +567,15 @@ multi-agent-village/
 │   ├── web-researcher/          # 網路研究員：自架 SearXNG（同一個 compose）、安全讀網頁、附引用回答（:8102）
 │   └── newspaper/               # 報社：採訪資料 → 兩階段寫稿（記者 / 總編輯）→ A4 報紙 PDF＋第一版預覽 PNG（:8103）
 ├── frontend/
-│   ├── public/assets/sprites/   # 角色四向圖、裝飾（deco/）、UI 泡泡、manifest.json
+│   ├── public/assets/sprites/   # 角色圖（村民管理的頭像與外觀清單 manifest.json；deco/、泡泡是像素地圖時代留下的）
 │   └── src/
 │       ├── App.tsx              # 登入閘門、滿版村子、⚙️ 選單、抽屜、💬 問答視窗
-│       ├── auth/                # 登入頁（示範村落劇本 demo.ts）
-│       ├── village/             # Phaser 場景（地圖、裝飾、障礙物、系統角色、冒泡與村民互動、點村民）；life.ts 生活作息（兩版共用）
+│       ├── auth/                # 登入頁（示範鐵道小鎮的劇本 demo.ts）
+│       ├── village/             # 和畫法無關的部分：layout.ts（30×20 格、裝飾、障礙物、系統角色）、life.ts（生活作息）
 │       ├── world3d/             # 3D 地圖共用（Three.js，lazy 載入）：World3D（鏡頭、日夜、事件、協作線、生活作息）、Villager3D、
-│       │                        # WorldCanvas＋Hud（工具列、日誌）、town（村子與作息地點）、models（低多邊形模型、Q 版村民、小道具）、common（Terrain 介面）
-│       ├── island/              # 島嶼場景：IslandTerrain（海、主島、外圍小島與木棧橋）、IslandCanvas（介面同 VillageCanvas）
-│       ├── rail/                # 鐵道小鎮場景（?view=rail 預覽）：RailTerrain、models（鐵道、車站、倉庫、火車、平交道、田）
+│       │                        # WorldCanvas＋Hud（工具列、日誌）、town（村子與作息地點）、models（低多邊形模型、Q 版村民、小道具）、
+│       │                        # common（Terrain / Courier 介面）、bake（合併不會動的零件）、webgl
+│       ├── rail/                # 鐵道小鎮：RailTerrain（場景）、Railway（火車與中轉站）、models（鐵道、車站、倉庫、火車…）、RailCanvas
 │       ├── chat/                # 問答面板、事件 reducer、附圖前處理、附文件（docs.ts）、@ 自動完成（mention.ts）
 │       ├── villagers/           # 村民管理、編輯器、試打 / 測試題、工坊、駐村專家（Residents）
 │       ├── traces/ memory/ rules/ accounts/ settings/   # 紀錄、記憶、村規、帳號、LLM 設定

@@ -134,6 +134,25 @@
 
 /* ---------------------------------------------------------------- 左上村名、帳號選單、右上選單 */
 
+:where(:root[data-theme="soft"]) .login-card {
+  background: rgba(255, 253, 248, 0.96);
+  border: none;
+  border-radius: 20px;
+  box-shadow: var(--soft-shadow);
+}
+
+:where(:root[data-theme="soft"]) .login-card h1 {
+  letter-spacing: 0.5px;
+}
+
+:where(:root[data-theme="soft"]) .login-caption {
+  color: var(--text);
+  background: rgba(255, 253, 248, 0.94);
+  border: none;
+  border-radius: 14px;
+  box-shadow: var(--soft-shadow-sm);
+}
+
 :where(:root[data-theme="soft"]) .village-name {
   color: var(--accent);
   background: rgba(255, 253, 248, 0.92);

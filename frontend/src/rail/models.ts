@@ -286,6 +286,15 @@ export function crossing(): THREE.Group {
   return g;
 }
 
+/** 長椅（正面 +z）：座面很低，坐下的村民（Q 版、腳短）剛好坐在上面 */
+export function bench(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.BoxGeometry(1.6, 0.07, 0.42), mat(0x9a6a42), 0, 0.27, 0));
+  g.add(mesh(new THREE.BoxGeometry(1.6, 0.42, 0.06), mat(0x9a6a42), 0, 0.55, -0.22));
+  [-0.65, 0.65].forEach((x) => g.add(mesh(new THREE.BoxGeometry(0.08, 0.2, 0.36), mat(0x3a3a44), x, 0.13, 0)));
+  return g;
+}
+
 /** 一塊田：一排一排的作物（w × d，沿 x 排） */
 export function field(w: number, d: number, crop: number, soil = 0x8a6a48): THREE.Group {
   const g = new THREE.Group();

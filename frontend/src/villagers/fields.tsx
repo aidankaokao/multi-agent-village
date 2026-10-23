@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { SpriteManifest } from "../village/VillageScene";
+import type { SpriteManifest } from "../village/layout";
 
 /** 欄位：標題 + 說明 + 輸入元件 */
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {

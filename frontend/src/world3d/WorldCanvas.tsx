@@ -1,14 +1,21 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { VillageEvent } from "../events";
-import type { VillageHandle } from "../village/VillageCanvas";
-import { APPRAISER, CRAFTSMAN, MAYOR, REVIEWER, SCRIBE } from "../village/VillageScene";
+import { APPRAISER, CRAFTSMAN, MAYOR, REVIEWER, SCRIBE } from "../village/layout";
 import { parseTime, type Terrain } from "./common";
-import { IslandHud, TIME_MINUTES, entry, loadPrefs, savePrefs, stamp, type LogEntry, type Prefs } from "./Hud";
+import { Hud, TIME_MINUTES, entry, loadPrefs, savePrefs, stamp, type LogEntry, type Prefs } from "./Hud";
 import { World3D, type WorldVillager } from "./World3D";
+
+/** App / 登入頁操作地圖的方式：事件進來、讓某位村民冒一句話 */
+export interface VillageHandle {
+  dispatch(e: VillageEvent): void;
+  say(id: string, text: string): void;
+}
 
 export interface WorldCanvasProps {
   villagers: WorldVillager[];
   onVillagerClick?: (id: string) => void;
+  hud?: boolean; // 工具列與日誌（登入頁的示範村落不要）
+  shiftX?: number; // 畫面往左偏幾 px（登入頁：右邊有登入卡片）
 }
 
 interface Props extends WorldCanvasProps {
@@ -18,8 +25,8 @@ interface Props extends WorldCanvasProps {
 const MAX_LOG = 120;
 const SYSTEM = [MAYOR, CRAFTSMAN, REVIEWER, SCRIBE, APPRAISER];
 
-/** 3D 地圖：介面和像素版的 VillageCanvas 一樣（村民名單、事件進來，點了誰出去）；場景由 makeTerrain 決定 */
-export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas({ villagers, onVillagerClick, makeTerrain }, ref) {
+/** 3D 地圖：村民名單、事件進來，點了誰出去；場景由 makeTerrain 決定 */
+export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas({ villagers, onVillagerClick, makeTerrain, hud = true, shiftX = 0 }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const world = useRef<World3D | null>(null);
   const latest = useRef(villagers);
@@ -30,6 +37,8 @@ export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas
   const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
   const [paused, setPaused] = useState(false);
   const [bird, setBird] = useState(false);
+  const [follow, setFollow] = useState(false);
+  const [canFollow, setCanFollow] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
   const skipBird = useRef(false); // 日誌點村民時關掉鳥瞰：鏡頭飛去村民，不要飛回預設角度
 
@@ -69,6 +78,7 @@ export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas
     w.onLog = (icon, text, agent, kind = "info") => setLog((xs) => [stamp({ icon, text, agent, kind }), ...xs].slice(0, MAX_LOG));
     w.syncVillagers(latest.current, false);
     world.current = w;
+    setCanFollow(w.canFollow);
     if (import.meta.env.DEV) (window as unknown as { __island?: World3D }).__island = w; // e2e 測試用
     return () => {
       w.dispose();
@@ -86,26 +96,43 @@ export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas
   }, [prefs.time, prefs.flows, prefs.life]);
   useEffect(() => world.current?.setPaused(paused), [paused]);
   useEffect(() => {
+    if (shiftX) world.current?.setViewShift(shiftX, 1.18);
+  }, [shiftX]);
+  useEffect(() => {
     if (skipBird.current) {
       skipBird.current = false;
       return;
     }
+    if (bird) setFollow(false);
     world.current?.setBirdView(bird);
   }, [bird]);
+  useEffect(() => {
+    if (follow && bird) {
+      skipBird.current = true; // 跟車時關掉鳥瞰：鏡頭飛去火車，不要飛回預設角度
+      setBird(false);
+    }
+    world.current?.setFollow(follow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [follow]);
 
   const cls = ["island-canvas", prefs.names ? "" : "hide-names", prefs.carry ? "" : "hide-carry", prefs.life ? "" : "hide-life", paused ? "paused" : ""].join(" ");
   return (
     <div className={cls}>
       <div className="island-stage" ref={host} />
-      <IslandHud
+      {hud && (
+      <Hud
         prefs={prefs}
         setPrefs={setPrefs}
         paused={paused}
         setPaused={setPaused}
         bird={bird}
         setBird={setBird}
+        canFollow={canFollow}
+        follow={follow}
+        setFollow={setFollow}
         log={log}
         onFocus={(id) => {
+          setFollow(false); // 日誌點村民：鏡頭飛去村民，不再跟車
           if (bird) {
             skipBird.current = true;
             setBird(false);
@@ -114,6 +141,7 @@ export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas
         }}
         onClearLog={() => setLog([])}
       />
+      )}
     </div>
   );
 });

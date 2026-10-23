@@ -6,7 +6,7 @@
  */
 
 /** 活動的地點：地圖上已經有的東西（house = 自己家門口，駐村專家是小島上的小屋） */
-export type SpotKind = "workbench" | "well" | "pond" | "tree" | "sign" | "flowers" | "plaza" | "house";
+export type SpotKind = "workbench" | "well" | "pond" | "tree" | "sign" | "flowers" | "plaza" | "house" | "bench" | "timetable" | "field";
 
 export type Pose = "stand" | "sit" | "fish" | "hammer" | "read" | "write" | "water" | "stretch" | "sleep" | "eat" | "look" | "sweep" | "paint" | "type" | "dance";
 
@@ -52,6 +52,10 @@ export const ACTIVITIES: Record<string, Activity> = {
   rest: A({ id: "rest", icon: "🍃", spot: "tree", pose: "sit", dur: [12, 22], lines: ["樹蔭下好涼"] }),
   sweep: A({ id: "sweep", icon: "🧹", spot: "house", pose: "sweep", prop: "broom", dur: [10, 18] }),
   bucket: A({ id: "bucket", icon: "🪣", spot: "well", pose: "stand", dur: [8, 14], social: true, lines: ["打點水"] }),
+  // 車站與菜園（鐵道小鎮）
+  waitTrain: A({ id: "waitTrain", icon: "🎫", spot: "bench", pose: "sit", dur: [14, 26], social: true, lines: ["火車快來了吧", "等車中…"] }),
+  timetable: A({ id: "timetable", icon: "🕒", spot: "timetable", pose: "read", dur: [8, 14], lines: ["下一班幾點？"] }),
+  garden: A({ id: "garden", icon: "🥬", spot: "field", pose: "water", prop: "can", dur: [14, 24], lines: ["菜長得真好", "今年會豐收"] }),
   // ---- 依時段
   stretch: A({ id: "stretch", icon: "🙆", spot: "plaza", pose: "stretch", dur: [10, 18], social: true, lines: ["早安！", "伸個懶腰～"] }),
   eat: A({ id: "eat", icon: "🍙", spot: "tree", pose: "eat", prop: "riceball", dur: [14, 24], lines: ["好吃！", "午餐時間～"] }),
@@ -73,7 +77,7 @@ const BY_SPRITE: Record<string, string[]> = {
   scribe: ["compose", "study"],
   appraiser: ["inspect"],
   jester: ["juggle"],
-  farmer: ["farm"],
+  farmer: ["farm", "garden"],
   chef: ["cook"],
   translator: ["study"],
 };
@@ -108,7 +112,7 @@ export function rolesOf(v: LifeWho): string[] {
   return BY_SPRITE[v.sprite ?? ""] ?? ["study"];
 }
 
-const COMMON = ["fish", "water", "rest", "sweep", "bucket"];
+const COMMON = ["fish", "water", "rest", "sweep", "bucket", "waitTrain", "timetable", "garden"];
 
 export type Period = "night" | "dawn" | "day" | "noon" | "evening";
 

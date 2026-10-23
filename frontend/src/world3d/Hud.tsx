@@ -1,6 +1,6 @@
 /**
  * 島嶼版的介面層：膠囊工具列（時段、名牌、搬運、協作線、生活、暫停、鳥瞰、日誌）與「村莊日誌 LIVE」。
- * 開關記在 localStorage（island-prefs）；網址 ?time= 會蓋過記住的時段。
+ * 開關記在 localStorage（island-prefs：島嶼版時代的名字，沿用才記得住舊設定）；網址 ?time= 會蓋過記住的時段。
  */
 import { useEffect, useState } from "react";
 import type { VillageEvent } from "../events";
@@ -116,6 +116,9 @@ interface HudProps {
   setPaused: (p: boolean) => void;
   bird: boolean;
   setBird: (b: boolean) => void;
+  canFollow: boolean; // 有火車的場景才顯示「跟車」
+  follow: boolean;
+  setFollow: (b: boolean) => void;
   log: LogEntry[];
   onFocus: (id: string) => void;
   onClearLog: () => void;
@@ -129,7 +132,7 @@ const TIMES: [TimeChoice, string, string][] = [
   ["night", "🌙", "夜晚"],
 ];
 
-export function IslandHud({ prefs, setPrefs, paused, setPaused, bird, setBird, log, onFocus, onClearLog }: HudProps) {
+export function Hud({ prefs, setPrefs, paused, setPaused, bird, setBird, canFollow, follow, setFollow, log, onFocus, onClearLog }: HudProps) {
   const toggle = (k: "names" | "carry" | "flows" | "life" | "log") => setPrefs({ ...prefs, [k]: !prefs[k] });
   const [fresh, setFresh] = useState(false); // 日誌收著時有新事件 → 按鈕上的小點
   useEffect(() => {
@@ -171,10 +174,16 @@ export function IslandHud({ prefs, setPrefs, paused, setPaused, bird, setBird, l
             <span className="ico">{paused ? "▶️" : "⏸️"}</span>
             <span className="lbl">{paused ? "繼續" : "暫停"}</span>
           </button>
-          <button className={bird ? "on" : ""} aria-pressed={bird} onClick={() => setBird(!bird)} title="從正上方看整座群島">
+          <button className={bird ? "on" : ""} aria-pressed={bird} onClick={() => setBird(!bird)} title="從正上方看整個村子">
             <span className="ico">🦅</span>
             <span className="lbl">鳥瞰</span>
           </button>
+          {canFollow && (
+            <button className={follow ? "on" : ""} aria-pressed={follow} onClick={() => setFollow(!follow)} title="鏡頭跟著火車">
+              <span className="ico">🚂</span>
+              <span className="lbl">跟車</span>
+            </button>
+          )}
           <button className={prefs.log ? "on" : ""} aria-pressed={prefs.log} onClick={() => toggle("log")} title="村莊日誌：村民正在做什麼">
             <span className="ico">📜</span>
             <span className="lbl">日誌</span>

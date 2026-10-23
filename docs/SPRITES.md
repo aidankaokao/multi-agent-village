@@ -1,5 +1,9 @@
 # 像素素材規格與生成 Prompt
 
+> 2026-10-24 起地圖改成 3D 鐵道小鎮（`frontend/src/world3d/`、`rail/`），像素地圖（Phaser）已刪除。
+> 角色圖現在只用在村民管理的頭像與外觀挑選（`manifest.json` 的 `characters`）；3D 村民依外觀 id 換衣服顏色與配件
+> （`world3d/models.ts` 的 `LOOKS`）。下面「地圖裝飾」與 `deco/`、狀態泡泡是像素地圖時代的素材，留作紀錄。
+
 ## 現有佔位素材
 
 由 `scripts/gen_placeholder_sprites.py` 程式產生（`python3 scripts/gen_placeholder_sprites.py`）：
@@ -92,7 +96,7 @@ Limited palette, no anti-aliasing, Stardew Valley style.
 ### 地圖裝飾
 
 `deco/*.png` 由 `scripts/gen_placeholder_sprites.py` 產生，和角色一樣在地圖上放大 2 倍。擺放位置與擋路範圍寫在
-`frontend/src/village/VillageScene.ts` 的 `DECOR` / `DECOR_BLOCK`（另有程式畫的池塘 `POND`）：
+`frontend/src/village/layout.ts` 的 `DECOR` / `DECOR_BLOCK`（另有池塘 `POND`；3D 小鎮的裝飾位置也照這份）：
 
 - 大型裝飾（房子、大部分的樹）放在第 0～2 列，村民不會走到那裡
 - 擋路的格子村民閒晃時會避開（目的地與路線都檢查）；花可以踩過去

@@ -1,10 +1,10 @@
 /**
- * 3D 村子（Three.js）：和像素版（village/VillageScene.ts）吃一樣的村民名單與事件，畫法不同。
- * 場景（地形、裝飾、駐村專家住的地方）由 Terrain 提供——島嶼（island/IslandTerrain.ts），之後是鐵道小鎮；
+ * 3D 村子（Three.js）：吃村民名單與事件（/ws），畫出村民的行動。
+ * 場景（地形、裝飾、駐村專家住的地方）由 Terrain 提供——目前是鐵道小鎮（rail/RailTerrain.ts）；
  * 這裡是場景共用的部分：
  *
  * - 名牌、冒泡、狀態用 HTML（CSS2DRenderer），文字清楚、不受 3D 縮放影響
- * - 村民的行為（冒一句、兩人聊天、派工、交接、外出中）照像素版；閒著時照生活作息（village/life.ts）
+ * - 村民的行為：冒一句、兩人聊天、派工、交接、外出中；閒著時照生活作息（village/life.ts）
  *   走去井邊、池塘、樹下做事，派工時立刻中斷，做完再回去接著做
  * - 日夜（依真實時間）、交接時頭上拿的東西、協作線、鏡頭（鳥瞰、飛到村民）
  */
@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import type { VillageEvent } from "../events";
-import { APPRAISER, CRAFTSMAN, MAP_H, MAP_W, MAYOR, REVIEWER, SCRIBE, type VillagerInfo } from "../village/VillageScene";
+import { APPRAISER, CRAFTSMAN, MAP_H, MAP_W, MAYOR, REVIEWER, SCRIBE, type VillagerInfo } from "../village/layout";
 import { periodOf, rolesOf, type SpotKind } from "../village/life";
 import {
   CARRY_BY_SPRITE,
@@ -32,10 +32,11 @@ import {
   type Spot,
   type Terrain,
 } from "./common";
+import { bakeStatic } from "./bake";
 import * as M from "./models";
 import { Villager3D } from "./Villager3D";
 
-// ---------------------------------------------------------------- 閒聊（同像素版）
+// ---------------------------------------------------------------- 閒聊
 
 const AMBIENT_MS: [number, number] = [8000, 15000];
 const CHAT_MS: [number, number] = [30000, 60000];
@@ -95,6 +96,7 @@ export class World3D {
   private small = false;
   paused = false;
   private flowsVisible = true;
+  private following = false;
   private camAnim: { fromPos: THREE.Vector3; toPos: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; t: number } | null = null;
   private frame = 0;
   private last = performance.now();
@@ -150,6 +152,7 @@ export class World3D {
       addLamp: (x, z) => this.addLamp(x, z),
     };
     this.buildWorld();
+    bakeStatic(this.scene); // 不會動的零件合併，每一幀畫的次數少很多
     const world = this; // eslint-disable-line @typescript-eslint/no-this-alias
     this.terrain.courier?.attach({
       log: (icon, text, agent, kind) => this.onLog?.(icon, text, agent, kind),
@@ -563,6 +566,21 @@ export class World3D {
     v.greetPulse();
   }
 
+  /** 有交通工具（火車）的場景才能跟車 */
+  get canFollow(): boolean {
+    return !!this.terrain.courier;
+  }
+
+  /** 跟車鏡頭：拉近到火車旁邊，之後每一幀跟著火車移動（拖曳照樣可以轉角度） */
+  setFollow(on: boolean) {
+    this.following = on && this.canFollow;
+    const p = this.terrain.courier?.focus();
+    if (!this.following || !p) return;
+    this.controls.minPolarAngle = 0.3;
+    const offset = new THREE.Vector3().setFromSphericalCoords(34, 0.95, this.controls.getAzimuthalAngle());
+    this.flyTo(p.clone().add(offset), p);
+  }
+
   private flyTo(pos: THREE.Vector3, target: THREE.Vector3) {
     this.camAnim = { fromPos: this.camera.position.clone(), toPos: pos, fromT: this.controls.target.clone(), toT: target, t: 0 };
   }
@@ -571,7 +589,7 @@ export class World3D {
     this.villagers.forEach((x) => x.setNameVisible(v));
   }
 
-  // ---------------------------------------------------------------- 事件（同像素版）
+  // ---------------------------------------------------------------- 事件
 
   handleEvent(e: VillageEvent) {
     const v = e.agent ? this.villagers.get(e.agent) : undefined;
@@ -705,12 +723,26 @@ export class World3D {
   /** 預設的鏡頭距離（直式畫面可以拉遠一點） */
   private homeDist(): number {
     const v = this.terrain.view;
-    return this.camera.aspect < 1 ? (v.portraitDist ?? v.dist) : v.dist;
+    return (this.camera.aspect < 1 ? (v.portraitDist ?? v.dist) : v.dist) * this.zoomOut;
+  }
+
+  private shiftX = 0;
+  private zoomOut = 1;
+
+  /** 畫面往左偏 px、鏡頭拉遠 zoomOut 倍（登入頁：右邊被登入卡片蓋住，整個小鎮要露在左邊）；0、1 = 平常 */
+  setViewShift(px: number, zoomOut = 1) {
+    this.shiftX = px;
+    this.zoomOut = zoomOut;
+    this.fit();
+    const v = this.terrain.view;
+    this.camera.position.setFromSphericalCoords(this.homeDist(), v.polar, v.azimuth);
   }
 
   private fit() {
     const w = Math.max(1, this.host.clientWidth);
     const h = Math.max(1, this.host.clientHeight);
+    if (this.shiftX) this.camera.setViewOffset(w, h, this.shiftX, 0, w, h);
+    else this.camera.clearViewOffset();
     this.renderer.setSize(w, h);
     this.labels.setSize(w, h);
     this.camera.aspect = w / h;
@@ -729,6 +761,12 @@ export class World3D {
       this.terrain.update(dt, now);
       this.terrain.courier?.update(dt, now);
       this.updateFlows(now);
+    }
+    const followAt = this.following && !this.camAnim ? this.terrain.courier?.focus() : undefined;
+    if (followAt) {
+      const d = followAt.sub(this.controls.target).setY(0).multiplyScalar(Math.min(1, dt * 2.5));
+      this.controls.target.add(d);
+      this.camera.position.add(d);
     }
     if (this.camAnim) {
       const a = this.camAnim;

@@ -1,18 +1,18 @@
 /**
  * 3D 村子共用的東西：座標換算、日夜關鍵影格、搬運圖示、協作線、障礙物、生活作息的地點，
- * 以及「場景」（Terrain）的介面——島嶼（island/IslandTerrain.ts）、之後的鐵道小鎮各自實作一份。
+ * 以及「場景」（Terrain）的介面——鐵道小鎮（rail/RailTerrain.ts）實作一份；以後要換場景再寫一份。
  */
 import * as THREE from "three";
 import type { Pose, SpotKind } from "../village/life";
 import type { Villager3D } from "./Villager3D";
-import { MAP_H, MAP_W } from "../village/VillageScene";
+import { MAP_H, MAP_W } from "../village/layout";
 
-export const S = 0.9; // 像素地圖一格 = 0.9 單位
+export const S = 0.9; // 地圖一格（village/layout.ts 的 30×20 格）= 0.9 單位
 export const SPEED = 2.4; // 單位 / 秒
 export const TAG_Y = 1.85; // 名牌掛在頭上多高（村民自己的座標，會跟著放大）
 export const VILLAGER_SCALE = 1.45; // 村民比例放大一點，遠看才認得出來
 
-/** 像素地圖的格子座標 → 3D 世界座標（村子的中心在原點） */
+/** 地圖的格子座標 → 3D 世界座標（村子的中心在原點） */
 export function toWorld(tx: number, ty: number): THREE.Vector3 {
   return new THREE.Vector3((tx - MAP_W / 2) * S, 0.18, (ty - MAP_H / 2) * S);
 }
@@ -184,6 +184,8 @@ export interface Courier {
   /** 問答結束（中轉站清空） */
   runEnded(runId?: string): void;
   setFlowsVisible(v: boolean): void;
+  /** 跟車鏡頭要對準哪裡（交通工具現在的位置） */
+  focus(): THREE.Vector3;
   update(dt: number, now: number): void;
   dispose(): void;
 }

@@ -34,18 +34,7 @@ body {
 .map {
   position: absolute;
   inset: 0;
-}
-
-.village-canvas {
-  width: 100%;
-  height: 100%;
-  /* 螢幕比例和地圖（3:2）不同時，兩側用草地色延伸，不留黑邊 */
-  background: #5f9c4e;
-  image-rendering: pixelated;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  z-index: 0; /* 自成一層：3D 名牌的 z-index 會一直往上加，不能蓋過登入卡片、選單 */
 }
 
 .village-name {
@@ -1811,6 +1800,12 @@ button.mention-item .clamp {
 .island-canvas canvas {
   display: block;
   touch-action: none;
+}
+
+.map-fallback {
+  padding: 24px;
+  text-align: center;
+  line-height: 1.6;
 }
 
 .island-loading {

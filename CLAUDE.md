@@ -1,6 +1,6 @@
 # Multi-Agent Village
 
-像素風虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者的問題。
+3D 鐵道小鎮裡的虛擬村落：每個 agent 是一位村民，村長（orchestrator）依 Agent Card 規劃並指派村民合作完成使用者的問題。
 
 - 架構：`docs/ARCHITECTURE.md`（全景、事件表、加密、帳號 / 對話 / 記憶、目錄結構）
 - 外接 agent：`extra-agents/`（每個子資料夾是獨立服務，各有 PLAN.md、README、docker-compose、build.sh）
@@ -57,21 +57,17 @@
   村子：名片 `maxFiles` 決定一次交幾份、回傳的圖片直接顯示、邀請 / 換 token 時先驗證。報紙底色是新聞用紙的暖米黃（使用者指定）。
   使用者部署實測通過（「網路研究員 ×2 → 報社」，第一版預覽＋PDF）。
 
-- **島嶼版地圖（3D）**：使用者看了政策島網站後提議「另做一版、可以切換、像素村不動」。`frontend/src/world3d/`（共用：World3D、Villager3D、Hud、town、models）＋ `island/IslandTerrain.ts`（場景；Three.js，lazy 載入），
-  介面同 `VillageCanvas`。之後使用者決定**只留島嶼**：登入後一律島嶼、沒有切換按鈕，畫不了 3D 時自動退回像素村
-  （`?view=pixel` 測試用；第一步完成待實測，像素村程式等登入頁改版、用一陣子後再刪）。I1 骨架使用者看過；
-  I2 日夜（真實時間，`?time=night` 預覽）/ 搬運圖示 / 協作線使用者看過；I3 膠囊工具列 / 村莊日誌 LIVE / 鳥瞰 / 手機完成（待實測）。
-  登入頁先維持像素村（之後可能也做島嶼版）。使用者提議「村民看起來像在過生活」→ L1 生活作息（`village/life.ts` 活動表，
-  島嶼版的地點 / 姿勢 / 道具；派工時中斷、做完回去接著做；夜晚回家睡）完成（待實測）。像素村不再加新功能。
+- **3D 地圖**：使用者看了政策島網站後先做了島嶼版（日夜、搬運圖示、協作線、工具列、村莊日誌、生活作息 `village/life.ts`），
+  再選定**鐵道小鎮**取代（ROADMAP 第 6、8 項）。`frontend/src/world3d/`（共用：World3D、Villager3D、WorldCanvas＋Hud、town、models、bake）
+  ＋ `rail/`（場景 `RailTerrain`、火車與中轉站 `Railway`；Three.js，lazy 載入）。R0～R3 完成：和駐村專家之間的交接都經過中轉站、
+  由火車載送；生活作息有車站長椅、時刻表、菜園；跟車鏡頭；不會動的零件合併（`bake.ts`）。使用者看過 R2 說 OK、要求 R3 與刪舊版
+  → 2026-10-24 **刪掉像素村（Phaser）與島嶼版**，登入頁也改成鐵道小鎮（示範劇本多一段「研究員 → 火車 → 報社」）。
+  R3、登入頁待使用者實測。畫不了 3D（WebGL）時地圖區顯示說明，問答與設定照常可用。
 
-- **介面風格**：像素 / 柔和並存（`theme-soft.css`，`data-theme`），預設柔和、帳號選單可換回像素，登入頁維持像素。T1 完成（待實測），
-  T2 逐頁打磨接著做（見 ROADMAP 第 7 項）。
+- **介面風格**：像素 / 柔和並存（`theme-soft.css`，`data-theme`），預設柔和、帳號選單可換回像素；登入頁照同一個設定。
+  T1 完成（待實測），T2 逐頁打磨（見 ROADMAP 第 7 項）。像素「介面風格」和已刪掉的像素村地圖是兩回事（目前保留）。
 
-- **鐵道小鎮**（ROADMAP 第 8 項）：使用者選定取代島嶼。R0 重構（`world3d/` 共用＋場景 `Terrain`）、R1 場景、R2 火車與中轉站
-  （`rail/Railway.ts`）都完成，使用者看過說 OK → **已設為預設地圖**（`?view=island` 還看得到島嶼版、`?view=pixel` 像素村）。
-
-**下一步**：R3 打磨（生活作息加車站地點、跟車鏡頭、效能）看使用者要不要；之後刪掉島嶼版與像素村（登入頁示範村落要先改成 3D）。
-介面風格 T2 逐頁打磨也還在排。之後 N2 郵差（只做 Email：Gmail SMTP＋應用程式密碼）——先提設計方案。
+**下一步**：等使用者實測 R3 與登入頁。介面風格 T2 逐頁打磨也還在排。之後 N2 郵差（只做 Email：Gmail SMTP＋應用程式密碼）——先提設計方案。
 Teams 不做、Telegram 之後試、定時送報（排程）等報社與郵差做完再討論。其他候選見 `docs/ROADMAP.md`「接下來」。
 本機生圖（Ollama 目前不支援，見「踩過的坑」）暫不做。
 
@@ -132,19 +128,18 @@ Teams 不做、Telegram 之後試、定時送報（排程）等報社與郵差�
 
 ## 介面配置
 
-- 登入頁：示範村落（`frontend/src/auth/demo.ts` 劇本驅動假事件）＋ 登入 / 註冊。
-- 登入後：地圖滿版（鐵道小鎮；畫不了 3D 時像素村）；左上帳號選單（LLM 設定、改密碼、登出、刪除帳號）；右上 ⚙️（滑鼠移入展開）→ 右側抽屜
+- 登入頁：示範鐵道小鎮（`frontend/src/auth/demo.ts` 劇本驅動假事件；不顯示工具列、畫面往左偏讓出登入卡片）＋ 登入 / 註冊。
+- 登入後：鐵道小鎮地圖滿版；左上帳號選單（LLM 設定、改密碼、登出、刪除帳號）；右上 ⚙️（滑鼠移入展開）→ 右側抽屜
   （村民、紀錄、記憶、村規、帳號、LLM 設定，依角色顯示）；右下 💬 問答視窗（對話列表、執行過程、停止、圖片放大）；⛶ 放大成畫面中央的大視窗（✕ / Esc / 點背景回右下，記住上次用哪種，localStorage `chat-size`）。
   輸入框打 `@` 跳出村民清單（`chat/mention.ts`：開頭 / 空白 / 標點後的 @ 才算，id 或中文名字篩選；↑↓、Enter / Tab、Esc 只關清單；外出中的駐村專家不能選）。
-- 介面風格：`styles.css`（像素）＋ `theme-soft.css`（柔和，`<html data-theme="soft">`）；新樣式先寫像素版，柔和需要不同外觀再補。
+- 介面風格：`styles.css`（像素，也是基底）＋ `theme-soft.css`（柔和，`<html data-theme="soft">`，預設）；新樣式先寫在 `styles.css`，柔和需要不同外觀再補。
 - 彈窗用 `ui/Modal.tsx`（portal 到 body，打開有動畫）；表單裡的非送出按鈕要寫 `type="button"`。
 - 回答與執行過程的成果用 `ui/Markdown.tsx` 顯示（marked → DOMPurify；保留單一換行、不顯示圖片、連結開新分頁）。
   LLM 的輸出不可信：不要繞過 DOMPurify 直接 innerHTML。執行紀錄（📜）維持原始文字方便除錯。
-- 地圖互動（`village/VillageScene.ts`）：閒著的村民每 8～15 秒有人冒一句（台詞由 `App.tsx` 的 `idleLines` 從名片產生，
-  系統角色在 `MAYOR` 等常數裡）；每 30～60 秒兩位附近的村民湊在一起聊幾句；派工時立刻中斷。
-  點村民：開新對話並在輸入框填「@id 」（村長不加 @；工匠、審核員、書記、鑑定師只自我介紹；外出中的駐村專家說外出中）。
-  開發模式有 `window.__village`（e2e 測試用）。Phaser 設 `input.windowEvents: false`，點擊也檢查 `downElement` 是地圖：
-  否則點在蓋住地圖的彈窗 / 視窗上會被當成點到後面的村民。
+- 地圖（`world3d/`、`rail/`）：村子的配置（30×20 格、裝飾、系統角色 `MAYOR` 等）在 `village/layout.ts`，生活作息在 `village/life.ts`。
+  閒著的村民每 8～15 秒有人冒一句（台詞由 `App.tsx` 的 `idleLines` 從名片產生）；每 30～60 秒兩位附近的村民湊在一起聊幾句；
+  派工時立刻中斷。點村民：開新對話並在輸入框填「@id 」（村長不加 @；工匠、審核員、書記、鑑定師只自我介紹；外出中的駐村專家說外出中）。
+  開發模式有 `window.__island`（World3D，e2e 測試用；名字沿用島嶼版時代）。地圖區（`.map`）自成一層（z-index），3D 名牌不會蓋過卡片 / 選單。
 
 ## 指令
 
@@ -156,7 +151,7 @@ Teams 不做、Telegram 之後試、定時送報（排程）等報社與郵差�
   本機 Ollama 上下文預設 4096 token，資料多時回答會被截斷（研究員會自動減半資料重寫）
 - 台灣史專家（`extra-agents/taiwan-history/`）：`uv run th index | search | ask | serve | gen-token`、`uv run pytest`；
   部署 `./build.sh` → 使用者自己 `docker-compose up -d`（在那個資料夾）。兩邊都要更新時：**先部署專家、再部署村子**
-- 重新產生 sprites（角色、裝飾、manifest）：`uv run --with pillow python scripts/gen_placeholder_sprites.py`；頁籤 icon：`scripts/gen_favicon.py`（同樣用法）
+- 重新產生角色圖（村民管理的頭像與外觀清單 manifest；3D 只用外觀 id）：`uv run --with pillow python scripts/gen_placeholder_sprites.py`；頁籤 icon：`scripts/gen_favicon.py`（同樣用法）
 - 容器部署：`cp .env.example .env` 填 `FRONTEND_PORT` → `./build.sh` → 使用者自己 `docker-compose up -d`；前端綁 0.0.0.0
 - DB 結構用 Alembic（`backend/village/store/migrations/`），啟動時自動 upgrade head；create_all 時代的舊 DB 先標記 0001 再升級。
   改 models 後：`cd backend && uv run python -m village.store.migrate revision -m "說明"`（外鍵要命名；SQLite 用 batch 模式）。

@@ -164,6 +164,10 @@ export class Railway implements Courier {
     });
   }
 
+  focus(): THREE.Vector3 {
+    return this.train.position.clone().setY(0);
+  }
+
   setFlowsVisible(v: boolean) {
     this.glowsVisible = v;
     for (const g of this.glows) g.mesh.visible = v;

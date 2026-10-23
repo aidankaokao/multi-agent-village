@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { residents, villagers, type Resident, type ResidentPreview, type ResidentStatus, type Villager } from "../api";
 import { Modal } from "../ui/Modal";
-import type { SpriteManifest } from "../village/VillageScene";
+import type { SpriteManifest } from "../village/layout";
 import { SpriteThumb } from "./fields";
 
 export const STATUS_LABEL: Record<ResidentStatus, string> = { online: "🟢 在村", offline: "🔴 外出中", unknown: "⚪ 還沒檢查" };

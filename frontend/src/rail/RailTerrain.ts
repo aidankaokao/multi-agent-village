@@ -63,7 +63,8 @@ export class RailTerrain implements Terrain {
   private clouds: THREE.Group[] = [];
   private smokes: { group: THREE.Group; puffs: THREE.Mesh[] }[] = [];
   courier?: Railway;
-  private stops = new WeakMap<Outpost, number>(); // 專家的小站 → 火車停在鐵道上的哪個角度
+  private stops = new WeakMap<Outpost, number>();
+  private stationSpots: Spot[] = []; // 專家的小站 → 火車停在鐵道上的哪個角度
 
   inside(p: THREE.Vector3, margin: number): boolean {
     return Math.hypot(p.x, p.z) <= TOWN_R - margin;
@@ -135,6 +136,7 @@ export class RailTerrain implements Terrain {
       const a = Math.PI * 0.9 + (i / 6) * Math.PI * 1.2;
       cl.position.set(Math.cos(a) * (75 + (i % 3) * 14), 32 + (i % 3) * 5, Math.sin(a) * (75 + (i % 3) * 14));
       cl.scale.setScalar(1.6 + (i % 3) * 0.5);
+      cl.userData.dynamic = true; // 會飄：不要合併
       this.clouds.push(cl);
       s.add(cl);
     }
@@ -151,7 +153,7 @@ export class RailTerrain implements Terrain {
     const st = R.mainStation();
     st.position.set(0, 0, stZ);
     s.add(st);
-    ctx.addObstacle(0, stZ, 2.7);
+    for (const x of [-1.3, 1.3]) ctx.addObstacle(x, stZ, 1.45); // 站房是長方形：用兩個圓蓋住
     const pf = R.platform(12);
     pf.position.set(-1, 0, pfZ);
     s.add(pf);
@@ -178,14 +180,46 @@ export class RailTerrain implements Terrain {
     const roadFrom = TOWN_R * 0.75;
     s.add(M.flat(new THREE.PlaneGeometry(0.75, stZ - 1.9 - roadFrom), 0xd9bf8a, -0.36, (roadFrom + stZ - 1.9) / 2));
 
+    this.buildStationLife(ctx, stZ);
+
     // 小火車：平常停在月台邊；和駐村專家之間的交接由它載（Railway）
     const t = R.train();
+    t.userData.dynamic = true; // 會開：不要合併
     s.add(t);
     this.courier = new Railway(s, t, dep, (o) => this.stops.get(o), MAIN_ANGLE - 0.04, TRACK_R);
   }
 
   spots(ctx: BuildCtx): Spot[] {
-    return townSpots(ctx, (p, m) => this.inside(p, m));
+    return [...townSpots(ctx, (p, m) => this.inside(p, m)), ...this.stationSpots.filter((x) => !ctx.blocked(x.pos.x, x.pos.z))];
+  }
+
+  /**
+   * 站前（朝小鎮那一面）：等車的長椅、時刻表；小鎮裡兩塊菜園。生活作息的地點（村民會來等車、看時刻表、種菜）。
+   */
+  private buildStationLife(ctx: BuildCtx, stZ: number) {
+    const s = ctx.scene;
+    const backZ = stZ - 2.1; // 站房背面前方
+    const face = (x: number, z: number) => new THREE.Vector3(x, 0.18, z);
+    for (const x of [-2.3, 2.3]) {
+      const b = R.bench();
+      b.position.set(x, 0, backZ);
+      b.rotation.y = Math.PI; // 背靠站房、面向小鎮
+      s.add(b);
+      for (const dx of [-0.38, 0.38]) this.stationSpots.push({ kind: "bench", pos: face(x + dx, backZ + 0.02), face: face(x + dx, backZ - 6), taken: null });
+    }
+    const tt = R.signPost("🕒 時刻表", 1.2, 0.5, "#ffffff", "#2b3a55");
+    tt.position.set(4.6, 0, backZ + 0.3);
+    s.add(tt);
+    ctx.addObstacle(4.6, backZ + 0.3, 0.5);
+    for (const dx of [-0.5, 0.5]) this.stationSpots.push({ kind: "timetable", pos: face(4.6 + dx, backZ - 0.9), face: face(4.6 + dx, backZ + 0.3), taken: null });
+    // 菜園
+    for (const [x, z] of [[-8.5, 12.5], [8.5, 12.8]]) {
+      const f = R.field(2.6, 1.8, x < 0 ? 0x6fae4a : 0x8cc05a);
+      f.position.set(x, 0, z);
+      s.add(f);
+      ctx.addObstacle(x, z, 1.3);
+      for (const dz of [-1.6, 1.6]) this.stationSpots.push({ kind: "field", pos: face(x, z + dz), face: face(x, z), taken: null });
+    }
   }
 
   /** 第 index 位駐村專家的小站：站房（依樣式）、月台、站名、路燈、平交道；外出中掛「暫停營業」 */

@@ -1,5 +1,5 @@
 import type { AgentSpec, Model, ToolInfo } from "../api";
-import { BLOCKED, CRAFTSMAN, MAP_H, MAP_W, MAYOR, nearestFree, REVIEWER, SCRIBE, type SpriteManifest } from "../village/VillageScene";
+import { BLOCKED, CRAFTSMAN, MAP_H, MAP_W, MAYOR, nearestFree, REVIEWER, SCRIBE, type SpriteManifest } from "../village/layout";
 import { Field, ListInput, NumInput, SpriteThumb } from "./fields";
 
 interface Props {

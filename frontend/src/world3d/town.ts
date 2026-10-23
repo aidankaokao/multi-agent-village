@@ -1,9 +1,9 @@
 /**
- * 村子本身（主島或鐵道小鎮中間的小鎮）：十字路與廣場、裝飾（位置和像素版一樣）、池塘、路燈，以及生活作息的地點。
+ * 村子本身（鐵道小鎮中間的小鎮）：十字路與廣場、裝飾（位置照 village/layout.ts 的 30×20 格）、池塘、路燈，以及生活作息的地點。
  */
 import * as THREE from "three";
 import type { SpotKind } from "../village/life";
-import { DECOR, POND } from "../village/VillageScene";
+import { DECOR, POND } from "../village/layout";
 import { BLOCK_R, S, toWorld, type BuildCtx, type Spot } from "./common";
 import * as M from "./models";
 
@@ -19,7 +19,7 @@ export function buildTown(ctx: BuildCtx, roadW: number, roadH: number) {
   ctx.scene.add(M.flat(new THREE.PlaneGeometry(0.75, roadH), road, -0.36, 0));
   ctx.scene.add(M.flat(new THREE.CircleGeometry(2.1, 24), road, 0, -0.36, 0.2));
 
-  // 裝飾：位置跟像素版一樣（x = 中心格、y = 底邊格）
+  // 裝飾：位置照 layout 的格子（x = 中心格、y = 底邊格）
   let seed = 0;
   for (const d of DECOR) {
     const p = toWorld(d.x, d.y - (d.kind.startsWith("house") ? 1.6 : 0.5));

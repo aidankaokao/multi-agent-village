@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { auth, type AuthStatus, type Me } from "../api";
-import { VillageCanvas, type VillageHandle } from "../village/VillageCanvas";
+import { initialTheme } from "../ui/theme";
+import { hasWebGL } from "../world3d/webgl";
+import type { VillageHandle } from "../world3d/WorldCanvas";
 import { DEMO_VILLAGERS, playDemo } from "./demo";
+
+const RailCanvas = lazy(() => import("../rail/RailCanvas"));
 
 const FEATURES = [
   ["🧓", "村長看懂你的需求，分派給合適的村民"],
@@ -9,10 +13,11 @@ const FEATURES = [
   ["🧮", "工具型村民用程式計算、畫圖，結果精準"],
   ["🔍", "審核員把關，答案交出前再檢查一次"],
   ["🔨", "跟工匠聊天，就能打造你自己的村民"],
+  ["🚂", "駐村專家住在鐵道沿線，火車經過中轉站幫忙送件"],
 ];
 
 /**
- * 登入頁：背景是會動的示範村落（劇本驅動，不呼叫後端），右側是登入 / 註冊。
+ * 登入頁：背景是會動的示範鐵道小鎮（劇本驅動，不呼叫後端），右側是登入 / 註冊。
  * 系統還沒有帳號時顯示「建立管理員帳號」。
  */
 export function LoginPage({ status, onDone }: { status: AuthStatus; onDone: (me: Me) => void }) {
@@ -26,12 +31,30 @@ export function LoginPage({ status, onDone }: { status: AuthStatus; onDone: (me:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // 等 Phaser 場景載入後再開始演
+  const [webgl] = useState(hasWebGL);
+  // 寬螢幕：登入卡片在右邊，小鎮往左偏一點才不會被蓋住（手機卡片置中、不偏）
+  const [shift, setShift] = useState(0);
+  useEffect(() => {
+    const update = () => setShift(window.innerWidth > 760 ? Math.min(240, window.innerWidth * 0.17) : 0);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  // 介面風格照帳號選單的設定（預設柔和）
+  useEffect(() => {
+    document.documentElement.dataset.theme = initialTheme();
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, []);
+
+  // 等 3D 地圖載入後再開始演
   useEffect(() => {
     let stop = () => {};
     const t = window.setTimeout(() => {
       stop = playDemo((e) => village.current?.dispatch(e), setCaption);
-    }, 1200);
+    }, 2500);
     return () => {
       window.clearTimeout(t);
       stop();
@@ -59,7 +82,11 @@ export function LoginPage({ status, onDone }: { status: AuthStatus; onDone: (me:
   return (
     <div className="login-stage">
       <div className="map">
-        <VillageCanvas ref={village} villagers={DEMO_VILLAGERS} />
+        {webgl && (
+          <Suspense fallback={<div className="island-loading">🚂</div>}>
+            <RailCanvas ref={village} villagers={DEMO_VILLAGERS} hud={false} shiftX={shift} />
+          </Suspense>
+        )}
       </div>
       <div className="village-name">Multi-Agent Village</div>
       <div className="login-caption" key={caption}>
@@ -68,7 +95,7 @@ export function LoginPage({ status, onDone }: { status: AuthStatus; onDone: (me:
 
       <div className="login-card">
         <h1>Multi-Agent Village</h1>
-        <p className="muted">像素村落裡的 AI 村民，分工合作完成你的任務。</p>
+        <p className="muted">鐵道小鎮裡的 AI 村民，分工合作完成你的任務。</p>
         <ul className="login-features">
           {FEATURES.map(([icon, text]) => (
             <li key={text}>

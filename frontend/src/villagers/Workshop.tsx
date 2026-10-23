@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { villagers, workshop, type AgentSpec, type Model, type TryResult, type WorkshopBody } from "../api";
-import { BLOCKED, type SpriteManifest } from "../village/VillageScene";
+import { BLOCKED, type SpriteManifest } from "../village/layout";
 import { SpriteThumb } from "./fields";
 import { TargetSelect } from "./Lab";
 

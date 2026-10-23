@@ -1,6 +1,6 @@
 /**
  * 島嶼版的 3D 模型：全部用程式拿方塊、圓柱、圓球組成（低多邊形），不用任何模型檔或貼圖。
- * 村民的造型依像素版的外觀（sprite id）決定：衣服顏色跟 scripts/gen_placeholder_sprites.py 一樣，再加上各自的配件。
+ * 村民的造型依外觀（sprite id）決定：衣服顏色跟角色圖（scripts/gen_placeholder_sprites.py）一樣，再加上各自的配件。
  */
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
@@ -26,56 +26,7 @@ export function mesh(geo: THREE.BufferGeometry, material: THREE.Material, x = 0,
   return m;
 }
 
-// ---------------------------------------------------------------- 島
-
-/** 平頂的六邊形頂點（半徑 r） */
-export function hexPoints(r: number): THREE.Vector2[] {
-  return Array.from({ length: 6 }, (_, i) => {
-    const a = (Math.PI / 3) * i;
-    return new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r);
-  });
-}
-
-/** 圓角六邊形的島：草地頂、沙灘邊、土色側面 */
-export function island(r: number, height = 1.2, grass = 0x8fc46a): THREE.Group {
-  const g = new THREE.Group();
-  const shape = (rr: number) => {
-    const pts = hexPoints(rr);
-    const s = new THREE.Shape();
-    const round = rr * 0.18;
-    pts.forEach((p, i) => {
-      const prev = pts[(i + 5) % 6];
-      const next = pts[(i + 1) % 6];
-      const a = p.clone().add(prev.clone().sub(p).setLength(round));
-      const b = p.clone().add(next.clone().sub(p).setLength(round));
-      if (i === 0) s.moveTo(a.x, a.y);
-      else s.lineTo(a.x, a.y);
-      s.quadraticCurveTo(p.x, p.y, b.x, b.y);
-    });
-    s.closePath();
-    return s;
-  };
-  const extrude = (rr: number, depth: number, color: number, y: number) => {
-    const geo = new THREE.ExtrudeGeometry(shape(rr), { depth, bevelEnabled: false, curveSegments: 4 });
-    geo.rotateX(Math.PI / 2); // 往下長出厚度
-    const m = mesh(geo, mat(color), 0, y, 0);
-    m.castShadow = false;
-    return m;
-  };
-  g.add(extrude(r + 0.9, 0.35, 0xe9d8a6, -0.25)); // 沙灘
-  g.add(extrude(r, height, 0x9a7a55, 0)); // 土
-  const top = extrude(r, 0.12, grass, 0.06); // 草地
-  g.add(top);
-  return g;
-}
-
-export function sea(radius: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.CircleGeometry(radius, 64), new THREE.MeshStandardMaterial({ color: 0x7ec7d0, roughness: 0.35 }));
-  m.rotation.x = -Math.PI / 2;
-  m.position.y = -0.55;
-  m.receiveShadow = true;
-  return m;
-}
+// ---------------------------------------------------------------- 地面
 
 /** 地上的平面（小路、廣場）：稍微浮在草地上 */
 export function flat(geo: THREE.BufferGeometry, color: number, x: number, z: number, y = 0.19): THREE.Mesh {
@@ -195,36 +146,6 @@ export function pond(w: number, d: number): THREE.Group {
   g.add(r, wtr);
   g.add(mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.02, 8), mat(0x3f9a48), w * 0.22, 0.22, -d * 0.18));
   g.add(mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.02, 8), mat(0x3f9a48), -w * 0.25, 0.22, d * 0.15));
-  return g;
-}
-
-/** 木棧橋：從 a 到 b（世界座標，y 取島面高度） */
-export function bridge(a: THREE.Vector3, b: THREE.Vector3): THREE.Group {
-  const g = new THREE.Group();
-  const len = a.distanceTo(b);
-  const planks = Math.max(2, Math.round(len / 0.45));
-  for (let i = 0; i < planks; i++) {
-    const t = (i + 0.5) / planks;
-    const p = a.clone().lerp(b, t);
-    const plank = mesh(new THREE.BoxGeometry(1.3, 0.1, 0.36), mat(i % 2 ? 0xb88a52 : 0xa8784a), p.x, 0.05, p.z);
-    plank.lookAt(b.x, 0.05, b.z);
-    g.add(plank);
-  }
-  for (let i = 0; i <= planks; i += 2) {
-    const p = a.clone().lerp(b, i / planks);
-    const side = new THREE.Vector3(b.z - a.z, 0, a.x - b.x).setLength(0.62);
-    [1, -1].forEach((s) => g.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 5), mat(0x7a4e2e), p.x + side.x * s, -0.1, p.z + side.z * s)));
-  }
-  return g;
-}
-
-export function boat(color = 0xd0563f): THREE.Group {
-  const g = new THREE.Group();
-  g.add(mesh(new THREE.BoxGeometry(0.5, 0.25, 1.3), mat(color), 0, 0.1, 0));
-  g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.2, 4), mat(0x7a4e2e), 0, 0.75, 0));
-  const sail = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.25, 0), new THREE.Vector3(0, 1.3, 0), new THREE.Vector3(0, 0.25, 0.7)]);
-  sail.computeVertexNormals();
-  g.add(mesh(sail, new THREE.MeshStandardMaterial({ color: 0xfaf6ee, side: THREE.DoubleSide, flatShading: true }), 0.04, 0, -0.2));
   return g;
 }
 

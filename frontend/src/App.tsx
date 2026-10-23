@@ -11,41 +11,28 @@ import { RulesPanel } from "./rules/RulesPanel";
 import { LlmSettings } from "./settings/LlmSettings";
 import { TracePanel } from "./traces/TracePanel";
 import { VillagerManager } from "./villagers/VillagerManager";
-import { VillageCanvas, type VillageHandle } from "./village/VillageCanvas";
-import type { VillagerInfo } from "./village/VillageScene";
+import type { VillagerInfo } from "./village/layout";
+import { THEME_LABEL, initialTheme, type UiTheme } from "./ui/theme";
+import { hasWebGL } from "./world3d/webgl";
+import type { VillageHandle } from "./world3d/WorldCanvas";
 
-// 島嶼版地圖（Three.js）：切到島嶼才下載，用像素村的人不受影響
-const IslandCanvas = lazy(() => import("./island/IslandCanvas"));
+// 鐵道小鎮（Three.js）：分開打包，先顯示介面、地圖隨後載入
 const RailCanvas = lazy(() => import("./rail/RailCanvas"));
-type MapView = "pixel" | "island" | "rail";
 
-// 介面風格：預設柔和，帳號選單可以換回像素；登入頁一律像素
-type UiTheme = "pixel" | "soft";
-function initialTheme(): UiTheme {
-  try {
-    return localStorage.getItem("ui-theme") === "pixel" ? "pixel" : "soft";
-  } catch {
-    return "soft";
-  }
-}
-const THEME_LABEL: Record<UiTheme, string> = { soft: "柔和", pixel: "像素" };
 
-/** 瀏覽器能不能畫 3D（WebGL）：舊電腦、關掉硬體加速時不行 */
-function hasWebGL(): boolean {
-  try {
-    const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") || c.getContext("webgl"));
-  } catch {
-    return false;
-  }
+/** 畫不了 3D 地圖時：說明怎麼辦（問答、設定照常可以用） */
+export function NoWebGL() {
+  return (
+    <div className="island-loading map-fallback">
+      <div>
+        <strong>🚂 這個瀏覽器畫不了 3D 地圖</strong>
+        <p>請在瀏覽器設定裡開啟「硬體加速」後重新整理。問答（右下 💬）和設定（右上 ⚙️）照常可以用。</p>
+      </div>
+    </div>
+  );
 }
 
-/** 地圖：鐵道小鎮（3D）；畫不了 3D 時自動退回像素村。網址 ?view=island 看舊的島嶼版、?view=pixel 強制看像素村（測試用） */
-function initialView(): MapView {
-  const q = new URLSearchParams(location.search).get("view");
-  if (q === "pixel" || !hasWebGL()) return "pixel";
-  return q === "island" ? "island" : "rail";
-}
+
 
 type Page = "villagers" | "traces" | "memories" | "rules" | "accounts" | "llm";
 
@@ -92,7 +79,7 @@ export function App() {
 }
 
 /**
- * 版面：像素地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
+ * 版面：鐵道小鎮地圖滿版；右上 ⚙️ 展開頁面選單，頁面從右側抽屜滑出（左邊仍看得到村子）；
  * 右下 💬 打開問答視窗。抽屜與問答視窗同時只開一個（進行中的問答不受影響）。
  */
 /** 系統角色被點到時的自我介紹（他們不接受 @ 指名） */
@@ -153,7 +140,7 @@ function VillageApp({
       /* 無痕模式等存不了：只是下次不記得 */
     }
   };
-  const [view] = useState<MapView>(initialView);
+  const [webgl] = useState(hasWebGL);
   const [uiTheme, setUiThemeState] = useState<UiTheme>(initialTheme);
   const setUiTheme = (t: UiTheme) => {
     setUiThemeState(t);
@@ -167,7 +154,7 @@ function VillageApp({
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     return () => {
-      delete document.documentElement.dataset.theme; // 登出回登入頁：像素
+      delete document.documentElement.dataset.theme; // 登出回登入頁：登入頁自己設定
     };
   }, [theme]);
   const [unseen, setUnseen] = useState(false); // 問答視窗收著時有問答完成 → 💬 上的紅點
@@ -306,16 +293,12 @@ function VillageApp({
   return (
     <div className={`stage ${page ? "with-drawer" : ""}`}>
       <div className="map" onMouseDown={() => setMenuOpen(false)}>
-        {view === "island" ? (
-          <Suspense fallback={<div className="island-loading">🏝️ 島嶼載入中…</div>}>
-            <IslandCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
-          </Suspense>
-        ) : view === "rail" ? (
+        {webgl ? (
           <Suspense fallback={<div className="island-loading">🚂 小鎮載入中…</div>}>
             <RailCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
           </Suspense>
         ) : (
-          <VillageCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
+          <NoWebGL />
         )}
       </div>
       <div className="village-name">Multi-Agent Village</div>
