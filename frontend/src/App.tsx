@@ -18,27 +18,31 @@ import type { VillagerInfo } from "./village/VillageScene";
 const IslandCanvas = lazy(() => import("./island/IslandCanvas"));
 type MapView = "pixel" | "island";
 
-// 介面風格：跟著地圖（像素村 → 像素、島嶼 → 柔和），或自己指定；登入頁一律像素
-type UiTheme = "auto" | "pixel" | "soft";
+// 介面風格：預設柔和，帳號選單可以換回像素；登入頁一律像素
+type UiTheme = "pixel" | "soft";
 function initialTheme(): UiTheme {
   try {
-    const t = localStorage.getItem("ui-theme");
-    return t === "pixel" || t === "soft" ? t : "auto";
+    return localStorage.getItem("ui-theme") === "pixel" ? "pixel" : "soft";
   } catch {
-    return "auto";
+    return "soft";
   }
 }
-const THEME_LABEL: Record<UiTheme, string> = { auto: "跟著地圖", pixel: "像素", soft: "柔和" };
+const THEME_LABEL: Record<UiTheme, string> = { soft: "柔和", pixel: "像素" };
 
-/** 地圖樣式：網址 ?view=island / pixel 優先，再來是上次的選擇 */
-function initialView(): MapView {
-  const q = new URLSearchParams(location.search).get("view");
-  if (q === "island" || q === "pixel") return q;
+/** 瀏覽器能不能畫 3D（WebGL）：舊電腦、關掉硬體加速時不行 */
+function hasWebGL(): boolean {
   try {
-    return localStorage.getItem("map-view") === "island" ? "island" : "pixel";
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl2") || c.getContext("webgl"));
   } catch {
-    return "pixel";
+    return false;
   }
+}
+
+/** 地圖：島嶼（3D）；畫不了 3D 時自動退回像素村。網址 ?view=pixel 可以強制看像素村（測試用） */
+function initialView(): MapView {
+  if (new URLSearchParams(location.search).get("view") === "pixel") return "pixel";
+  return hasWebGL() ? "island" : "pixel";
 }
 
 type Page = "villagers" | "traces" | "memories" | "rules" | "accounts" | "llm";
@@ -147,18 +151,7 @@ function VillageApp({
       /* 無痕模式等存不了：只是下次不記得 */
     }
   };
-  const [view, setView] = useState<MapView>(initialView);
-  const switchView = (v: MapView) => {
-    setView(v);
-    try {
-      localStorage.setItem("map-view", v);
-    } catch {
-      /* 存不了：只是下次不記得 */
-    }
-    const url = new URL(location.href);
-    url.searchParams.set("view", v);
-    history.replaceState(null, "", url);
-  };
+  const [view] = useState<MapView>(initialView);
   const [uiTheme, setUiThemeState] = useState<UiTheme>(initialTheme);
   const setUiTheme = (t: UiTheme) => {
     setUiThemeState(t);
@@ -168,7 +161,7 @@ function VillageApp({
       /* 存不了：只是下次不記得 */
     }
   };
-  const theme = uiTheme === "auto" ? (view === "island" ? "soft" : "pixel") : uiTheme;
+  const theme = uiTheme;
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     return () => {
@@ -319,14 +312,6 @@ function VillageApp({
           <VillageCanvas ref={villageRef} villagers={villagers} onVillagerClick={clickVillager} />
         )}
       </div>
-      <div className="view-switch" role="group" aria-label="地圖樣式">
-        <button className={view === "pixel" ? "active" : ""} onClick={() => switchView("pixel")} title="像素村（2D）">
-          🟫 像素村
-        </button>
-        <button className={view === "island" ? "active" : ""} onClick={() => switchView("island")} title="島嶼（3D，可拖曳旋轉、滾輪縮放）">
-          🏝️ 島嶼
-        </button>
-      </div>
       <div className="village-name">Multi-Agent Village</div>
       <div className="user-chip">
         <button onClick={() => setUserMenu(!userMenu)} title="帳號">
@@ -341,7 +326,7 @@ function VillageApp({
             <div className="theme-pick" role="group" aria-label="介面風格">
               <span className="muted">🎨 介面風格</span>
               <div className="row">
-                {(["auto", "pixel", "soft"] as const).map((t) => (
+                {(["soft", "pixel"] as const).map((t) => (
                   <button key={t} className={uiTheme === t ? "on" : ""} aria-pressed={uiTheme === t} onClick={() => setUiTheme(t)}>
                     {THEME_LABEL[t]}
                   </button>

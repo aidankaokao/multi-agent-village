@@ -211,22 +211,6 @@
   border-color: var(--panel);
 }
 
-:where(:root[data-theme="soft"]) .view-switch {
-  background: rgba(255, 253, 248, 0.92);
-  border: none;
-  box-shadow: var(--soft-shadow-sm);
-}
-
-:where(:root[data-theme="soft"]) .view-switch button {
-  color: var(--text);
-  background: transparent;
-}
-
-:where(:root[data-theme="soft"]) .view-switch button.active {
-  background: var(--soft-ink);
-  color: #fff;
-}
-
 :where(:root[data-theme="soft"]) .llm-banner {
   background: #fdf0e8;
   color: #a2421f;

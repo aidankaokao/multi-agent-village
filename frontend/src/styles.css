@@ -1911,36 +1911,6 @@ button.mention-item .clamp {
   }
 }
 
-/* 地圖樣式切換（畫面上方中央的膠囊） */
-.view-switch {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  background: rgba(27, 27, 42, 0.8);
-  border: 2px solid var(--line);
-  border-radius: 999px;
-}
-
-.view-switch button {
-  padding: 4px 12px;
-  font-size: 13px;
-  border-radius: 999px;
-  border: none;
-  box-shadow: none;
-  background: transparent;
-  color: var(--text);
-}
-
-.view-switch button.active {
-  background: var(--accent);
-  color: #1b1b2a;
-}
-
 /* 島嶼版：交接時頭上拿著的東西 */
 .isl-carry {
   display: none;
@@ -1998,7 +1968,7 @@ button.mention-item .clamp {
 /* 島嶼版工具列：白色膠囊（參考政策島的浮動工具列） */
 .isl-toolbar {
   position: absolute;
-  top: 58px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 15;
@@ -2205,18 +2175,20 @@ button.mention-item .clamp {
   }
 }
 
-/* 手機：左上的村名、帳號佔掉上方空間，切換膠囊與工具列往下排 */
-@media (max-width: 700px) {
-  .view-switch {
-    top: 92px;
-  }
-
+/* 畫面窄時左上的村名會擋到工具列：往下排；手機再排到帳號按鈕下面 */
+@media (max-width: 1080px) {
   .isl-toolbar {
-    top: 136px;
+    top: 58px;
   }
 }
 
-/* 帳號選單：介面風格（跟著地圖 / 像素 / 柔和） */
+@media (max-width: 700px) {
+  .isl-toolbar {
+    top: 92px;
+  }
+}
+
+/* 帳號選單：介面風格（柔和 / 像素） */
 .theme-pick {
   display: flex;
   flex-direction: column;
