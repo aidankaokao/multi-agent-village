@@ -2,7 +2,7 @@
  * 鐵道小鎮場景：村子是中間的小鎮，一條環狀鐵道繞著小鎮；主車站在小鎮前方（+z），旁邊的倉庫是中轉站。
  * 駐村專家住在鐵道外側自己的小站（樣式依名字），外圍是田野和遠山。
  * 主車站在鐵道內側（正面朝鏡頭）；專家的小站在鐵道外側（正面朝小鎮）。
- * R1 只有場景（火車停在主車站）；R2 才讓火車載包裹往返。
+ * 和駐村專家之間的交接都經過中轉站、由火車載送（rail/Railway.ts）。
  */
 import * as THREE from "three";
 import { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
@@ -10,6 +10,7 @@ import type { BuildCtx, Outpost, Spot, Terrain, ViewConfig } from "../world3d/co
 import * as M from "../world3d/models";
 import { TOWN_NODES, buildTown, townSpots } from "../world3d/town";
 import * as R from "./models";
+import { Railway } from "./Railway";
 
 const TOWN_R = 20; // 小鎮（村民生活的範圍）的半徑
 const TRACK_R = 24; // 環狀鐵道的半徑
@@ -60,8 +61,8 @@ export class RailTerrain implements Terrain {
   routeNodes = TOWN_NODES;
   private clouds: THREE.Group[] = [];
   private smokes: { group: THREE.Group; puffs: THREE.Mesh[] }[] = [];
-  train: THREE.Group | null = null;
-  depot: THREE.Group | null = null;
+  courier?: Railway;
+  private stops = new WeakMap<Outpost, number>(); // 專家的小站 → 火車停在鐵道上的哪個角度
 
   inside(p: THREE.Vector3, margin: number): boolean {
     return Math.hypot(p.x, p.z) <= TOWN_R - margin;
@@ -170,19 +171,16 @@ export class RailTerrain implements Terrain {
     depSign.position.set(-7.7, 0, stZ + 1.0);
     depSign.rotation.y = 0.5;
     s.add(depSign);
-    this.depot = dep;
+
     // 站前（後門）廣場，和小鎮的直路接起來
     s.add(M.flat(new THREE.PlaneGeometry(14, 1.6), 0xd9bf8a, -1.6, stZ - 1.9, 0.185));
     const roadFrom = TOWN_R * 0.75;
     s.add(M.flat(new THREE.PlaneGeometry(0.75, stZ - 1.9 - roadFrom), 0xd9bf8a, -0.36, (roadFrom + stZ - 1.9) / 2));
 
-    // 停在月台邊的小火車（R2 會開）
+    // 小火車：平常停在月台邊；和駐村專家之間的交接由它載（Railway）
     const t = R.train();
-    const a = MAIN_ANGLE - 0.04;
-    t.position.set(Math.cos(a) * TRACK_R, 0.1, Math.sin(a) * TRACK_R);
-    t.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); // 車頭（+x）朝逆時針方向（切線 (-sin, cos)）
     s.add(t);
-    this.train = t;
+    this.courier = new Railway(s, t, dep, (o) => this.stops.get(o), MAIN_ANGLE - 0.04, TRACK_R);
   }
 
   spots(ctx: BuildCtx): Spot[] {
@@ -230,7 +228,9 @@ export class RailTerrain implements Terrain {
     const desk: Spot = { kind: "tree", pos: toWorldOf(g, 1.5, 1.5), face: toTown, taken: null };
     // 走到小鎮：站前 → 平交道旁的月台尾端 → 越過鐵道（鐵道內側）
     const gates = [toWorldOf(g, -3.4, 3.0), toWorldOf(g, -3.4, LOCAL_TRACK_Z + 2.4)];
-    return { outpost: { center, radius: 4.0, gates, door, desk }, group: g };
+    const outpost: Outpost = { center, radius: 4.0, gates, door, desk };
+    this.stops.set(outpost, angle);
+    return { outpost, group: g };
   }
 
   outpostAway(group: THREE.Group, away: boolean) {

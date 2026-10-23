@@ -65,6 +65,8 @@ export interface WorldVillager extends VillagerInfo {
 
 export class World3D {
   onVillagerClick?: (id: string) => void;
+  /** 場景（交通工具）想寫進村莊日誌的話 */
+  onLog?: (icon: string, text: string, agent?: string, kind?: "info" | "ok" | "bad") => void;
   private renderer: THREE.WebGLRenderer;
   private labels: CSS2DRenderer;
   private scene = new THREE.Scene();
@@ -148,6 +150,13 @@ export class World3D {
       addLamp: (x, z) => this.addLamp(x, z),
     };
     this.buildWorld();
+    const world = this; // eslint-disable-line @typescript-eslint/no-this-alias
+    this.terrain.courier?.attach({
+      log: (icon, text, agent, kind) => this.onLog?.(icon, text, agent, kind),
+      get flowsVisible() {
+        return world.flowsVisible;
+      },
+    });
     this.collectGlow(this.scene);
     this.applyTime(this.minutes());
     this.resize = new ResizeObserver(() => this.fit());
@@ -525,6 +534,7 @@ export class World3D {
   setFlowsVisible(v: boolean) {
     this.flowsVisible = v;
     for (const f of this.flows) f.line.visible = f.dot.visible = v;
+    this.terrain.courier?.setFlowsVisible(v);
   }
 
   /** 暫停：村民、船、雲、協作線都停住（鏡頭照樣可以轉） */
@@ -569,7 +579,11 @@ export class World3D {
       if (icon) this.carrying.set(e.agent, icon);
       else this.carrying.delete(e.agent);
     }
-    if (["run.finished", "run.failed", "run.cancelled"].includes(e.type)) this.endFlows(e.run_id);
+    const courier = this.terrain.courier;
+    if (["run.finished", "run.failed", "run.cancelled"].includes(e.type)) {
+      this.endFlows(e.run_id);
+      courier?.runEnded(e.run_id);
+    }
     switch (e.type) {
       case "run.started":
         v?.startWork("thinking");
@@ -581,6 +595,9 @@ export class World3D {
         v?.finish(false);
         break;
       case "agent.started":
+        v?.startWork();
+        if (v) courier?.started(v, e.run_id);
+        break;
       case "workshop.started":
       case "review.started":
       case "memory.started":
@@ -588,6 +605,9 @@ export class World3D {
         v?.startWork();
         break;
       case "agent.finished":
+        v?.finish(true);
+        if (v) courier?.finished(v, this.carryOf(v), e.run_id);
+        break;
       case "workshop.finished":
       case "memory.finished":
         v?.finish(true);
@@ -609,6 +629,7 @@ export class World3D {
         const from = this.villagers.get(e.from_agent ?? "");
         const to = this.villagers.get(e.to_agent ?? "");
         if (from && to) {
+          if (courier?.handoff(from, to, this.carryOf(from), e.run_id)) break; // 交通工具送（例如經過中轉站、搭火車）
           from.handoffTo(to, this.carryOf(from));
           this.addFlow(from, to, e.run_id);
         }
@@ -699,6 +720,7 @@ export class World3D {
     if (!this.paused) {
       this.villagers.forEach((v) => v.update(dt, now));
       this.terrain.update(dt, now);
+      this.terrain.courier?.update(dt, now);
       this.updateFlows(now);
     }
     if (this.camAnim) {
@@ -719,6 +741,7 @@ export class World3D {
   };
 
   dispose() {
+    this.terrain.courier?.dispose();
     cancelAnimationFrame(this.frame);
     window.clearInterval(this.idleTimer);
     this.resize.disconnect();

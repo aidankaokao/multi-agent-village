@@ -38,6 +38,8 @@ export class Villager3D {
   private actEl: HTMLDivElement;
   private actTimer?: number;
   roles: string[] = [];
+  private onErrand = false;
+  private working = false; // 派工中（startWork 到 finish）
   busy = false;
   chatting = false;
   away = false;
@@ -383,16 +385,47 @@ export class Villager3D {
   startWork(kind: "working" | "thinking" = "working") {
     this.endChat();
     this.interrupt();
-    this.busy = true;
-    this.stop();
-    this.faceTo(this.world.cameraGround());
+    this.busy = this.working = true;
+    if (!this.onErrand) {
+      this.stop();
+      this.faceTo(this.world.cameraGround());
+    }
     this.showBubble(kind);
   }
 
   finish(ok: boolean) {
     this.showBubble(ok ? "done" : "error", ok ? 1800 : 4000);
-    this.busy = false;
+    this.working = false;
+    this.busy = this.onErrand; // 跑腿中（去中轉站放 / 拿東西）就跑完再說
     this.wanderAt = performance.now() + 2000;
+  }
+
+  /**
+   * 跑腿：走到 target（例如中轉站），到了呼叫 onArrive，停一下再回去過日子。
+   * 去的路上頭上拿著 take（放東西）；回來的路上拿著 bring（取東西）。工作中也照樣走完。
+   */
+  errand(target: THREE.Vector3, face: THREE.Vector3, onArrive: () => void, take: string | null = null, bring: string | null = null) {
+    this.endChat();
+    this.interrupt();
+    this.busy = true;
+    this.onErrand = true;
+    this.carry(take);
+    const path = this.outpost ? null : this.world.route(this.pos, target);
+    const arrived = () => {
+      this.faceTo(face);
+      this.carry(bring);
+      onArrive();
+      this.timers.push(window.setTimeout(() => {
+        this.onErrand = false;
+        this.busy = this.working;
+        if (bring) this.timers.push(window.setTimeout(() => this.carry(null), 2600));
+        if (!this.working) this.wanderAt = performance.now() + 300; // 回去接著做剛才的事
+      }, 700));
+    };
+    if (path) {
+      this.path = path;
+      this.onArrive = arrived;
+    } else this.walkTo(target, arrived, null);
   }
 
   chatWith(other: Villager3D, script: [string, string, string?]) {

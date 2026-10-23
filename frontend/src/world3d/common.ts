@@ -4,6 +4,7 @@
  */
 import * as THREE from "three";
 import type { Pose, SpotKind } from "../village/life";
+import type { Villager3D } from "./Villager3D";
 import { MAP_H, MAP_W } from "../village/VillageScene";
 
 export const S = 0.9; // 像素地圖一格 = 0.9 單位
@@ -156,4 +157,32 @@ export interface Terrain {
   tint(water: THREE.Color, night: number): void;
   /** 每一幀（船、雲） */
   update(dt: number, now: number): void;
+  /** 交通工具（鐵道小鎮的火車）：有的話，和駐村專家之間的交接由它處理（build 之後才有） */
+  courier?: Courier;
+}
+
+/** World3D 給交通工具用的東西 */
+export interface CourierHost {
+  /** 寫一句到村莊日誌 */
+  log(icon: string, text: string, agent?: string, kind?: "info" | "ok" | "bad"): void;
+  flowsVisible: boolean;
+}
+
+/**
+ * 交通工具：場景自己決定東西怎麼送（例如放進中轉站、火車載到專家的小站）。
+ * 沒有交通工具的場景（島嶼）照舊：村民走過去交給對方。
+ */
+export interface Courier {
+  attach(host: CourierHost): void;
+  /** 交接；回傳 true = 交通工具處理了（World3D 不再走路、不畫弧線） */
+  handoff(from: Villager3D, to: Villager3D, icon: string, runId?: string): boolean;
+  /** 村民開始工作（駐村專家沒有人交東西給它時，火車送村長的指示過去） */
+  started(v: Villager3D, runId?: string): void;
+  /** 村民做完（駐村專家的成果由火車載回中轉站） */
+  finished(v: Villager3D, icon: string, runId?: string): void;
+  /** 問答結束（中轉站清空） */
+  runEnded(runId?: string): void;
+  setFlowsVisible(v: boolean): void;
+  update(dt: number, now: number): void;
+  dispose(): void;
 }

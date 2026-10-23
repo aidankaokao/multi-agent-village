@@ -97,7 +97,11 @@ export function describe(e: VillageEvent, name: (id?: string) => string, carry: 
 
 export function entry(e: VillageEvent, name: (id?: string) => string, carry: (id: string) => string): LogEntry | null {
   const d = describe(e, name, carry);
-  if (!d) return null;
+  return d ? stamp(d) : null;
+}
+
+/** 加上時間與編號（場景自己寫的日誌，例如火車，也用這個） */
+export function stamp(d: Omit<LogEntry, "key" | "time">): LogEntry {
   const t = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return { ...d, key: ++seq, time: `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}` };

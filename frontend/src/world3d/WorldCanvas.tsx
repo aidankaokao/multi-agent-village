@@ -3,7 +3,7 @@ import type { VillageEvent } from "../events";
 import type { VillageHandle } from "../village/VillageCanvas";
 import { APPRAISER, CRAFTSMAN, MAYOR, REVIEWER, SCRIBE } from "../village/VillageScene";
 import { parseTime, type Terrain } from "./common";
-import { IslandHud, TIME_MINUTES, entry, loadPrefs, savePrefs, type LogEntry, type Prefs } from "./Hud";
+import { IslandHud, TIME_MINUTES, entry, loadPrefs, savePrefs, stamp, type LogEntry, type Prefs } from "./Hud";
 import { World3D, type WorldVillager } from "./World3D";
 
 export interface WorldCanvasProps {
@@ -66,6 +66,7 @@ export const WorldCanvas = forwardRef<VillageHandle, Props>(function WorldCanvas
     if (!host.current) return;
     const w = new World3D(host.current, makeTerrain());
     w.onVillagerClick = (id) => clickRef.current?.(id);
+    w.onLog = (icon, text, agent, kind = "info") => setLog((xs) => [stamp({ icon, text, agent, kind }), ...xs].slice(0, MAX_LOG));
     w.syncVillagers(latest.current, false);
     world.current = w;
     if (import.meta.env.DEV) (window as unknown as { __island?: World3D }).__island = w; // e2e 測試用

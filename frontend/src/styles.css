@@ -1850,6 +1850,36 @@ button.mention-item .clamp {
   white-space: nowrap;
 }
 
+/* 鐵道小鎮：火車上載的東西、中轉站貨架上的包裹（號碼） */
+.isl-cargo {
+  padding: 2px 7px;
+  font-size: 17px;
+  line-height: 1.1;
+  background: rgba(255, 253, 246, 0.95);
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(30, 40, 50, 0.3);
+  pointer-events: none;
+  animation: isl-bob 0.9s ease-in-out infinite;
+}
+
+.isl-parcel {
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6a3a1a;
+  background: #fff4e0;
+  border: 1px solid #e8c89a;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: isl-pop 0.25s ease-out;
+}
+
+.island-canvas.hide-carry .isl-cargo,
+.island-canvas.hide-carry .isl-parcel {
+  display: none !important;
+}
+
 /* 鐵道小鎮：外出中的小站 */
 .isl-closed {
   padding: 3px 10px;
