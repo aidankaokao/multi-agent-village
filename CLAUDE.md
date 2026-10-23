@@ -167,6 +167,8 @@ Teams 不做、Telegram 之後試、定時送報（排程）等報社與郵差�
 - 背景問答在關閉時要先等收尾再 dispose DB（`main.py` lifespan），否則被取消的問答寫 DB 會卡住整個程序（測試偶發卡住也是這個）。
 - e2e 截圖：scratchpad 有 CDP 腳本（shot_*.py）；用 `uv run --with websockets python …`；填問答框要指定 `.workshop` / `.chat-input` 等範圍，
   避免填到隱藏的元素；CDP 取陣列要 `JSON.stringify`。
+- 3D 地圖的 HTML 標籤（CSS2DObject）：CSS2DRenderer 用**外層元素的 transform** 定位，動畫（同樣是 transform）不能加在外層，
+  否則標籤會在原位和畫面左上角之間跳（實例：火車上的貨物標籤）。樣式與動畫放內層（見 `rail/Railway.ts` 的 `label`）。
 - 本機 Ollama 有 qwen3.5:9b（e2e 用，思考強度設 none）；使用者的容器用 gpt-5、gpt-4o-mini、DeepSeek（OpenRouter）。
   OpenRouter 的 GLM 5.3 線路不穩（JSON 約束下吐空白、無約束時偶爾亂碼），建議不要放 large 第一位。
 - 使用者的 OpenRouter key 有總額度上限（已從 5 美元調到 10 美元）。出現 403「Key limit exceeded」是額度用完，不是程式問題；

@@ -37,11 +37,17 @@ interface Glow {
   fadeAt: number;
 }
 
+/**
+ * HTML 標籤：外層給 CSS2DRenderer 定位（它用外層的 transform），內層才放樣式和動畫——
+ * 動畫如果加在外層，會蓋掉定位的 transform，標籤就會在原位和畫面左上角之間跳。
+ */
 function label(text: string, cls: string): CSS2DObject {
-  const el = document.createElement("div");
-  el.className = cls;
-  el.textContent = text;
-  return new CSS2DObject(el);
+  const outer = document.createElement("div");
+  const inner = document.createElement("div");
+  inner.className = cls;
+  inner.textContent = text;
+  outer.appendChild(inner);
+  return new CSS2DObject(outer);
 }
 
 function box(): THREE.Group {
@@ -267,7 +273,7 @@ export class Railway implements Courier {
   // ---------------------------------------------------------------- 火車
 
   private load(icon: string) {
-    (this.cargo.element as HTMLDivElement).textContent = icon;
+    (this.cargo.element.firstElementChild as HTMLDivElement).textContent = icon;
     this.cargo.visible = true;
   }
 
