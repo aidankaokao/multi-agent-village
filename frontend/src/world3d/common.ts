@@ -126,6 +126,7 @@ export interface BuildCtx {
 /** 鏡頭的預設與限制 */
 export interface ViewConfig {
   dist: number; // 預設距離
+  portraitDist?: number; // 直式畫面（手機）的預設距離：場景比較寬時拉遠一點
   polar: number;
   azimuth: number;
   target: THREE.Vector3;

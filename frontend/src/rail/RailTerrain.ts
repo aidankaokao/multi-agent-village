@@ -49,11 +49,12 @@ const LOCAL_PLATFORM_Z = LOCAL_TRACK_Z - 1.6;
 export class RailTerrain implements Terrain {
   view: ViewConfig = {
     dist: 82,
+    portraitDist: 145, // 手機直式：兩側的小站才放得下
     polar: 0.9,
     azimuth: 0.38,
     target: new THREE.Vector3(0, 0, 5),
     minDist: 18,
-    maxDist: 130,
+    maxDist: 150,
     panLimit: 34,
     birdHeight: 125,
     fog: [110, 250],

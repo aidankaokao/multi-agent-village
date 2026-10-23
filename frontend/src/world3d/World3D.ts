@@ -162,6 +162,7 @@ export class World3D {
     this.resize = new ResizeObserver(() => this.fit());
     this.resize.observe(host);
     this.fit();
+    this.camera.position.setFromSphericalCoords(this.homeDist(), view.polar, view.azimuth); // 知道畫面比例後再決定距離
     const el = this.renderer.domElement;
     el.addEventListener("pointerdown", this.onDown);
     el.addEventListener("pointerup", this.onUp);
@@ -545,7 +546,7 @@ export class World3D {
   /** 鳥瞰（從正上方看整個場景）或回到預設的斜角 */
   setBirdView(on: boolean) {
     const v = this.terrain.view;
-    const pos = on ? new THREE.Vector3(0, v.birdHeight, 0.01) : new THREE.Vector3().setFromSphericalCoords(v.dist, v.polar, v.azimuth);
+    const pos = on ? new THREE.Vector3(0, v.birdHeight, 0.01) : new THREE.Vector3().setFromSphericalCoords(this.homeDist(), v.polar, v.azimuth);
     const target = on ? new THREE.Vector3(0, 0, 0) : v.target.clone();
     this.controls.minPolarAngle = on ? 0 : 0.3;
     this.flyTo(pos, target);
@@ -700,6 +701,12 @@ export class World3D {
   };
 
   // ---------------------------------------------------------------- 迴圈
+
+  /** 預設的鏡頭距離（直式畫面可以拉遠一點） */
+  private homeDist(): number {
+    const v = this.terrain.view;
+    return this.camera.aspect < 1 ? (v.portraitDist ?? v.dist) : v.dist;
+  }
 
   private fit() {
     const w = Math.max(1, this.host.clientWidth);

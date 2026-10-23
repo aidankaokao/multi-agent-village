@@ -357,7 +357,7 @@ class BaseAgent(Protocol):
 App 依帳號選單的「介面風格」（localStorage `ui-theme`：柔和（預設）/ 像素）設定 `data-theme`。
 登出（登入頁）時移除，登入頁一律像素。新增樣式時：先寫像素版，柔和版需要不同外觀再到 `theme-soft.css` 補。
 
-#### 島嶼版地圖（預設地圖；像素村只剩備案）
+#### 3D 地圖（預設是鐵道小鎮；島嶼版、像素村只剩備案）
 
 地圖和其他部分只靠一個小介面溝通（`VillageHandle`：`dispatch(事件)`、`say(id, 話)`；props：村民名單、點了誰），
 所以另外寫了 3D 版 `island/IslandCanvas.tsx`，介面一模一樣。
@@ -366,13 +366,14 @@ App 依帳號選單的「介面風格」（localStorage `ui-theme`：柔和（�
 （工具列、村莊日誌）、`town.ts`（村子本身：十字路、裝飾、池塘、路燈、生活作息的地點）、`models.ts`；場景只要實作
 `common.ts` 的 `Terrain`（地形、範圍 `inside`、繞路的路口、駐村專家住的地方 `outpost` → `Outpost{center, radius, gates, door, desk}`、
 依時間換顏色 `tint`、每幀 `update`、鏡頭設定 `view`）。島嶼是 `island/IslandTerrain.ts`（海、六邊形主島、外圍小島與木棧橋、船、雲）；鐵道小鎮是 `rail/RailTerrain.ts`
-（環狀鐵道、主車站與倉庫＝中轉站、專家的主題小站、田野；網址 `?view=rail` 預覽，見 ROADMAP 第 8 項）。
+（環狀鐵道、主車站與倉庫＝中轉站、專家的主題小站、田野；預設地圖，見 ROADMAP 第 8 項）。
 場景可以有交通工具（`Terrain.courier`，介面 `Courier`）：有的話 `agent.handoff` 先問它要不要處理，`agent.started` /
 `agent.finished` / 問答結束也通知它，它可以寫村莊日誌（`CourierHost.log` → `World3D.onLog`）。鐵道小鎮的 `rail/Railway.ts`：
 和駐村專家之間的交接都經過中轉站（倉庫貨架上貼號碼的包裹）——村民自己走去放 / 拿（`Villager3D.errand`，工作中也會走完），
 專家的東西由火車載（工作排隊，一次一件；開動時那段鐵道亮起）；只是動畫，號碼是畫面上的順序，不是後端的取件號碼。
 駐村專家外出中時 World3D 熄掉那裡的窗戶與燈（發光材質 `userData.off`），場景可再加東西（鐵道小鎮：「暫停營業」標籤）。使用者決定只留島嶼（2026-10-23）：登入後一律島嶼，
-沒有切換按鈕；瀏覽器畫不了 3D（`hasWebGL()` 失敗）時自動用像素村，網址 `?view=pixel` 可強制看像素村（測試用）。
+沒有切換按鈕；之後鐵道小鎮取代島嶼成為預設（`?view=island` 還看得到島嶼版）。瀏覽器畫不了 3D（`hasWebGL()` 失敗）
+時自動用像素村，網址 `?view=pixel` 可強制看像素村（測試用）。
 像素版程式還在（登入頁示範村落也還用它），等登入頁改成島嶼版、使用者用一陣子沒問題後再刪（含 Phaser）。
 
 - Three.js（`React.lazy`）切到島嶼才下載（壓縮後約 157KB）；不用模型檔或貼圖，全部用方塊、圓柱、圓球組成（`world3d/models.ts`）。

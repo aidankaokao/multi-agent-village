@@ -40,11 +40,11 @@ function hasWebGL(): boolean {
   }
 }
 
-/** 地圖：島嶼（3D）；畫不了 3D 時自動退回像素村。網址 ?view=pixel 強制看像素村（測試用）、?view=rail 預覽鐵道小鎮 */
+/** 地圖：鐵道小鎮（3D）；畫不了 3D 時自動退回像素村。網址 ?view=island 看舊的島嶼版、?view=pixel 強制看像素村（測試用） */
 function initialView(): MapView {
   const q = new URLSearchParams(location.search).get("view");
   if (q === "pixel" || !hasWebGL()) return "pixel";
-  return q === "rail" ? "rail" : "island";
+  return q === "island" ? "island" : "rail";
 }
 
 type Page = "villagers" | "traces" | "memories" | "rules" | "accounts" | "llm";
